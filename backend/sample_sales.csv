@@ -1,0 +1,6 @@
+Order_ID,Product,Country,Revenue_USD,Units_Sold,Sale_Date,Weight_kg
+101,Laptop,Nepal,1200.0,2.0,2024-01-15,2.5
+102,Phone,India,450.0,5.0,2024-02-20,0.3
+103,,Nepal,,3.0,2024-03-10,1.1
+102,Phone,India,450.0,5.0,2024-02-20,0.3
+104,Tablet,,800.0,,2024-04-05,0.6

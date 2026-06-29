@@ -1,13 +1,12 @@
 from dotenv import load_dotenv
-load_dotenv()  
+load_dotenv()
 
 from langgraph.graph import StateGraph, END
 from agents.agent_1 import GraphState, agent1_structural_profiler
 from agents.agent_2 import agent2_semantic_tagger
 from agents.agent_3 import agent3_preprocessor
+from agents.agent_4 import agent4_analysis
 
-
-# ── routing functions ─────────────────────────────────────────────────────────
 
 def should_continue_after_agent1(state: GraphState) -> str:
     if state.get("errors") and any("Agent1" in e for e in state["errors"]):
@@ -30,10 +29,16 @@ def should_continue_after_agent3(state: GraphState) -> str:
         return "end"
     if state.get("cleaned_df") is None:
         return "end"
-    return "end"   # Agent 4 will replace this "end"
+    return "agent4"
 
 
-# ── graph builder ─────────────────────────────────────────────────────────────
+def should_continue_after_agent4(state: GraphState) -> str:
+    if state.get("errors") and any("Agent4" in e for e in state["errors"]):
+        return "end"
+    if not state.get("stats"):
+        return "end"
+    return "end"   # Agent 5 will replace this
+
 
 def build_pipeline() -> StateGraph:
     graph = StateGraph(GraphState)
@@ -41,29 +46,21 @@ def build_pipeline() -> StateGraph:
     graph.add_node("agent1", agent1_structural_profiler)
     graph.add_node("agent2", agent2_semantic_tagger)
     graph.add_node("agent3", agent3_preprocessor)
+    graph.add_node("agent4", agent4_analysis)
 
     graph.set_entry_point("agent1")
 
-    graph.add_conditional_edges(
-        "agent1",
-        should_continue_after_agent1,
-        {"agent2": "agent2", "end": END}
-    )
-    graph.add_conditional_edges(
-        "agent2",
-        should_continue_after_agent2,
-        {"agent3": "agent3", "end": END}
-    )
-    graph.add_conditional_edges(
-        "agent3",
-        should_continue_after_agent3,
-        {"end": END}
-    )
+    graph.add_conditional_edges("agent1", should_continue_after_agent1,
+                                {"agent2": "agent2", "end": END})
+    graph.add_conditional_edges("agent2", should_continue_after_agent2,
+                                {"agent3": "agent3", "end": END})
+    graph.add_conditional_edges("agent3", should_continue_after_agent3,
+                                {"agent4": "agent4", "end": END})
+    graph.add_conditional_edges("agent4", should_continue_after_agent4,
+                                {"end": END})
 
     return graph.compile()
 
-
-# ── quick test ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import json
@@ -88,25 +85,21 @@ if __name__ == "__main__":
 
     final_state = pipeline.invoke(initial_state)
 
-    print("\n── Raw Profile (shape) ──")
-    print(json.dumps(final_state["raw_profile"].get("shape"), indent=2))
+    print("\n── Descriptive Stats ──")
+    print(json.dumps(final_state["stats"].get("descriptive", {}), indent=2))
 
-    print("\n── Preprocessing Log ──")
-    for entry in final_state.get("preprocessing_log", []):
-        print(" •", entry)
+    print("\n── Strong Correlations ──")
+    print(json.dumps(final_state["stats"].get("correlation", {}).get("strong_pairs", []), indent=2))
 
-    print("\n── Data Quality Score ──")
-    print(json.dumps(final_state.get("data_quality", {}), indent=2))
+    print("\n── Anomalies ──")
+    print(json.dumps(final_state["stats"].get("anomalies", {}), indent=2))
 
-    print("\n── Scaling Params ──")
-    print(json.dumps(final_state.get("scaling_params", {}), indent=2))
+    print("\n── Regression ──")
+    print(json.dumps(final_state["stats"].get("regression", {}), indent=2))
 
-    print("\n── Cleaned DataFrame (first 3 rows) ──")
-    df = final_state.get("cleaned_df")
-    if df is not None:
-        print(df.head(3).to_string())
-        print(f"\nShape: {df.shape[0]} rows × {df.shape[1]} cols")
-        print(f"Remaining NaNs: {df.isna().sum().sum()}")
+    print("\n── Charts Generated ──")
+    for p in final_state["chart_paths"]:
+        print(" •", p)
 
     if final_state["errors"]:
         print("\n── Errors ──")

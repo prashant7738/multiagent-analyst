@@ -1,6 +1,67 @@
-Order_ID,Product,Country,Revenue_USD,Units_Sold,Sale_Date,Weight_kg
-101,Laptop,Nepal,1200.0,2.0,2024-01-15,2.5
-102,Phone,India,450.0,5.0,2024-02-20,0.3
-103,,Nepal,,3.0,2024-03-10,1.1
-102,Phone,India,450.0,5.0,2024-02-20,0.3
-104,Tablet,,800.0,,2024-04-05,0.6
+Order_ID,Customer_ID,Customer_Name,Product,Category,Brand,Country,City,Revenue_USD,Cost_USD,Profit_USD,Units_Sold,Discount_Percent,Rating,Payment_Method,Sale_Date,Ship_Date,Shipping_Cost,Weight_kg,Returned
+1001,C001,John Smith,Laptop,Electronics,Dell,Nepal,Kathmandu,1200,900,300,2,10,4.5,Card,2024-01-05,2024-01-08,15.5,2.5,No
+1002,C002,Alice Brown,Phone,Electronics,Samsung,India,Delhi,700,500,200,3,5,4.3,Cash,2024-01-07,2024-01-10,8.2,0.4,No
+1003,C003,Ram Sharma,Tablet,Electronics,Apple,Nepal,Pokhara,950,750,200,1,0,4.8,Card,2024-01-10,2024-01-13,12.0,0.6,No
+1004,C004,Sita Rai,Chair,Furniture,IKEA,Nepal,Lalitpur,180,120,60,4,15,4.1,Wallet,2024-01-12,2024-01-15,18.0,8.5,No
+1005,C005,David Lee,Desk,Furniture,IKEA,India,Mumbai,320,240,80,2,10,4.0,Card,2024-01-13,2024-01-17,22.4,15.0,Yes
+1006,C006,Emma Wilson,Monitor,Electronics,LG,Bangladesh,Dhaka,350,260,90,2,5,4.4,Card,2024-01-14,2024-01-18,10.0,4.2,No
+1007,C007,Arjun Singh,Keyboard,Accessories,Logitech,India,Bangalore,65,35,30,5,20,4.6,Cash,2024-01-16,2024-01-19,5.0,0.8,No
+1008,C008,Priya Shah,Mouse,Accessories,Logitech,Nepal,Biratnagar,40,18,22,8,0,4.7,Wallet,2024-01-17,2024-01-20,3.2,0.2,No
+1009,C009,Michael Scott,Printer,Electronics,HP,USA,New York,260,180,80,2,10,4.2,Card,2024-01-18,2024-01-22,16.0,6.5,No
+1010,C010,Sabina KC,Headphones,Accessories,Sony,Nepal,Kathmandu,120,70,50,6,5,4.5,Wallet,2024-01-19,2024-01-23,4.5,0.5,No
+1011,C011,Rajesh Gupta,Camera,Electronics,Canon,India,Delhi,900,720,180,1,8,4.8,Card,2024-01-20,2024-01-24,20.0,1.8,No
+1012,C012,Ava Johnson,Watch,Fashion,Fossil,USA,Boston,220,140,80,3,15,4.1,Cash,2024-01-21,2024-01-24,6.8,0.3,Yes
+1013,C013,Rina Lama,Shoes,Fashion,Nike,Nepal,Butwal,130,75,55,4,12,4.4,Wallet,2024-01-22,2024-01-25,7.0,0.9,No
+1014,C014,Rohit Das,T-Shirt,Fashion,Adidas,India,Kolkata,45,20,25,10,5,4.0,Card,2024-01-23,2024-01-26,4.2,0.3,No
+1015,C015,Sophia Green,Bag,Fashion,Puma,UK,London,85,45,40,3,18,4.3,Card,2024-01-24,2024-01-28,8.0,0.8,No
+1016,C016,Kiran KC,Laptop,Electronics,HP,Nepal,Kathmandu,1150,870,280,2,10,4.4,Wallet,2024-01-25,2024-01-29,15.5,2.4,No
+1017,C017,Anil Rai,Phone,Electronics,Xiaomi,Nepal,Dharan,380,280,100,4,5,4.2,Cash,2024-01-26,2024-01-30,7.8,0.35,No
+1018,C018,James Clark,Desk,Furniture,IKEA,USA,Chicago,340,250,90,2,10,4.1,Card,2024-01-27,2024-01-31,24.0,16.5,No
+1019,C019,Nabin Oli,Chair,Furniture,IKEA,Nepal,Bhaktapur,175,120,55,4,15,4.0,Wallet,2024-01-28,2024-02-01,18.5,8.4,Yes
+1020,C020,Maya Thapa,Monitor,Electronics,Dell,Nepal,Kathmandu,330,245,85,2,5,4.5,Card,2024-01-29,2024-02-02,11.0,4.0,No
+1021,C021,Olivia King,Keyboard,Accessories,Logitech,UK,Manchester,68,38,30,5,20,4.6,Card,2024-02-01,2024-02-04,5.2,0.8,No
+1022,C022,Aman Shah,Mouse,Accessories,Logitech,India,Pune,42,20,22,8,0,4.7,Cash,2024-02-02,2024-02-05,3.0,0.2,No
+1023,C023,Samir KC,Printer,Electronics,Epson,Nepal,Kathmandu,280,190,90,2,8,4.1,Wallet,2024-02-03,2024-02-06,16.5,6.2,No
+1024,C024,Lisa Hall,Camera,Electronics,Nikon,USA,Seattle,980,770,210,1,5,4.9,Card,2024-02-04,2024-02-08,20.5,1.9,No
+1025,C025,Prakash Oli,Watch,Fashion,Casio,Nepal,Chitwan,95,55,40,5,10,4.2,Wallet,2024-02-05,2024-02-08,4.8,0.25,No
+1026,C026,,Shoes,Fashion,Nike,Nepal,Kathmandu,140,85,55,4,10,4.5,Card,2024-02-06,2024-02-10,7.2,0.95,No
+1027,C027,Emily Stone,,Electronics,Apple,USA,Miami,1300,1000,300,1,0,4.8,Card,2024-02-07,2024-02-11,15.5,2.2,No
+1028,C028,Ravi Sharma,Laptop,Electronics,,India,Delhi,1100,850,250,2,5,4.4,Wallet,2024-02-08,2024-02-12,15.0,2.5,No
+1029,C029,John Smith,Laptop,Electronics,Dell,Nepal,Kathmandu,1200,900,300,2,10,4.5,Card,2024-01-05,2024-01-08,15.5,2.5,No
+1030,C030,Anita Rai,Phone,Electronics,Samsung,Nepal,,650,480,170,3,5,4.2,Cash,2024-02-09,2024-02-13,8.0,0.4,No
+1031,C031,Kabir Singh,Monitor,Electronics,LG,India,Mumbai,340,250,90,2,5,4.5,Card,2024-02-10,2024-02-14,11.0,4.1,No
+1032,C032,Sunita KC,Desk,Furniture,IKEA,Nepal,Pokhara,310,235,75,2,12,4.0,Wallet,2024-02-11,2024-02-15,23.5,15.5,No
+1033,C033,Alex Brown,Keyboard,Accessories,Logitech,USA,Dallas,70,40,30,6,15,4.6,Card,2024-02-12,2024-02-16,5.5,0.8,No
+1034,C034,Rita Shrestha,Mouse,Accessories,Logitech,Nepal,Lalitpur,39,18,21,7,0,4.8,Wallet,2024-02-13,2024-02-17,3.1,0.2,No
+1035,C035,Peter Wilson,Camera,Electronics,Canon,UK,London,920,730,190,1,10,4.7,Card,2024-02-14,2024-02-18,21.0,1.8,No
+1036,C036,Hari Karki,T-Shirt,Fashion,Adidas,Nepal,Dharan,48,22,26,9,5,4.2,Cash,2024-02-15,2024-02-18,4.0,0.3,No
+1037,C037,Lucy Scott,Bag,Fashion,Puma,USA,Denver,90,50,40,3,20,4.4,Card,2024-02-16,2024-02-20,8.2,0.7,No
+1038,C038,Ramesh Oli,Watch,Fashion,Casio,Nepal,Butwal,100,60,40,4,5,4.1,Wallet,2024-02-17,2024-02-20,5.0,0.25,No
+1039,C039,Ashish KC,Printer,Electronics,HP,Nepal,Kathmandu,,,2,10,4.0,Card,2024-02-18,2024-02-22,16.0,6.4,No
+1040,C040,Emma Wilson,Monitor,Electronics,LG,Bangladesh,Dhaka,350,260,90,2,5,4.4,Card,2024-01-14,2024-01-18,10.0,4.2,No
+1040,C040,Emma Wilson,Monitor,Electronics,LG,Bangladesh,Dhaka,350,260,90,2,5,4.4,Card,2024-01-14,2024-01-18,10.0,4.2,No
+1041,C041,Raj Gupta,Laptop,Electronics,Dell,India,Delhi,1180,890,290,2,10,4.5,Card,2024-02-19,2024-02-23,15.3,2.5,No
+1042,C042,Sara Ali,Phone,Electronics,Samsung,Pakistan,Lahore,620,460,160,3,5,4.2,Cash,2024-02-20,2024-02-24,8.4,0.4,No
+1043,C043,Nabin KC,Tablet,Electronics,Apple,Nepal,Kathmandu,980,780,200,1,0,4.9,Wallet,2024-02-21,2024-02-25,12.3,0.6,No
+1044,C044,Ram Bahadur,Chair,Furniture,IKEA,Nepal,Pokhara,190,125,65,4,10,4.1,Card,2024-02-22,2024-02-26,18.6,8.7,No
+1045,C045,Alice Green,Headphones,Accessories,Sony,USA,Atlanta,130,80,50,5,5,4.4,Wallet,2024-02-23,2024-02-27,4.4,0.45,No
+1046,C046,Chris Young,Shoes,Fashion,Nike,Canada,Toronto,150,95,55,4,12,4.6,Card,2024-02-24,2024-02-28,7.5,0.9,No
+1047,C047,Rita Rai,Camera,Electronics,Canon,Nepal,Bhaktapur,890,700,190,1,5,4.8,Cash,2024-02-25,2024-02-29,20.0,1.8,Yes
+1048,C048,David Kim,Keyboard,Accessories,Logitech,Korea,Seoul,72,42,30,6,10,4.5,Card,2024-02-26,2024-03-01,5.3,0.8,No
+1049,C049,Anju KC,Mouse,Accessories,Logitech,Nepal,Lalitpur,41,20,21,8,0,4.7,Wallet,2024-02-27,2024-03-02,3.0,0.2,No
+1050,C050,Paul White,Desk,Furniture,IKEA,USA,San Francisco,345,255,90,2,10,4.2,Card,2024-02-28,2024-03-03,24.5,16.0,No
+1051,C051,,,,,,,,,,,,,,,,,,
+1052,C052,Rina Lama,Laptop,Electronics,Dell,Nepal,Kathmandu,1250,930,320,2,5,4.8,Card,2024-03-01,2024-03-05,15.8,2.5,No
+1053,C053,Rina Lama,Laptop,Electronics,Dell,Nepal,Kathmandu,1250,930,320,2,5,4.8,Card,2024-03-01,2024-03-05,15.8,2.5,No
+1054,C054,Mohan KC,Phone,Electronics,Samsung,Nepal,Kathmandu,680,500,180,3,10,4.3,Wallet,2024-03-02,2024-03-06,8.0,0.4,No
+1055,C055,Samir Rai,Monitor,Electronics,LG,India,Chennai,360,270,90,2,5,4.4,Card,2024-03-03,2024-03-07,10.8,4.3,No
+1056,C056,Olivia Green,Printer,Electronics,Epson,USA,Chicago,295,205,90,2,8,4.2,Card,2024-03-04,2024-03-08,16.8,6.3,No
+1057,C057,Rajesh Oli,Bag,Fashion,Puma,Nepal,Dharan,92,52,40,3,20,4.3,Wallet,2024-03-05,2024-03-09,8.3,0.7,No
+1058,C058,Anita KC,Watch,Fashion,Casio,Nepal,Pokhara,105,65,40,4,5,4.1,Cash,2024-03-06,2024-03-10,5.2,0.25,No
+1059,C059,John Doe,Laptop,Electronics,Dell,Nepal,Kathmandu,50000,900,49100,2,10,4.5,Card,2024-03-07,2024-03-11,15.5,2.5,No
+1060,C060,Jane Doe,Phone,Electronics,Samsung,India,Delhi,-700,500,-1200,3,5,4.3,Card,2024-03-08,2024-03-12,8.2,0.4,No
+1061,C061,Rita KC,Chair,Furniture,IKEA,Nepal,Kathmandu,185,125,60,4,10,4.2,Wallet,2024-03-09,2024-03-13,18.0,8.5,No
+1062,C062,David Lee,Desk,Furniture,IKEA,India,Mumbai,320,240,80,2,10,4.0,Card,2024-01-13,2024-01-17,22.4,15.0,Yes
+1063,C063,Emma Stone,Headphones,Accessories,Sony,USA,Boston,128,78,50,5,5,4.5,Card,2024-03-10,2024-03-14,4.6,0.5,No
+1064,C064,Kiran Rai,Mouse,Accessories,Logitech,Nepal,Kathmandu,43,21,22,8,0,4.8,Wallet,2024-03-11,2024-03-15,3.0,0.2,No
+1065,C065,Ashok KC,Keyboard,Accessories,Logitech,Nepal,Lalitpur,69,39,30,5,15,4.6,Cash,2024-03-12,2024-03-16,5.2,0.8,No

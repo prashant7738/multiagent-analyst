@@ -9,4 +9,8 @@ dependencies = [
     "langchain-core>=1.4.8",
     "langgraph>=1.2.6",
     "pandas>=3.0.3",
+    "python-dotenv>=1.0.0",
+    "numpy",
+    "scipy",
+    "matplotlib",
 ]

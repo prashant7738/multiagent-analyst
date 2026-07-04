@@ -13,6 +13,7 @@ class GraphState(TypedDict):
     schema_blueprint: dict     # per-column semantic tags and metadata
 
     # ── Agent 3 outputs ───────────────────────────────────────────────────────
+    preprocessing_config: dict # runtime thresholds and scoring weights for preprocessing
     cleaned_df: Any            # fully preprocessed DataFrame for Agent 4
     cleaned_csv_path: str      # exported cleaned dataset path
     scaling_params: dict       # {col: {min, max}} for Agent 4 inverse-transform

@@ -12,10 +12,44 @@ NULL_STRINGS = {
     "not available", "not applicable", "nil", "#n/a", "nan ",
 }
 
-MAX_CURRENCY_ABS_VALUE = 1_000_000_000
-MAX_REASONABLE_TAX_RATE = 0.40
-TOTAL_RECONCILIATION_REL_TOL = 0.02
-TOTAL_RECONCILIATION_ABS_TOL = 1.0
+DEFAULT_PREPROCESSING_CONFIG = {
+    "currency_max_abs_value": 1_000_000_000,
+    "max_reasonable_tax_rate": 0.40,
+    "reconciliation_rel_tol": 0.02,
+    "reconciliation_abs_tol": 1.0,
+    "quality_weights": {
+        "remaining_null_pct": 0.50,
+        "validation_fail_pct": 0.40,
+        "duplicate_rate_pct": 0.10,
+    },
+}
+
+
+def _build_preprocessing_config(state_config):
+    cfg = {
+        "currency_max_abs_value": DEFAULT_PREPROCESSING_CONFIG["currency_max_abs_value"],
+        "max_reasonable_tax_rate": DEFAULT_PREPROCESSING_CONFIG["max_reasonable_tax_rate"],
+        "reconciliation_rel_tol": DEFAULT_PREPROCESSING_CONFIG["reconciliation_rel_tol"],
+        "reconciliation_abs_tol": DEFAULT_PREPROCESSING_CONFIG["reconciliation_abs_tol"],
+        "quality_weights": DEFAULT_PREPROCESSING_CONFIG["quality_weights"].copy(),
+    }
+    if not isinstance(state_config, dict):
+        return cfg
+
+    for key in [
+        "currency_max_abs_value",
+        "max_reasonable_tax_rate",
+        "reconciliation_rel_tol",
+        "reconciliation_abs_tol",
+    ]:
+        if key in state_config:
+            cfg[key] = state_config[key]
+
+    quality_weights = state_config.get("quality_weights")
+    if isinstance(quality_weights, dict):
+        cfg["quality_weights"].update(quality_weights)
+
+    return cfg
 
 
 def _normalize_missing_text(series):
@@ -98,7 +132,7 @@ def _coerce_types(df, schema_blueprint):
     return df, notes
 
 
-def _clean_currency_values(df, schema_blueprint):
+def _clean_currency_values(df, schema_blueprint, config):
     notes = []
     critical_errors = []
 
@@ -150,7 +184,7 @@ def _clean_currency_values(df, schema_blueprint):
             continue
 
         max_abs = float(parsed.abs().max(skipna=True))
-        if np.isfinite(max_abs) and max_abs > MAX_CURRENCY_ABS_VALUE:
+        if np.isfinite(max_abs) and max_abs > config["currency_max_abs_value"]:
             critical_errors.append(
                 f"Agent3: CRITICAL currency plausibility assertion failed for [{col}] "
                 f"(max abs {max_abs:.2f})"
@@ -471,7 +505,7 @@ def _validate_count_ranges(df, schema_blueprint):
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
 
-def _validate_financial_constraints(df):
+def _validate_financial_constraints(df, config):
     notes = []
     checks = 0
     failed_rows = 0
@@ -486,7 +520,7 @@ def _validate_financial_constraints(df):
         amount = pd.to_numeric(df[amount_col], errors="coerce")
         tax = pd.to_numeric(df[tax_col], errors="coerce")
         valid = amount.notna() & tax.notna() & (amount != 0)
-        fail_mask = valid & (tax > amount.abs() * MAX_REASONABLE_TAX_RATE)
+        fail_mask = valid & (tax > amount.abs() * config["max_reasonable_tax_rate"])
         flag_col = f"{tax_col}_rate_failed"
         df[flag_col] = fail_mask.astype(int)
         checks += int(valid.sum())
@@ -499,7 +533,7 @@ def _validate_financial_constraints(df):
         tax_series = pd.to_numeric(df[tax_col], errors="coerce") if tax_col else 0.0
         discount_series = pd.to_numeric(df[discount_col], errors="coerce") if discount_col else 0.0
         expected = amount + tax_series - discount_series
-        tol = np.maximum(TOTAL_RECONCILIATION_ABS_TOL, expected.abs() * TOTAL_RECONCILIATION_REL_TOL)
+        tol = np.maximum(config["reconciliation_abs_tol"], expected.abs() * config["reconciliation_rel_tol"])
         valid = expected.notna() & total.notna()
         fail_mask = valid & ((total - expected).abs() > tol)
         flag_col = f"{total_col}_reconciliation_failed"
@@ -524,7 +558,7 @@ def _validate_financial_constraints(df):
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
 
-def _compute_quality_score(df_raw, df_clean, validation_summary):
+def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     raw_total_cells = df_raw.shape[0] * df_raw.shape[1]
     clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
 
@@ -535,8 +569,14 @@ def _compute_quality_score(df_raw, df_clean, validation_summary):
     total_checks = max(validation_summary.get("checks", 0), 1)
     validation_fail_pct = round((validation_summary.get("failed_rows", 0) / total_checks) * 100, 2)
 
+    weights = config.get("quality_weights", DEFAULT_PREPROCESSING_CONFIG["quality_weights"])
     # Score is driven by post-hoc failures, not by number of executed steps.
-    score = 100.0 - (0.50 * remaining_null_pct) - (0.40 * validation_fail_pct) - (0.10 * duplicate_rate_pct)
+    score = (
+        100.0
+        - (weights.get("remaining_null_pct", 0.50) * remaining_null_pct)
+        - (weights.get("validation_fail_pct", 0.40) * validation_fail_pct)
+        - (weights.get("duplicate_rate_pct", 0.10) * duplicate_rate_pct)
+    )
 
     null_pct_by_column = {
         col: round((df_clean[col].isna().sum() / max(len(df_clean), 1)) * 100, 2)
@@ -593,6 +633,8 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         errors.append("Agent3: schema_blueprint is empty. Agent 2 failed.")
         return {**state, "errors": errors}
 
+    preprocessing_config = _build_preprocessing_config(state.get("preprocessing_config"))
+
     df_raw = df.copy()
     preprocessing_log = []
     validation_summary = {"checks": 0, "failed_rows": 0}
@@ -601,7 +643,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     # Step 1: currency cleanup + strict assertions.
     before_step = df.copy()
-    df, notes, critical_errors = _clean_currency_values(df, schema_blueprint)
+    df, notes, critical_errors = _clean_currency_values(df, schema_blueprint, preprocessing_config)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 1"))
     print(f"[Agent 3] Step 1 - Currency cleaning done ({len(notes)} columns)")
@@ -668,12 +710,12 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     validation_summary["checks"] += count_validation["checks"]
     validation_summary["failed_rows"] += count_validation["failed_rows"]
 
-    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df)
+    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df, preprocessing_config)
     preprocessing_log.extend(financial_validation_notes)
     validation_summary["checks"] += financial_validation["checks"]
     validation_summary["failed_rows"] += financial_validation["failed_rows"]
 
-    data_quality = _compute_quality_score(df_raw, df, validation_summary)
+    data_quality = _compute_quality_score(df_raw, df, validation_summary, preprocessing_config)
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
         f"(remaining_nulls={data_quality['remaining_null_pct']}%, "
@@ -702,6 +744,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "cleaned_csv_path": cleaned_csv_path,
         "scaling_params": scaling_params,
         "preprocessing_log": preprocessing_log,
+        "preprocessing_config": preprocessing_config,
         "data_quality": data_quality,
         "errors": errors,
     }

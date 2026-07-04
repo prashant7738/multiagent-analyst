@@ -71,6 +71,7 @@ if __name__ == "__main__":
         "csv_path": "sample_sales.csv",
         "raw_profile": {},
         "schema_blueprint": {},
+        "preprocessing_config": {},
         "_df_cache": None,
         "cleaned_df": None,
         "cleaned_csv_path": "",

@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import numpy as np
 from langgraph.graph import StateGraph, END
 from agents.agent_1 import GraphState, agent1_structural_profiler
 from agents.agent_2 import agent2_semantic_tagger
@@ -17,8 +18,6 @@ def should_continue_after_agent1(state: GraphState) -> str:
 
 
 def should_continue_after_agent2(state: GraphState) -> str:
-    if state.get("errors") and any("Agent2" in e for e in state["errors"]):
-        return "end"
     if not state.get("schema_blueprint"):
         return "end"
     return "agent3"
@@ -66,6 +65,7 @@ def format_comprehensive_output(final_state):
     """Format 8-section comprehensive pipeline output for developers."""
     from datetime import datetime
     import os
+    import pandas as pd
     
     # Extract data
     raw_profile = final_state.get("raw_profile", {})
@@ -75,6 +75,8 @@ def format_comprehensive_output(final_state):
     chart_paths = final_state.get("chart_paths", [])
     errors = final_state.get("errors", [])
     column_ledger = final_state.get("column_ledger", {})
+    scaling_params = final_state.get("scaling_params", {})
+    row_accounting = column_ledger.get("row_accounting", {})
     
     raw_rows = raw_profile.get("shape", {}).get("rows", 0)
     raw_cols = raw_profile.get("shape", {}).get("cols", 0)
@@ -91,6 +93,7 @@ def format_comprehensive_output(final_state):
     domain = final_state.get("dataset_domain", "unknown")
     
     print(f"\n=== Pipeline Run: {timestamp} | dataset={dataset} | profile={profile}/{domain} ===")
+    print(f"Status: {'FAILED' if errors else 'SUCCESS'}")
     missing_pct = raw_profile.get("overall_missing_rate_pct", 0)
     dup_count = raw_profile.get("duplicate_rows", 0)
     print(f"Input:  {raw_rows} rows × {raw_cols} cols | {missing_pct}% missing | {dup_count} exact duplicates detected")
@@ -120,6 +123,29 @@ def format_comprehensive_output(final_state):
     # ──────────────────────────────────────────────────────────────────────
     clip_bounds = column_ledger.get("clip_bounds", {})
     clip_post_bounds = column_ledger.get("clip_post_bounds", {})
+    clip_verified_from_csv = {}
+    cleaned_csv_path = final_state.get("cleaned_csv_path", "")
+
+    if cleaned_csv_path and os.path.exists(cleaned_csv_path):
+        try:
+            csv_df = pd.read_csv(cleaned_csv_path, low_memory=False)
+            for col, bounds in clip_bounds.items():
+                source_col = scaling_params.get(col, {}).get("raw_col", col)
+                if source_col not in csv_df.columns:
+                    continue
+                numeric = pd.to_numeric(csv_df[source_col], errors="coerce").dropna()
+                if numeric.empty:
+                    continue
+                clip_verified_from_csv[col] = {
+                    "min": float(numeric.min()),
+                    "max": float(numeric.max()),
+                    "lower": float(bounds["lower"]),
+                    "upper": float(bounds["upper"]),
+                    "source_col": source_col,
+                }
+        except Exception as e:
+            errors.append(f"Report: unable to re-read cleaned CSV for bounds check - {e}")
+
     if clip_bounds:
         print("\n=== Validation: Post-Clip Bounds ===")
         print(f"{'COLUMN':<25} {'MIN':<15} {'MAX':<15} {'STATUS':<8} {'BOUNDS':<30}")
@@ -127,9 +153,10 @@ def format_comprehensive_output(final_state):
         all_pass = True
         for col in sorted(clip_bounds.keys()):
             bounds = clip_bounds[col]
+            verified = clip_verified_from_csv.get(col)
             post_bounds = clip_post_bounds.get(col, {})
-            min_val = post_bounds.get("min", float('inf'))
-            max_val = post_bounds.get("max", float('-inf'))
+            min_val = verified["min"] if verified else post_bounds.get("min", float("inf"))
+            max_val = verified["max"] if verified else post_bounds.get("max", float("-inf"))
             lower = bounds["lower"]
             upper = bounds["upper"]
             
@@ -137,7 +164,8 @@ def format_comprehensive_output(final_state):
             status = "✓" if within_bounds else "✗ FAIL"
             if not within_bounds:
                 all_pass = False
-            bounds_str = f"[{lower:.1f}, {upper:.1f}]"
+            source_col = verified.get("source_col", col) if verified else col
+            bounds_str = f"[{lower:.1f}, {upper:.1f}] via {source_col}"
             print(
                 f"{col:<25} {min_val:>14.2f} {max_val:>14.2f} {status:<8} {bounds_str:<30}"
             )
@@ -174,10 +202,16 @@ def format_comprehensive_output(final_state):
             # Skip flag columns
             if "_failed" in col1 or "_failed" in col2:
                 continue
+            if base1 == base2:
+                continue
             pair_key = tuple(sorted([base1, base2]))
             if pair_key not in seen_base_pairs:
                 seen_base_pairs.add(pair_key)
-                filtered_pairs.append(pair)
+                filtered_pairs.append({
+                    **pair,
+                    "col1": base1,
+                    "col2": base2,
+                })
         
         if filtered_pairs:
             print(f"\n=== Strong Correlations (deduplicated, |r| > 0.5): {len(filtered_pairs)} unique relationships ===")
@@ -203,6 +237,36 @@ def format_comprehensive_output(final_state):
     # ──────────────────────────────────────────────────────────────────────
     # 6. ANOMALIES (raw values only)
     # ──────────────────────────────────────────────────────────────────────
+    regression = stats.get("regression", {})
+    if regression:
+        reg_seen = set()
+        reg_rows = []
+        for col, info in regression.items():
+            base_col = col.replace("_raw", "").replace("_scaled", "")
+            if base_col.endswith("_failed"):
+                continue
+            if base_col in reg_seen:
+                continue
+            reg_seen.add(base_col)
+            reg_rows.append((base_col, info))
+
+        if reg_rows:
+            significant = sum(1 for _, info in reg_rows if info.get("significant"))
+            print(
+                f"\n=== Regression (deduplicated): {len(reg_rows)} models, "
+                f"{significant} significant ==="
+            )
+            for col, info in reg_rows[:10]:
+                print(
+                    f"  {col:<30} r2={info.get('r_squared', 0):.3f} "
+                    f"p={info.get('p_value', 1):.4f} trend={info.get('trend', 'n/a')}"
+                )
+            if len(reg_rows) > 10:
+                print(f"  ... and {len(reg_rows) - 10} more")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # 7. ANOMALIES (raw values only)
+    # ──────────────────────────────────────────────────────────────────────
     anomalies = stats.get("anomalies", {})
     if anomalies:
         anomaly_total = sum(v.get("count", 0) for v in anomalies.values() if isinstance(v, dict))
@@ -220,36 +284,68 @@ def format_comprehensive_output(final_state):
             print(f"  ... and {len(anom_cols) - 8} more")
     
     # ──────────────────────────────────────────────────────────────────────
-    # 7. ROW ACCOUNTING
+    # 8. ROW ACCOUNTING
     # ──────────────────────────────────────────────────────────────────────
     print("\n=== Row Accounting ===")
-    print(f"  input                {raw_rows:>6}")
-    dup_removed = raw_rows - clean_rows
-    if dup_removed > 0:
-        print(f"  - exact duplicates   {dup_removed:>6}")
-    print(f"  = cleaned            {clean_rows:>6}  {'✓ matches' if clean_rows >= 0 else '✗ MISMATCH'}")
+    input_rows = int(row_accounting.get("input_rows", raw_rows))
+    dedup_removed = int(row_accounting.get("exact_duplicates_removed", 0))
+    dropped_impute = int(row_accounting.get("rows_dropped_by_imputation", 0))
+    final_rows = int(row_accounting.get("final_rows", clean_rows))
+    expected_final = input_rows - dedup_removed - dropped_impute
+    rows_match = expected_final == final_rows
+
+    print(f"  input                {input_rows:>6}")
+    print(f"  - exact duplicates   {dedup_removed:>6}")
+    if dropped_impute:
+        print(f"  - imputation drop    {dropped_impute:>6}")
+    print(f"  = cleaned            {final_rows:>6}  {'✓ matches' if rows_match else '✗ MISMATCH'}")
     
     # ──────────────────────────────────────────────────────────────────────
-    # 8. TRUST CHECK
+    # 9. TRUST CHECK
     # ──────────────────────────────────────────────────────────────────────
     print("\n=== Trust Check ===")
-    
-    # Check 1: row math
-    rows_match = (raw_rows - dup_removed) == clean_rows
-    print(f"{'✓' if rows_match else '✗'} Row math reconciles")
+
+    # Check 1: row math + non-degenerate dataset sanity.
+    survived_floor = final_rows >= int(np.ceil(0.5 * max(input_rows, 1)))
+    non_empty = final_rows > 0
+    row_check_ok = rows_match and non_empty and survived_floor
+    if row_check_ok:
+        print(f"✓ Row math reconciles ({final_rows}/{input_rows} rows retained)")
+    else:
+        print(
+            "✗ Row sanity failed "
+            f"(expected_final={expected_final}, actual={final_rows}, min_allowed={int(np.ceil(0.5 * max(input_rows, 1)))})"
+        )
     
     # Check 2: post-clip bounds
     bounds_ok = True
-    if clip_post_bounds:
+    if not clip_bounds:
+        bounds_ok = False
+        print("✗ Post-clip bounds check skipped (no clipped columns recorded)")
+    elif not clip_verified_from_csv:
+        bounds_ok = False
+        print("✗ Post-clip bounds check failed (cleaned CSV values unavailable)")
+    else:
+        bad_cols = []
         for col in clip_bounds.keys():
             bounds = clip_bounds[col]
-            post_bounds = clip_post_bounds.get(col, {})
-            min_val = post_bounds.get("min", float('inf'))
-            max_val = post_bounds.get("max", float('-inf'))
+            verified = clip_verified_from_csv.get(col)
+            if not verified:
+                bad_cols.append(f"{col}: missing in cleaned CSV")
+                continue
+            min_val = verified["min"]
+            max_val = verified["max"]
             if not (min_val >= bounds["lower"] - 1e-6 and max_val <= bounds["upper"] + 1e-6):
-                bounds_ok = False
-                break
-    print(f"{'✓' if bounds_ok else '✗'} Post-clip bounds verified for all clipped columns")
+                bad_cols.append(
+                    f"{col}: min={min_val:.2f} max={max_val:.2f} expected=[{bounds['lower']:.2f}, {bounds['upper']:.2f}]"
+                )
+        bounds_ok = len(bad_cols) == 0
+        if bounds_ok:
+            print(f"✓ Post-clip bounds verified for all {len(clip_bounds)} clipped columns")
+        else:
+            print(f"✗ Post-clip bounds verification failed for {len(bad_cols)} columns")
+            for msg in bad_cols[:5]:
+                print(f"  - {msg}")
     
     # Check 3: no duplicate correlation pairs
     dedup_ok = (len(seen_base_pairs) if 'seen_base_pairs' in locals() else 0) == len(filtered_pairs) if 'filtered_pairs' in locals() else True
@@ -261,6 +357,8 @@ def format_comprehensive_output(final_state):
     
     if errors:
         print(f"\n{'✗'} {len(errors)} errors detected")
+        for err in errors:
+            print(f"  - {err}")
     else:
         print(f"{'✓'} No errors")
 

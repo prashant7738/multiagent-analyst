@@ -78,9 +78,16 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict)
 
 def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
     """Used when LLM call fails. Basic but functional."""
+    def _normalize_intended_type(t: str) -> str:
+        if t == "numeric":
+            return "float"
+        if t in {"datetime", "string", "boolean"}:
+            return t
+        return "string"
+
     return {
         col: {
-            "intended_type": inferred_types[col],
+            "intended_type": _normalize_intended_type(inferred_types[col]),
             "semantic_tag": "unknown",
             "is_identifier": False,
             "scaling_allowed": inferred_types[col] == "numeric",

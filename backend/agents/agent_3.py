@@ -91,14 +91,58 @@ class ColumnLedger:
         self.columns[col_name]["range_fail_count"] = count
     
     def record_clip_bounds(self, col_name, lower, upper):
-        self.clip_bounds[col_name] = {"lower": round(float(lower), 2), "upper": round(float(upper), 2)}
+        self.clip_bounds[col_name] = {"lower": float(lower), "upper": float(upper)}
     
     def record_clip_post_bounds(self, col_name, min_val, max_val):
-        self.clip_post_bounds[col_name] = {"min": round(float(min_val), 2), "max": round(float(max_val), 2)}
+        self.clip_post_bounds[col_name] = {"min": float(min_val), "max": float(max_val)}
     
     def record_validation_failure(self, check_name, count, total_rows):
         pct = (count / max(total_rows, 1)) * 100
         self.validation_failures[check_name] = {"count": count, "pct": round(pct, 2)}
+
+
+def _duplicate_key_samples(df, limit=5):
+    """Return representative duplicated-row signatures for diagnostics."""
+    if df.empty:
+        return []
+
+    duplicated_mask = df.duplicated(keep=False)
+    if not duplicated_mask.any():
+        return []
+
+    dup_df = df.loc[duplicated_mask].copy()
+    # Create a stable row signature without depending on column-specific keys.
+    row_sig = dup_df.astype("string").fillna("<NA>").agg("|".join, axis=1)
+    counts = row_sig.value_counts()
+    return [
+        {"count": int(v), "signature": str(k)[:180]}
+        for k, v in counts.head(limit).items()
+    ]
+
+
+def dedup_exact_rows(df, expected_duplicate_count=None):
+    """Deduplicate exact rows and optionally assert consistency with an expected count."""
+    actual_duplicate_count = int(df.duplicated(keep="first").sum())
+    samples = _duplicate_key_samples(df)
+
+    if expected_duplicate_count is not None and actual_duplicate_count != int(expected_duplicate_count):
+        raise ValueError(
+            "Dedup consistency mismatch: "
+            f"expected={expected_duplicate_count}, actual={actual_duplicate_count}, "
+            f"duplicate_key_samples={samples}"
+        )
+
+    deduped = df.drop_duplicates(keep="first").reset_index(drop=True)
+    return deduped, actual_duplicate_count, samples
+
+
+def _assert_row_survival_or_abort(input_row_count, cleaned_row_count, step_name):
+    min_allowed = int(np.ceil(0.5 * input_row_count))
+    if cleaned_row_count < min_allowed:
+        raise ValueError(
+            f"ABORT: only {cleaned_row_count}/{input_row_count} rows survived {step_name} "
+            "- likely a bug, not real duplicates. Halting pipeline."
+        )
 
 
 def _detect_dataset_domain(schema_blueprint):
@@ -803,6 +847,39 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"input={df.shape[0]}x{df.shape[1]}"
     )
 
+    input_rows = int(df.shape[0])
+    expected_duplicates = int(state.get("raw_profile", {}).get("duplicate_rows", 0))
+
+    # Step 0: deduplicate on the same raw dataframe shape/profile as Agent 1.
+    try:
+        df, actual_duplicates, duplicate_samples = dedup_exact_rows(df, expected_duplicates)
+    except Exception as e:
+        return _early_exit_with_error(
+            state,
+            errors,
+            preprocessing_log,
+            f"Agent3: dedup consistency check failed - {e}",
+        )
+
+    preprocessing_log.append(
+        f"Duplicate removal (exact-row): expected={expected_duplicates}, actual={actual_duplicates}, "
+        f"rows_after={len(df)}"
+    )
+    if duplicate_samples:
+        preprocessing_log.append(f"Duplicate key samples: {duplicate_samples}")
+
+    try:
+        _assert_row_survival_or_abort(input_rows, len(df), "dedup_exact_rows")
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: {e}")
+
+    row_accounting = {
+        "input_rows": input_rows,
+        "exact_duplicates_removed": actual_duplicates,
+        "rows_after_dedup": int(len(df)),
+        "rows_dropped_by_imputation": 0,
+    }
+
     # Step 1: currency cleanup + strict assertions.
     before_step = df.copy()
     df, notes, critical_errors = _clean_currency_values(df, schema_blueprint, preprocessing_config, ledger)
@@ -827,54 +904,49 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     if verbose:
         print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
-    # Deduplicate before imputation/scaling, using business keys when available.
-    before_step = df.copy()
-    df, dupes_removed, dedup_keys = _remove_duplicates(df, schema_blueprint)
-    if dedup_keys:
-        preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed using business keys {dedup_keys}")
-    else:
-        preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed using full-row match")
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
-    if verbose:
-        print(f"[Agent 3] Step 4 - Duplicates removed: {dupes_removed}")
-
     before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
+    dropped_in_impute = int(len(before_step) - len(df))
+    row_accounting["rows_dropped_by_imputation"] = dropped_in_impute
+    try:
+        _assert_row_survival_or_abort(input_rows, len(df), "imputation_drop")
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: {e}")
     if verbose:
-        print(f"[Agent 3] Step 5 - Imputation done ({len(notes)} actions)")
+        print(f"[Agent 3] Step 4 - Imputation done ({len(notes)} actions)")
 
     before_step = df.copy()
     df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
     if verbose:
-        print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
+        print(f"[Agent 3] Step 5 - Outlier clipping done ({len(notes)} columns)")
     if critical_errors:
         return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
     before_step = df.copy()
     df, scaling_params, notes = _scale_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
     if verbose:
-        print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
+        print(f"[Agent 3] Step 6 - Scaling done ({len(scaling_params)} columns)")
 
     before_step = df.copy()
     df, notes = _extract_date_features(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
     if verbose:
-        print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
+        print(f"[Agent 3] Step 7 - Date features extracted ({len(notes)} datetime columns)")
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
     df, notes = _derive_business_metrics(df)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
     if verbose:
-        print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
+        print(f"[Agent 3] Step 8 - Business metrics derived ({len(notes)} metrics)")
 
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)
@@ -916,6 +988,37 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         if verbose:
             print(f"[Agent 3] Cleaned CSV exported -> {cleaned_csv_path}")
 
+    # Ensure ledger has one entry for each original column.
+    for col in df_raw.columns:
+        before_null_pct = round((df_raw[col].isna().sum() / max(len(df_raw), 1)) * 100, 2)
+        after_null_pct = round((df[col].isna().sum() / max(len(df), 1)) * 100, 2) if col in df.columns else 100.0
+
+        entry = ledger.columns.get(col, {})
+        if "action" not in entry:
+            if col in ledger.clip_bounds:
+                action = "outlier_clip"
+            elif col in scaling_params:
+                action = "scale"
+            elif schema_blueprint.get(col, {}).get("semantic_tag") == "datetime":
+                action = "date_parse"
+            elif schema_blueprint.get(col, {}).get("intended_type") in ("string", "category"):
+                action = "text_standardize"
+            else:
+                action = "coerce/impute"
+
+            notes = entry.get("notes", "")
+            ledger.record_column_action(col, action, before_null_pct, after_null_pct, notes)
+        else:
+            entry["before_nulls_pct"] = before_null_pct
+            entry["after_nulls_pct"] = after_null_pct
+
+        if "parse_fail_pct" not in ledger.columns[col]:
+            ledger.columns[col]["parse_fail_pct"] = 0.0
+        if "range_fail_pct" not in ledger.columns[col]:
+            ledger.columns[col]["range_fail_pct"] = 0.0
+
+    row_accounting["final_rows"] = int(len(df))
+
     return {
         **state,
         "cleaned_df": df,
@@ -931,6 +1034,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
             "clip_bounds": ledger.clip_bounds,
             "clip_post_bounds": ledger.clip_post_bounds,
             "validation_failures": ledger.validation_failures,
+            "row_accounting": row_accounting,
         },
         "errors": errors,
     }

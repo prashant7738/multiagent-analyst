@@ -115,6 +115,15 @@ def _normalize_missing_text(series):
     return trimmed.mask(normalized.isin(NULL_STRINGS), pd.NA)
 
 
+def _canonicalize_text_values(series):
+    """Canonicalize categorical-like text so case/separator variants collapse to one value."""
+    canonical = series.astype("string")
+    canonical = canonical.str.replace(r"[_\-]+", " ", regex=True)
+    canonical = canonical.str.replace(r"\s+", " ", regex=True).str.strip()
+    canonical = _normalize_missing_text(canonical)
+    return canonical.str.casefold().str.title()
+
+
 def _log_null_diff(before_df, after_df, step_name):
     """Return per-column null-count deltas for debugging and regression detection."""
     notes = []
@@ -259,13 +268,19 @@ def _standardize_text_columns(df, schema_blueprint):
         if meta.get("is_identifier"):
             continue
 
-        text_series = _normalize_missing_text(df[col])
-
-        # Title-case is opt-in because it can corrupt acronyms/brand names.
-        if meta.get("text_case_strategy") == "title":
-            df[col] = text_series.str.title()
-            notes.append(f"{col}: text standardized (strip + title-case + null normalization)")
+        # Canonicalize category-like text to avoid split groups from casing or separators.
+        if meta.get("canonicalize_text", True):
+            df[col] = _canonicalize_text_values(df[col])
+            notes.append(
+                f"{col}: text standardized (null normalization + separator cleanup + case canonicalization)"
+            )
         else:
+            text_series = _normalize_missing_text(df[col])
+            if meta.get("text_case_strategy") == "title":
+                df[col] = text_series.str.title()
+                notes.append(f"{col}: text standardized (strip + title-case + null normalization)")
+                continue
+
             df[col] = text_series
             notes.append(f"{col}: text standardized (strip + null normalization)")
 

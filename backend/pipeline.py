@@ -89,6 +89,12 @@ if __name__ == "__main__":
 
     final_state = pipeline.invoke(initial_state)
 
+    print("\n── Preprocessing Context ──")
+    print(f"Profile: {final_state.get('preprocessing_profile', 'unknown')}")
+    print(f"Domain: {final_state.get('dataset_domain', 'unknown')}")
+    if final_state.get("cleaned_csv_path"):
+        print(f"Cleaned CSV: {final_state['cleaned_csv_path']}")
+
     print("\n── Descriptive Stats ──")
     print(json.dumps(final_state["stats"].get("descriptive", {}), indent=2))
 

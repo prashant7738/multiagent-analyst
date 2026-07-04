@@ -102,7 +102,10 @@ def agent2_semantic_tagger(state: dict) -> dict:
 
     # Step 1: pure Python type sniffing
     inferred_types = _infer_intended_types(df, raw_profile)
-    print(f"[Agent 2] Type sniffing: {inferred_types}")
+    type_counts = {}
+    for inferred_type in inferred_types.values():
+        type_counts[inferred_type] = type_counts.get(inferred_type, 0) + 1
+    print(f"[Agent 2] Type sniffing summary: {type_counts}")
 
     # Step 2: single Groq LLM call for semantic tagging
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile)

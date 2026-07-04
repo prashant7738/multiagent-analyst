@@ -1,4 +1,5 @@
 import re
+import os
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,11 @@ PREPROCESSING_PROFILES = {
 }
 
 DEFAULT_PROFILE = "balanced"
+
+
+def _verbose_logging_enabled():
+    val = os.getenv("PIPELINE_VERBOSE", "0").strip().lower()
+    return val in {"1", "true", "yes", "on"}
 
 
 def _detect_dataset_domain(schema_blueprint):
@@ -713,16 +719,20 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     df_raw = df.copy()
     preprocessing_log = []
     validation_summary = {"checks": 0, "failed_rows": 0}
+    verbose = _verbose_logging_enabled()
 
-    print(f"[Agent 3] Starting preprocessing: {df.shape[0]} rows x {df.shape[1]} cols")
-    print(f"[Agent 3] Profile selected: {selected_profile} (domain={dataset_domain})")
+    print(
+        f"[Agent 3] Preprocessing: profile={selected_profile} domain={dataset_domain} "
+        f"input={df.shape[0]}x{df.shape[1]}"
+    )
 
     # Step 1: currency cleanup + strict assertions.
     before_step = df.copy()
     df, notes, critical_errors = _clean_currency_values(df, schema_blueprint, preprocessing_config)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 1"))
-    print(f"[Agent 3] Step 1 - Currency cleaning done ({len(notes)} columns)")
+    if verbose:
+        print(f"[Agent 3] Step 1 - Currency cleaning done ({len(notes)} columns)")
     if critical_errors:
         return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
@@ -730,13 +740,15 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     df, notes = _coerce_types(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 2"))
-    print(f"[Agent 3] Step 2 - Type coercion done ({len(notes)} actions)")
+    if verbose:
+        print(f"[Agent 3] Step 2 - Type coercion done ({len(notes)} actions)")
 
     before_step = df.copy()
     df, notes = _standardize_text_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3"))
-    print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
+    if verbose:
+        print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
     # Deduplicate before imputation/scaling, using business keys when available.
     before_step = df.copy()
@@ -746,19 +758,22 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     else:
         preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed using full-row match")
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
-    print(f"[Agent 3] Step 4 - Duplicates removed: {dupes_removed}")
+    if verbose:
+        print(f"[Agent 3] Step 4 - Duplicates removed: {dupes_removed}")
 
     before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
-    print(f"[Agent 3] Step 5 - Imputation done ({len(notes)} actions)")
+    if verbose:
+        print(f"[Agent 3] Step 5 - Imputation done ({len(notes)} actions)")
 
     before_step = df.copy()
     df, notes, critical_errors = _clip_outliers(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
-    print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
+    if verbose:
+        print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
     if critical_errors:
         return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
@@ -766,20 +781,23 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     df, scaling_params, notes = _scale_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
-    print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
+    if verbose:
+        print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
 
     before_step = df.copy()
     df, notes = _extract_date_features(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
-    print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
+    if verbose:
+        print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
     df, notes = _derive_business_metrics(df)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
-    print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
+    if verbose:
+        print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
 
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint)
     preprocessing_log.extend(count_validation_notes)
@@ -798,13 +816,19 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"validation_fail={data_quality['validation_fail_pct']}%, "
         f"duplicates={data_quality['duplicate_rate_pct']}%)"
     )
-    print(f"[Agent 3] Step 10 - Quality score: {data_quality['overall_quality_score']}/100")
+    if verbose:
+        print(f"[Agent 3] Step 10 - Quality score: {data_quality['overall_quality_score']}/100")
 
     final_missing = int(df.isna().sum().sum())
     preprocessing_log.append(
         f"Final shape: {df.shape[0]} rows x {df.shape[1]} cols | Remaining NaNs: {final_missing}"
     )
-    print(f"[Agent 3] Done -> {df.shape[0]} rows x {df.shape[1]} cols | Remaining NaNs: {final_missing}")
+    print(
+        f"[Agent 3] Completed: rows={df_raw.shape[0]}->{df.shape[0]} "
+        f"cols={df_raw.shape[1]}->{df.shape[1]} "
+        f"quality={data_quality['overall_quality_score']}/100 "
+        f"remaining_nulls={data_quality['remaining_null_pct']}%"
+    )
 
     cleaned_csv_path, export_error = _export_cleaned_dataset(df)
     if export_error:
@@ -812,7 +836,8 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         preprocessing_log.append(f"CSV export failed: {export_error}")
     else:
         preprocessing_log.append(f"Cleaned CSV exported to {cleaned_csv_path}")
-        print(f"[Agent 3] Cleaned CSV exported -> {cleaned_csv_path}")
+        if verbose:
+            print(f"[Agent 3] Cleaned CSV exported -> {cleaned_csv_path}")
 
     return {
         **state,

@@ -648,60 +648,78 @@ def agent4_analysis(state: GraphState) -> GraphState:
     errors = state.get("errors", [])
     schema_blueprint = state.get("schema_blueprint", {})
     df = state.get("cleaned_df")
+    verbose = os.getenv("PIPELINE_VERBOSE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     if df is None:
         errors.append("Agent4: No cleaned_df in state. Agent 3 failed.")
         return {**state, "errors": errors}
 
-    print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
-    print(f"[Agent 4] Dataset has: revenue={_has_revenue(df)}, "
-          f"time_series={_has_time_series(df)}, "
-          f"categories={_has_categories(df, schema_blueprint)}, "
-          f"derived={_has_derived(df)}")
+    print(f"[Agent 4] Analysis: input={df.shape[0]}x{df.shape[1]}")
+    if verbose:
+        print(f"[Agent 4] Dataset has: revenue={_has_revenue(df)}, "
+              f"time_series={_has_time_series(df)}, "
+              f"categories={_has_categories(df, schema_blueprint)}, "
+              f"derived={_has_derived(df)}")
 
     all_chart_paths = []
     stats = {}
 
     stats["descriptive"] = _descriptive_stats(df, schema_blueprint)
-    print(f"[Agent 4] Step 1 — Descriptive stats: {len(stats['descriptive'])} columns")
+    if verbose:
+        print(f"[Agent 4] Step 1 - Descriptive stats: {len(stats['descriptive'])} columns")
 
     stats["correlation"], corr_path = _correlation(df, schema_blueprint)
     if corr_path:
         all_chart_paths.append(corr_path)
-    print(f"[Agent 4] Step 2 — Correlation: {len(stats['correlation'].get('strong_pairs', []))} strong pairs")
+    if verbose:
+        print(f"[Agent 4] Step 2 - Correlation: {len(stats['correlation'].get('strong_pairs', []))} strong pairs")
 
     stats["growth_rates"], paths = _growth_rates(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 3 — Growth rates: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 3 - Growth rates: {len(paths)} charts")
 
     stats["top_bottom"], paths = _top_bottom_rankings(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 4 — Rankings: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 4 - Rankings: {len(paths)} charts")
 
     stats["seasonality"], paths = _seasonality(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 5 — Seasonality: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 5 - Seasonality: {len(paths)} charts")
 
     stats["anomalies"] = _detect_anomalies(df, schema_blueprint)
-    print(f"[Agent 4] Step 6 — Anomalies: {len(stats['anomalies'])} columns flagged")
+    if verbose:
+        print(f"[Agent 4] Step 6 - Anomalies: {len(stats['anomalies'])} columns flagged")
 
     stats["distributions"], paths = _category_distributions(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 7 — Distributions: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 7 - Distributions: {len(paths)} charts")
 
     stats["regression"], paths = _regression_trends(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 8 — Regression: {len(stats['regression'])} columns, {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 8 - Regression: {len(stats['regression'])} columns, {len(paths)} charts")
 
     paths = _distribution_charts(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 9 — Distribution charts: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 9 - Distribution charts: {len(paths)} charts")
 
     paths = _derived_metrics_charts(df)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 10 — Derived metrics charts: {len(paths)} charts")
+    if verbose:
+        print(f"[Agent 4] Step 10 - Derived metrics charts: {len(paths)} charts")
 
-    print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")
+    print(
+        f"[Agent 4] Completed: descriptive={len(stats['descriptive'])} "
+        f"strong_corr={len(stats['correlation'].get('strong_pairs', []))} "
+        f"anomaly_cols={len(stats['anomalies'])} "
+        f"regression_models={len(stats['regression'])} "
+        f"charts={len(all_chart_paths)}"
+    )
 
     return {
         **state,

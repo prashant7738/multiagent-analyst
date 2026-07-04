@@ -57,6 +57,50 @@ def _verbose_logging_enabled():
     return val in {"1", "true", "yes", "on"}
 
 
+class ColumnLedger:
+    """Tracks per-column transformation details for the final report."""
+    def __init__(self):
+        self.columns = {}  # col_name -> {action, before_nulls_pct, after_nulls_pct, parse_fail_pct, range_fail_pct, notes}
+        self.clip_bounds = {}  # col_name -> {lower, upper}
+        self.clip_post_bounds = {}  # col_name -> {min, max}
+        self.validation_failures = {}  # check_name -> {count, rows_affected_pct, note}
+        self.rows_removed = 0
+    
+    def record_column_action(self, col_name, action, before_nulls_pct, after_nulls_pct, notes=""):
+        if col_name not in self.columns:
+            self.columns[col_name] = {}
+        self.columns[col_name].update({
+            "action": action,
+            "before_nulls_pct": round(before_nulls_pct, 2),
+            "after_nulls_pct": round(after_nulls_pct, 2),
+            "parse_fail_pct": 0.0,
+            "range_fail_pct": 0.0,
+            "notes": notes
+        })
+    
+    def record_parse_failure(self, col_name, pct, count):
+        if col_name not in self.columns:
+            self.columns[col_name] = {}
+        self.columns[col_name]["parse_fail_pct"] = round(pct, 2)
+        self.columns[col_name]["parse_fail_count"] = count
+    
+    def record_range_failure(self, col_name, pct, count):
+        if col_name not in self.columns:
+            self.columns[col_name] = {}
+        self.columns[col_name]["range_fail_pct"] = round(pct, 2)
+        self.columns[col_name]["range_fail_count"] = count
+    
+    def record_clip_bounds(self, col_name, lower, upper):
+        self.clip_bounds[col_name] = {"lower": round(float(lower), 2), "upper": round(float(upper), 2)}
+    
+    def record_clip_post_bounds(self, col_name, min_val, max_val):
+        self.clip_post_bounds[col_name] = {"min": round(float(min_val), 2), "max": round(float(max_val), 2)}
+    
+    def record_validation_failure(self, check_name, count, total_rows):
+        pct = (count / max(total_rows, 1)) * 100
+        self.validation_failures[check_name] = {"count": count, "pct": round(pct, 2)}
+
+
 def _detect_dataset_domain(schema_blueprint):
     finance_name_hits = 0
     finance_tag_hits = 0
@@ -203,7 +247,7 @@ def _coerce_types(df, schema_blueprint):
     return df, notes
 
 
-def _clean_currency_values(df, schema_blueprint, config):
+def _clean_currency_values(df, schema_blueprint, config, ledger=None):
     notes = []
     critical_errors = []
 
@@ -220,6 +264,7 @@ def _clean_currency_values(df, schema_blueprint, config):
 
         original_series = df[col]
         original_nulls = int(original_series.isna().sum())
+        before_null_pct = (original_nulls / max(len(df), 1)) * 100
 
         working = original_series.astype("string").str.strip()
         working = working.str.replace(r"^\((.+)\)$", r"-\1", regex=True)
@@ -241,12 +286,20 @@ def _clean_currency_values(df, schema_blueprint, config):
         df[col] = parsed
         df[parse_failed_col] = parse_failed_mask.astype(int)
 
-        new_nulls = int(parsed.isna().sum()) - original_nulls
+        new_nulls = int(parsed.isna().sum())
+        after_null_pct = (new_nulls / max(len(df), 1)) * 100
         failed_count = int(parse_failed_mask.sum())
+        failed_pct = (failed_count / max(len(df), 1)) * 100
+        
         notes.append(
             f"{col}: currency cleaned, {new_nulls} unparseable values -> NaN, "
             f"{failed_count} failures flagged in [{parse_failed_col}]"
         )
+        
+        if ledger:
+            ledger.record_column_action(col, "currency_clean", before_null_pct, after_null_pct, "multi-currency formats")
+            if failed_count > 0:
+                ledger.record_parse_failure(col, failed_pct, failed_count)
 
         if parsed.notna().sum() == 0:
             critical_errors.append(
@@ -362,7 +415,7 @@ def _impute(df, schema_blueprint):
     return df, notes
 
 
-def _clip_outliers(df, schema_blueprint):
+def _clip_outliers(df, schema_blueprint, ledger=None):
     notes = []
     critical_errors = []
     df = df.copy()
@@ -390,12 +443,17 @@ def _clip_outliers(df, schema_blueprint):
         clipped = int(((numeric_col < lower) | (numeric_col > upper)).sum())
         df[col] = numeric_col.clip(lower=lower, upper=upper)
         notes.append(f"{col}: IQR clipping (lower={lower:.3f}, upper={upper:.3f}), {clipped} values clipped")
+        
+        if ledger:
+            ledger.record_clip_bounds(col, lower, upper)
 
         # Post-step assertion.
         non_null = df[col].dropna()
         if not non_null.empty:
             actual_min = float(non_null.min())
             actual_max = float(non_null.max())
+            if ledger:
+                ledger.record_clip_post_bounds(col, actual_min, actual_max)
             if actual_min < lower - 1e-9 or actual_max > upper + 1e-9:
                 critical_errors.append(
                     f"Agent3: CRITICAL clipping assertion failed for [{col}] "
@@ -557,7 +615,7 @@ def _derive_business_metrics(df):
     return df, notes
 
 
-def _validate_count_ranges(df, schema_blueprint):
+def _validate_count_ranges(df, schema_blueprint, ledger=None):
     notes = []
     checks = 0
     failed_rows = 0
@@ -578,11 +636,16 @@ def _validate_count_ranges(df, schema_blueprint):
         col_failed = int(violation_mask.sum())
         failed_rows += col_failed
         notes.append(f"{col}: count-range validation -> {col_failed} rows flagged in [{flag_col}]")
+        
+        if ledger and col_failed > 0:
+            pct = (col_failed / max(len(df), 1)) * 100
+            ledger.record_range_failure(col, pct, col_failed)
+            ledger.record_validation_failure(f"{col}_range_failed", col_failed, len(df))
 
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
 
-def _validate_financial_constraints(df, config):
+def _validate_financial_constraints(df, config, ledger=None):
     notes = []
     checks = 0
     failed_rows = 0
@@ -601,8 +664,13 @@ def _validate_financial_constraints(df, config):
         flag_col = f"{tax_col}_rate_failed"
         df[flag_col] = fail_mask.astype(int)
         checks += int(valid.sum())
-        failed_rows += int(fail_mask.sum())
-        notes.append(f"Tax-rate validation [{tax_col}] vs [{amount_col}]: {int(fail_mask.sum())} rows flagged")
+        col_failed = int(fail_mask.sum())
+        failed_rows += col_failed
+        notes.append(f"Tax-rate validation [{tax_col}] vs [{amount_col}]: {col_failed} rows flagged")
+        if ledger and col_failed > 0:
+            pct = (col_failed / max(len(df), 1)) * 100
+            ledger.record_range_failure(tax_col, pct, col_failed)
+            ledger.record_validation_failure(f"{tax_col}_rate_failed", col_failed, len(df))
 
     if amount_col and total_col:
         amount = pd.to_numeric(df[amount_col], errors="coerce")
@@ -616,8 +684,12 @@ def _validate_financial_constraints(df, config):
         flag_col = f"{total_col}_reconciliation_failed"
         df[flag_col] = fail_mask.astype(int)
         checks += int(valid.sum())
-        failed_rows += int(fail_mask.sum())
-        notes.append(f"Total reconciliation [{total_col}]: {int(fail_mask.sum())} rows flagged")
+        col_failed = int(fail_mask.sum())
+        failed_rows += col_failed
+        notes.append(f"Total reconciliation [{total_col}]: {col_failed} rows flagged")
+        if ledger and col_failed > 0:
+            pct = (col_failed / max(len(df), 1)) * 100
+            ledger.record_validation_failure(f"{total_col}_reconciliation_failed", col_failed, len(df))
 
     if margin_col:
         margin = pd.to_numeric(df[margin_col], errors="coerce")
@@ -629,8 +701,12 @@ def _validate_financial_constraints(df, config):
         flag_col = f"{margin_col}_range_failed"
         df[flag_col] = fail_mask.astype(int)
         checks += int(valid.sum())
-        failed_rows += int(fail_mask.sum())
-        notes.append(f"Profit-margin range validation [{margin_col}]: {int(fail_mask.sum())} rows flagged")
+        col_failed = int(fail_mask.sum())
+        failed_rows += col_failed
+        notes.append(f"Profit-margin range validation [{margin_col}]: {col_failed} rows flagged")
+        if ledger and col_failed > 0:
+            pct = (col_failed / max(len(df), 1)) * 100
+            ledger.record_validation_failure(f"{margin_col}_range_failed", col_failed, len(df))
 
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
@@ -719,6 +795,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     df_raw = df.copy()
     preprocessing_log = []
     validation_summary = {"checks": 0, "failed_rows": 0}
+    ledger = ColumnLedger()
     verbose = _verbose_logging_enabled()
 
     print(
@@ -728,7 +805,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     # Step 1: currency cleanup + strict assertions.
     before_step = df.copy()
-    df, notes, critical_errors = _clean_currency_values(df, schema_blueprint, preprocessing_config)
+    df, notes, critical_errors = _clean_currency_values(df, schema_blueprint, preprocessing_config, ledger)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 1"))
     if verbose:
@@ -769,7 +846,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 5 - Imputation done ({len(notes)} actions)")
 
     before_step = df.copy()
-    df, notes, critical_errors = _clip_outliers(df, schema_blueprint)
+    df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
     if verbose:
@@ -799,12 +876,12 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     if verbose:
         print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
 
-    df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint)
+    df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)
     validation_summary["checks"] += count_validation["checks"]
     validation_summary["failed_rows"] += count_validation["failed_rows"]
 
-    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df, preprocessing_config)
+    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df, preprocessing_config, ledger)
     preprocessing_log.extend(financial_validation_notes)
     validation_summary["checks"] += financial_validation["checks"]
     validation_summary["failed_rows"] += financial_validation["failed_rows"]
@@ -849,5 +926,11 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "preprocessing_profile": selected_profile,
         "dataset_domain": dataset_domain,
         "data_quality": data_quality,
+        "column_ledger": {
+            "columns": ledger.columns,
+            "clip_bounds": ledger.clip_bounds,
+            "clip_post_bounds": ledger.clip_post_bounds,
+            "validation_failures": ledger.validation_failures,
+        },
         "errors": errors,
     }

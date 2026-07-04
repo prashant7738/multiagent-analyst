@@ -21,6 +21,7 @@ class GraphState(TypedDict):
     scaling_params: dict       # {col: {min, max}} for Agent 4 inverse-transform
     preprocessing_log: list    # full audit trail of every preprocessing action
     data_quality: dict         # 0-100 quality score for Agent 5 and Agent 6
+    column_ledger: dict        # per-column transformation tracking and validation failures
 
     # ── Agent 4 outputs (to be filled) ───────────────────────────────────────
     stats: dict

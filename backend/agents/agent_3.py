@@ -1,7 +1,9 @@
 import re
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
 from agents.agent_1 import GraphState
 
 
@@ -9,6 +11,11 @@ NULL_STRINGS = {
     "nan", "none", "null", "n/a", "na", "-", "", "unknown",
     "not available", "not applicable", "nil", "#n/a", "nan ",
 }
+
+MAX_CURRENCY_ABS_VALUE = 1_000_000_000
+MAX_REASONABLE_TAX_RATE = 0.40
+TOTAL_RECONCILIATION_REL_TOL = 0.02
+TOTAL_RECONCILIATION_ABS_TOL = 1.0
 
 
 def _normalize_missing_text(series):
@@ -18,12 +25,51 @@ def _normalize_missing_text(series):
     return trimmed.mask(normalized.isin(NULL_STRINGS), pd.NA)
 
 
+def _log_null_diff(before_df, after_df, step_name):
+    """Return per-column null-count deltas for debugging and regression detection."""
+    notes = []
+    shared_cols = [c for c in before_df.columns if c in after_df.columns]
+    for col in shared_cols:
+        before_nulls = int(before_df[col].isna().sum())
+        after_nulls = int(after_df[col].isna().sum())
+        if before_nulls != after_nulls:
+            delta = after_nulls - before_nulls
+            direction = "increased" if delta > 0 else "decreased"
+            notes.append(
+                f"{step_name} null diff [{col}]: {before_nulls} -> {after_nulls} "
+                f"({direction} by {abs(delta)})"
+            )
+    return notes
+
+
+def _is_count_field(col, meta):
+    if meta.get("semantic_tag") == "count":
+        return True
+    return bool(re.search(r"\b(count|counts|qty|quantity|quantities|units|num|number)\b", col.lower()))
+
+
+def _resolve_business_keys(df, schema_blueprint):
+    key_cols = [
+        col for col, meta in schema_blueprint.items()
+        if col in df.columns and meta.get("is_identifier")
+    ]
+    if key_cols:
+        return key_cols
+
+    fallback_priority = ["transaction_id", "order_id", "invoice_id", "customer_id", "id"]
+    fallback = [col for col in fallback_priority if col in df.columns]
+    if fallback:
+        return fallback
+    return []
+
+
 def _coerce_types(df, schema_blueprint):
     notes = []
     df = df.copy()
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
+
         intended = meta.get("intended_type", "string")
         try:
             if intended in ("float", "int"):
@@ -31,7 +77,7 @@ def _coerce_types(df, schema_blueprint):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
                 new_nulls = int(df[col].isna().sum() - before_nulls)
                 if new_nulls > 0:
-                    notes.append(f"{col}: {new_nulls} values could not be cast to {intended} → NaN")
+                    notes.append(f"{col}: {new_nulls} values could not be cast to {intended} -> NaN")
                 if intended == "int" and df[col].isna().sum() == 0:
                     df[col] = df[col].astype(int)
             elif intended == "datetime":
@@ -39,44 +85,78 @@ def _coerce_types(df, schema_blueprint):
                 notes.append(f"{col}: coerced to datetime")
             elif intended == "boolean":
                 df[col] = df[col].map(
-                    lambda x: True  if str(x).strip().lower() in ("true",  "1", "yes")
-                         else False if str(x).strip().lower() in ("false", "0", "no")
-                         else np.nan
+                    lambda x: True if str(x).strip().lower() in ("true", "1", "yes")
+                    else False if str(x).strip().lower() in ("false", "0", "no")
+                    else np.nan
                 )
                 notes.append(f"{col}: coerced to boolean")
             elif intended in ("category", "string"):
                 df[col] = _normalize_missing_text(df[col])
         except Exception as e:
-            notes.append(f"{col}: coercion failed — {e}")
+            notes.append(f"{col}: coercion failed - {e}")
+
     return df, notes
 
 
 def _clean_currency_values(df, schema_blueprint):
     notes = []
+    critical_errors = []
+
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
         if meta.get("semantic_tag") != "currency":
             continue
-        original_nulls = int(df[col].isna().sum())
-        df[col] = df[col].astype(str).str.strip()
-        df[col] = df[col].str.replace(r'^\((.+)\)$', r'-\1', regex=True)
-        df[col] = df[col].str.replace(r'[₹$€£¥₩\s]', '', regex=True)
-        df[col] = df[col].str.replace(r'^Rs\.?', '', regex=True)
-        mask = df[col].str.contains(',', na=False)
-        df.loc[mask, col] = (
-            df.loc[mask, col]
-            .str.replace(r'\.(?=\d{3})', '', regex=True)
-            .str.replace(',', '.', regex=False)
+        if meta.get("intended_type") not in ("float", "int"):
+            notes.append(
+                f"{col}: currency tag detected but intended_type={meta.get('intended_type')} -> skipped numeric currency parsing"
+            )
+            continue
+
+        original_series = df[col]
+        original_nulls = int(original_series.isna().sum())
+
+        working = original_series.astype("string").str.strip()
+        working = working.str.replace(r"^\((.+)\)$", r"-\1", regex=True)
+        working = working.str.replace(r"[₹$€£¥₩\s]", "", regex=True)
+        working = working.str.replace(r"^Rs\.?", "", regex=True)
+
+        has_comma = working.str.contains(",", na=False)
+        working.loc[has_comma] = (
+            working.loc[has_comma]
+            .str.replace(r"\.(?=\d{3})", "", regex=True)
+            .str.replace(",", ".", regex=False)
         )
-        df[col] = df[col].str.replace(',', '', regex=False)
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-        new_nulls = int(df[col].isna().sum()) - original_nulls
+        working = working.str.replace(",", "", regex=False)
+
+        parsed = pd.to_numeric(working, errors="coerce")
+        parse_failed_mask = original_series.notna() & parsed.isna()
+        parse_failed_col = f"{col}_parse_failed"
+
+        df[col] = parsed
+        df[parse_failed_col] = parse_failed_mask.astype(int)
+
+        new_nulls = int(parsed.isna().sum()) - original_nulls
+        failed_count = int(parse_failed_mask.sum())
         notes.append(
-            f"{col}: currency symbols cleaned"
-            + (f", {new_nulls} unparseable values → NaN" if new_nulls > 0 else "")
+            f"{col}: currency cleaned, {new_nulls} unparseable values -> NaN, "
+            f"{failed_count} failures flagged in [{parse_failed_col}]"
         )
-    return df, notes
+
+        if parsed.notna().sum() == 0:
+            critical_errors.append(
+                f"Agent3: CRITICAL currency parse assertion failed for [{col}] - column is 100% null"
+            )
+            continue
+
+        max_abs = float(parsed.abs().max(skipna=True))
+        if np.isfinite(max_abs) and max_abs > MAX_CURRENCY_ABS_VALUE:
+            critical_errors.append(
+                f"Agent3: CRITICAL currency plausibility assertion failed for [{col}] "
+                f"(max abs {max_abs:.2f})"
+            )
+
+    return df, notes, critical_errors
 
 
 def _standardize_text_columns(df, schema_blueprint):
@@ -88,22 +168,30 @@ def _standardize_text_columns(df, schema_blueprint):
             continue
         if meta.get("is_identifier"):
             continue
+
         text_series = _normalize_missing_text(df[col])
 
-        # Title-casing is opt-in because it can corrupt acronyms/brand names.
+        # Title-case is opt-in because it can corrupt acronyms/brand names.
         if meta.get("text_case_strategy") == "title":
             df[col] = text_series.str.title()
-            notes.append(f"{col}: text standardized (stripped, title-cased, null strings → NaN)")
+            notes.append(f"{col}: text standardized (strip + title-case + null normalization)")
         else:
             df[col] = text_series
-            notes.append(f"{col}: text standardized (stripped, null strings → NaN)")
+            notes.append(f"{col}: text standardized (strip + null normalization)")
+
     return df, notes
 
 
-def _remove_duplicates(df):
+def _remove_duplicates(df, schema_blueprint):
     before = len(df)
-    df = df.drop_duplicates().reset_index(drop=True)
-    return df, before - len(df)
+    key_cols = _resolve_business_keys(df, schema_blueprint)
+
+    if key_cols:
+        df = df.drop_duplicates(subset=key_cols).reset_index(drop=True)
+    else:
+        df = df.drop_duplicates().reset_index(drop=True)
+
+    return df, before - len(df), key_cols
 
 
 def _impute(df, schema_blueprint):
@@ -111,13 +199,16 @@ def _impute(df, schema_blueprint):
     df = df.copy()
     rows_before = len(df)
     drop_mask = pd.Series([False] * len(df), index=df.index)
+
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
+
         strategy = meta.get("imputation_strategy", "none")
         missing_count = int(df[col].isna().sum())
         if missing_count == 0:
             continue
+
         try:
             if strategy == "mean":
                 fill_value = df[col].mean()
@@ -149,18 +240,22 @@ def _impute(df, schema_blueprint):
             elif strategy == "none":
                 notes.append(f"{col}: {missing_count} NaNs left as-is (strategy=none)")
             else:
-                notes.append(f"{col}: unknown strategy '{strategy}' — skipped")
+                notes.append(f"{col}: unknown strategy '{strategy}' - skipped")
         except Exception as e:
-            notes.append(f"{col}: imputation failed — {e}")
+            notes.append(f"{col}: imputation failed - {e}")
+
     if drop_mask.any():
         df = df[~drop_mask].reset_index(drop=True)
         notes.append(f"Dropped {rows_before - len(df)} rows with missing identifier values")
+
     return df, notes
 
 
 def _clip_outliers(df, schema_blueprint):
     notes = []
+    critical_errors = []
     df = df.copy()
+
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
@@ -170,25 +265,40 @@ def _clip_outliers(df, schema_blueprint):
             continue
         if meta.get("intended_type") not in ("float", "int"):
             continue
+
         numeric_col = pd.to_numeric(df[col], errors="coerce")
-        Q1  = numeric_col.quantile(0.25)
-        Q3  = numeric_col.quantile(0.75)
-        IQR = Q3 - Q1
-        if IQR == 0:
+        q1 = numeric_col.quantile(0.25)
+        q3 = numeric_col.quantile(0.75)
+        iqr = q3 - q1
+        if iqr == 0:
             notes.append(f"{col}: outlier clipping skipped (zero IQR)")
             continue
-        lower = Q1 - 1.5 * IQR
-        upper = Q3 + 1.5 * IQR
+
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
         clipped = int(((numeric_col < lower) | (numeric_col > upper)).sum())
         df[col] = numeric_col.clip(lower=lower, upper=upper)
         notes.append(f"{col}: IQR clipping (lower={lower:.3f}, upper={upper:.3f}), {clipped} values clipped")
-    return df, notes
+
+        # Post-step assertion.
+        non_null = df[col].dropna()
+        if not non_null.empty:
+            actual_min = float(non_null.min())
+            actual_max = float(non_null.max())
+            if actual_min < lower - 1e-9 or actual_max > upper + 1e-9:
+                critical_errors.append(
+                    f"Agent3: CRITICAL clipping assertion failed for [{col}] "
+                    f"(min={actual_min:.4f}, max={actual_max:.4f}, bounds={lower:.4f}..{upper:.4f})"
+                )
+
+    return df, notes, critical_errors
 
 
 def _scale_columns(df, schema_blueprint):
     notes = []
     scaling_params = {}
     df = df.copy()
+
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
@@ -200,14 +310,36 @@ def _scale_columns(df, schema_blueprint):
             continue
         if meta.get("intended_type") not in ("float", "int"):
             continue
+        if _is_count_field(col, meta):
+            notes.append(f"{col}: scaling skipped (count field)")
+            continue
+
+        raw_col = f"{col}_raw"
+        scaled_col = f"{col}_scaled"
+        if raw_col not in df.columns:
+            df[raw_col] = df[col]
+
         col_min = df[col].min()
         col_max = df[col].max()
         if col_max == col_min:
             notes.append(f"{col}: scaling skipped (constant column)")
             continue
-        df[col] = (df[col] - col_min) / (col_max - col_min)
-        scaling_params[col] = {"min": float(col_min), "max": float(col_max)}
-        notes.append(f"{col}: Min-Max scaled (min={col_min:.4f}, max={col_max:.4f})")
+
+        df[scaled_col] = (df[col] - col_min) / (col_max - col_min)
+        # Preserve backward compatibility for downstream code expecting the original name.
+        df[col] = df[scaled_col]
+
+        scaling_params[col] = {
+            "min": float(col_min),
+            "max": float(col_max),
+            "raw_col": raw_col,
+            "scaled_col": scaled_col,
+        }
+        notes.append(
+            f"{col}: Min-Max scaled in [{scaled_col}] with raw backup [{raw_col}] "
+            f"(min={col_min:.4f}, max={col_max:.4f})"
+        )
+
     return df, scaling_params, notes
 
 
@@ -218,27 +350,29 @@ def _extract_date_features(df, schema_blueprint):
             continue
         if meta.get("semantic_tag") != "datetime":
             continue
+
         try:
             dt = pd.to_datetime(df[col], errors="coerce")
-            df[f"{col}_year"]         = dt.dt.year
-            df[f"{col}_month"]        = dt.dt.month
-            df[f"{col}_quarter"]      = dt.dt.quarter
-            df[f"{col}_day"]          = dt.dt.day
-            df[f"{col}_day_of_week"]  = dt.dt.dayofweek
-            df[f"{col}_is_weekend"]   = (dt.dt.dayofweek >= 5).astype(int)
+            df[f"{col}_year"] = dt.dt.year
+            df[f"{col}_month"] = dt.dt.month
+            df[f"{col}_quarter"] = dt.dt.quarter
+            df[f"{col}_day"] = dt.dt.day
+            df[f"{col}_day_of_week"] = dt.dt.dayofweek
+            df[f"{col}_is_weekend"] = (dt.dt.dayofweek >= 5).astype(int)
             df[f"{col}_week_of_year"] = dt.dt.isocalendar().week.astype("Int64")
             notes.append(f"{col}: extracted year, month, quarter, day, day_of_week, is_weekend, week_of_year")
         except Exception as e:
-            notes.append(f"{col}: date feature extraction failed — {e}")
+            notes.append(f"{col}: date feature extraction failed - {e}")
+
     return df, notes
 
 
 def _find_col(df, keywords):
-    """Whole-word keyword matching — prevents 'count' matching 'Country'."""
+    """Whole-word keyword matching; prevents accidental substring matches."""
     for col in df.columns:
         col_lower = col.lower()
         for kw in keywords:
-            if re.search(rf'\b{re.escape(kw)}\b', col_lower):
+            if re.search(rf"\b{re.escape(kw)}\b", col_lower):
                 return col
     return None
 
@@ -254,36 +388,31 @@ def _is_numeric_col(df, col):
 def _derive_business_metrics(df):
     notes = []
 
-    rev_col      = _find_col(df, ["revenue", "sales", "income", "total_amount", "net_sales"])
-    cost_col     = _find_col(df, ["cost_price", "cost", "expense", "cogs", "expenditure"])
-    unit_col     = _find_col(df, ["units_sold", "units", "quantity", "qty", "volume"])
-    price_col    = _find_col(df, ["unit_price", "price", "rate", "mrp", "selling_price"])
-    discount_col = _find_col(df, ["discount", "rebate", "deduction"])
-    budget_col   = _find_col(df, ["budget", "target", "planned", "projected"])
-    tax_col      = _find_col(df, ["tax", "vat", "gst", "duty"])
-    ship_col     = _find_col(df, ["shipping", "freight", "delivery_cost", "logistics"])
+    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount", "net_sales"])
+    cost_col = _find_col(df, ["cost_price", "cost", "expense", "cogs", "expenditure"])
+    unit_col = _find_col(df, ["units_sold", "units", "quantity", "qty", "volume"])
+    price_col = _find_col(df, ["unit_price", "price", "rate", "mrp", "selling_price"])
+    discount_col = _find_col(df, ["discount_amount", "discount", "rebate", "deduction"])
+    budget_col = _find_col(df, ["budget", "target", "planned", "projected"])
+    tax_col = _find_col(df, ["tax_amount", "tax", "vat", "gst", "duty"])
+    ship_col = _find_col(df, ["shipping", "freight", "delivery_cost", "logistics"])
 
-    # Verify every detected column is actually numeric before doing math
-    rev_col      = rev_col      if _is_numeric_col(df, rev_col)      else None
-    cost_col     = cost_col     if _is_numeric_col(df, cost_col)     else None
-    unit_col     = unit_col     if _is_numeric_col(df, unit_col)     else None
-    price_col    = price_col    if _is_numeric_col(df, price_col)    else None
+    rev_col = rev_col if _is_numeric_col(df, rev_col) else None
+    cost_col = cost_col if _is_numeric_col(df, cost_col) else None
+    unit_col = unit_col if _is_numeric_col(df, unit_col) else None
+    price_col = price_col if _is_numeric_col(df, price_col) else None
     discount_col = discount_col if _is_numeric_col(df, discount_col) else None
-    budget_col   = budget_col   if _is_numeric_col(df, budget_col)   else None
-    tax_col      = tax_col      if _is_numeric_col(df, tax_col)      else None
-    ship_col     = ship_col     if _is_numeric_col(df, ship_col)     else None
+    budget_col = budget_col if _is_numeric_col(df, budget_col) else None
+    tax_col = tax_col if _is_numeric_col(df, tax_col) else None
+    ship_col = ship_col if _is_numeric_col(df, ship_col) else None
 
-    # Force numeric on verified columns only — never touches string columns
-    for col in [rev_col, cost_col, unit_col, price_col,
-                discount_col, budget_col, tax_col, ship_col]:
+    for col in [rev_col, cost_col, unit_col, price_col, discount_col, budget_col, tax_col, ship_col]:
         if col and col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     if rev_col and cost_col:
         df["derived_profit"] = df[rev_col] - df[cost_col]
-        df["derived_profit_margin_pct"] = (
-            df["derived_profit"] / df[rev_col].replace(0, np.nan)
-        ) * 100
+        df["derived_profit_margin_pct"] = (df["derived_profit"] / df[rev_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: profit and profit_margin_pct from [{rev_col}] - [{cost_col}]")
 
     if rev_col and unit_col:
@@ -292,20 +421,16 @@ def _derive_business_metrics(df):
 
     if not rev_col and price_col and unit_col:
         df["derived_total_revenue"] = df[price_col] * df[unit_col]
-        notes.append(f"Derived: total_revenue from [{price_col}] × [{unit_col}]")
+        notes.append(f"Derived: total_revenue from [{price_col}] * [{unit_col}]")
 
     if rev_col and discount_col:
         df["derived_revenue_after_discount"] = df[rev_col] - df[discount_col]
-        df["derived_discount_pct"] = (
-            df[discount_col] / df[rev_col].replace(0, np.nan)
-        ) * 100
+        df["derived_discount_pct"] = (df[discount_col] / df[rev_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: revenue_after_discount and discount_pct from [{rev_col}] and [{discount_col}]")
 
     if rev_col and budget_col:
         df["derived_budget_variance"] = df[rev_col] - df[budget_col]
-        df["derived_budget_variance_pct"] = (
-            df["derived_budget_variance"] / df[budget_col].replace(0, np.nan)
-        ) * 100
+        df["derived_budget_variance_pct"] = (df["derived_budget_variance"] / df[budget_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: budget_variance and variance_pct from [{rev_col}] and [{budget_col}]")
 
     if cost_col and tax_col and ship_col:
@@ -321,20 +446,115 @@ def _derive_business_metrics(df):
     return df, notes
 
 
-def _compute_quality_score(df_raw, df_clean):
-    total_cells  = df_raw.shape[0] * df_raw.shape[1]
-    completeness = 1 - (df_raw.isna().sum().sum() / max(total_cells, 1))
-    dup_penalty  = df_raw.duplicated().sum() / max(len(df_raw), 1)
-    score        = round((completeness - dup_penalty) * 100, 2)
+def _validate_count_ranges(df, schema_blueprint):
+    notes = []
+    checks = 0
+    failed_rows = 0
+
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns or not _is_count_field(col, meta):
+            continue
+
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        valid = numeric.notna()
+        negative_mask = valid & (numeric < 0)
+        non_int_mask = valid & (np.floor(numeric) != numeric)
+        violation_mask = negative_mask | non_int_mask
+        flag_col = f"{col}_range_failed"
+        df[flag_col] = violation_mask.astype(int)
+
+        checks += int(valid.sum())
+        col_failed = int(violation_mask.sum())
+        failed_rows += col_failed
+        notes.append(f"{col}: count-range validation -> {col_failed} rows flagged in [{flag_col}]")
+
+    return df, notes, {"checks": checks, "failed_rows": failed_rows}
+
+
+def _validate_financial_constraints(df):
+    notes = []
+    checks = 0
+    failed_rows = 0
+
+    amount_col = _find_col(df, ["amount", "revenue", "sales", "subtotal"])
+    tax_col = _find_col(df, ["tax_amount", "tax", "vat", "gst"])
+    discount_col = _find_col(df, ["discount_amount", "discount", "rebate", "deduction"])
+    total_col = _find_col(df, ["total_amount", "grand_total", "invoice_total"])
+    margin_col = _find_col(df, ["profit_margin", "derived_profit_margin_pct"])
+
+    if amount_col and tax_col:
+        amount = pd.to_numeric(df[amount_col], errors="coerce")
+        tax = pd.to_numeric(df[tax_col], errors="coerce")
+        valid = amount.notna() & tax.notna() & (amount != 0)
+        fail_mask = valid & (tax > amount.abs() * MAX_REASONABLE_TAX_RATE)
+        flag_col = f"{tax_col}_rate_failed"
+        df[flag_col] = fail_mask.astype(int)
+        checks += int(valid.sum())
+        failed_rows += int(fail_mask.sum())
+        notes.append(f"Tax-rate validation [{tax_col}] vs [{amount_col}]: {int(fail_mask.sum())} rows flagged")
+
+    if amount_col and total_col:
+        amount = pd.to_numeric(df[amount_col], errors="coerce")
+        total = pd.to_numeric(df[total_col], errors="coerce")
+        tax_series = pd.to_numeric(df[tax_col], errors="coerce") if tax_col else 0.0
+        discount_series = pd.to_numeric(df[discount_col], errors="coerce") if discount_col else 0.0
+        expected = amount + tax_series - discount_series
+        tol = np.maximum(TOTAL_RECONCILIATION_ABS_TOL, expected.abs() * TOTAL_RECONCILIATION_REL_TOL)
+        valid = expected.notna() & total.notna()
+        fail_mask = valid & ((total - expected).abs() > tol)
+        flag_col = f"{total_col}_reconciliation_failed"
+        df[flag_col] = fail_mask.astype(int)
+        checks += int(valid.sum())
+        failed_rows += int(fail_mask.sum())
+        notes.append(f"Total reconciliation [{total_col}]: {int(fail_mask.sum())} rows flagged")
+
+    if margin_col:
+        margin = pd.to_numeric(df[margin_col], errors="coerce")
+        valid = margin.notna()
+        if margin_col.endswith("_pct"):
+            fail_mask = valid & ((margin < -100) | (margin > 100))
+        else:
+            fail_mask = valid & ((margin < -1) | (margin > 1))
+        flag_col = f"{margin_col}_range_failed"
+        df[flag_col] = fail_mask.astype(int)
+        checks += int(valid.sum())
+        failed_rows += int(fail_mask.sum())
+        notes.append(f"Profit-margin range validation [{margin_col}]: {int(fail_mask.sum())} rows flagged")
+
+    return df, notes, {"checks": checks, "failed_rows": failed_rows}
+
+
+def _compute_quality_score(df_raw, df_clean, validation_summary):
+    raw_total_cells = df_raw.shape[0] * df_raw.shape[1]
+    clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
+
+    raw_completeness = 1 - (df_raw.isna().sum().sum() / max(raw_total_cells, 1))
+    remaining_null_pct = round((df_clean.isna().sum().sum() / max(clean_total_cells, 1)) * 100, 2)
+    duplicate_rate_pct = round((df_raw.duplicated().sum() / max(len(df_raw), 1)) * 100, 2)
+
+    total_checks = max(validation_summary.get("checks", 0), 1)
+    validation_fail_pct = round((validation_summary.get("failed_rows", 0) / total_checks) * 100, 2)
+
+    # Score is driven by post-hoc failures, not by number of executed steps.
+    score = 100.0 - (0.50 * remaining_null_pct) - (0.40 * validation_fail_pct) - (0.10 * duplicate_rate_pct)
+
+    null_pct_by_column = {
+        col: round((df_clean[col].isna().sum() / max(len(df_clean), 1)) * 100, 2)
+        for col in df_clean.columns
+    }
+
     return {
-        "overall_quality_score": max(0.0, min(100.0, score)),
-        "raw_completeness_pct":  round(completeness * 100, 2),
-        "duplicate_rate_pct":    round(dup_penalty * 100, 2),
-        "rows_before":           int(df_raw.shape[0]),
-        "rows_after":            int(df_clean.shape[0]),
-        "rows_removed":          int(df_raw.shape[0] - df_clean.shape[0]),
-        "columns_before":        int(df_raw.shape[1]),
-        "columns_after":         int(df_clean.shape[1]),
+        "overall_quality_score": max(0.0, min(100.0, round(score, 2))),
+        "raw_completeness_pct": round(raw_completeness * 100, 2),
+        "remaining_null_pct": remaining_null_pct,
+        "duplicate_rate_pct": duplicate_rate_pct,
+        "validation_fail_pct": validation_fail_pct,
+        "null_pct_by_column": null_pct_by_column,
+        "rows_before": int(df_raw.shape[0]),
+        "rows_after": int(df_clean.shape[0]),
+        "rows_removed": int(df_raw.shape[0] - df_clean.shape[0]),
+        "columns_before": int(df_raw.shape[1]),
+        "columns_after": int(df_clean.shape[1]),
     }
 
 
@@ -347,6 +567,17 @@ def _export_cleaned_dataset(df, output_path="outputs/cleaned_data.csv"):
         return str(output), None
     except Exception as e:
         return "", f"Failed to export cleaned dataset CSV: {e}"
+
+
+def _early_exit_with_error(state, errors, preprocessing_log, message):
+    errors.append(message)
+    return {
+        **state,
+        "cleaned_df": None,
+        "cleaned_csv_path": "",
+        "preprocessing_log": preprocessing_log,
+        "errors": errors,
+    }
 
 
 def agent3_preprocessor(state: GraphState) -> GraphState:
@@ -364,58 +595,98 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     df_raw = df.copy()
     preprocessing_log = []
-    print(f"[Agent 3] Starting preprocessing: {df.shape[0]} rows × {df.shape[1]} cols")
+    validation_summary = {"checks": 0, "failed_rows": 0}
 
-    # Clean semantic currency fields before generic numeric coercion.
-    df, notes = _clean_currency_values(df, schema_blueprint)
+    print(f"[Agent 3] Starting preprocessing: {df.shape[0]} rows x {df.shape[1]} cols")
+
+    # Step 1: currency cleanup + strict assertions.
+    before_step = df.copy()
+    df, notes, critical_errors = _clean_currency_values(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 1 — Currency cleaning done ({len(notes)} columns)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 1"))
+    print(f"[Agent 3] Step 1 - Currency cleaning done ({len(notes)} columns)")
+    if critical_errors:
+        return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
+    before_step = df.copy()
     df, notes = _coerce_types(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 2 — Type coercion done ({len(notes)} actions)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 2"))
+    print(f"[Agent 3] Step 2 - Type coercion done ({len(notes)} actions)")
 
+    before_step = df.copy()
     df, notes = _standardize_text_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 3 — Text standardization done ({len(notes)} columns)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3"))
+    print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
-    df, dupes_removed = _remove_duplicates(df)
-    preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed")
-    print(f"[Agent 3] Step 4 — Duplicates removed: {dupes_removed}")
+    # Deduplicate before imputation/scaling, using business keys when available.
+    before_step = df.copy()
+    df, dupes_removed, dedup_keys = _remove_duplicates(df, schema_blueprint)
+    if dedup_keys:
+        preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed using business keys {dedup_keys}")
+    else:
+        preprocessing_log.append(f"Duplicate removal: {dupes_removed} rows removed using full-row match")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
+    print(f"[Agent 3] Step 4 - Duplicates removed: {dupes_removed}")
 
+    before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 5 — Imputation done ({len(notes)} actions)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
+    print(f"[Agent 3] Step 5 - Imputation done ({len(notes)} actions)")
 
-    df, notes = _clip_outliers(df, schema_blueprint)
+    before_step = df.copy()
+    df, notes, critical_errors = _clip_outliers(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 6 — Outlier clipping done ({len(notes)} columns)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
+    if critical_errors:
+        return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
+    before_step = df.copy()
     df, scaling_params, notes = _scale_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 7 — Scaling done ({len(scaling_params)} columns)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
+    print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
 
+    before_step = df.copy()
     df, notes = _extract_date_features(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 8 — Date features extracted ({len(notes)} datetime columns)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
+    print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
+    # Derived metrics are computed only after upstream columns are finalized.
+    before_step = df.copy()
     df, notes = _derive_business_metrics(df)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 9 — Business metrics derived ({len(notes)} metrics)")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
+    print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
 
-    data_quality = _compute_quality_score(df_raw, df)
+    df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint)
+    preprocessing_log.extend(count_validation_notes)
+    validation_summary["checks"] += count_validation["checks"]
+    validation_summary["failed_rows"] += count_validation["failed_rows"]
+
+    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df)
+    preprocessing_log.extend(financial_validation_notes)
+    validation_summary["checks"] += financial_validation["checks"]
+    validation_summary["failed_rows"] += financial_validation["failed_rows"]
+
+    data_quality = _compute_quality_score(df_raw, df, validation_summary)
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
-        f"(completeness={data_quality['raw_completeness_pct']}%, "
+        f"(remaining_nulls={data_quality['remaining_null_pct']}%, "
+        f"validation_fail={data_quality['validation_fail_pct']}%, "
         f"duplicates={data_quality['duplicate_rate_pct']}%)"
     )
-    print(f"[Agent 3] Step 10 — Quality score: {data_quality['overall_quality_score']}/100")
+    print(f"[Agent 3] Step 10 - Quality score: {data_quality['overall_quality_score']}/100")
 
     final_missing = int(df.isna().sum().sum())
     preprocessing_log.append(
-        f"Final shape: {df.shape[0]} rows × {df.shape[1]} cols | Remaining NaNs: {final_missing}"
+        f"Final shape: {df.shape[0]} rows x {df.shape[1]} cols | Remaining NaNs: {final_missing}"
     )
-    print(f"[Agent 3] Done → {df.shape[0]} rows × {df.shape[1]} cols | Remaining NaNs: {final_missing}")
+    print(f"[Agent 3] Done -> {df.shape[0]} rows x {df.shape[1]} cols | Remaining NaNs: {final_missing}")
 
     cleaned_csv_path, export_error = _export_cleaned_dataset(df)
     if export_error:
@@ -423,14 +694,14 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         preprocessing_log.append(f"CSV export failed: {export_error}")
     else:
         preprocessing_log.append(f"Cleaned CSV exported to {cleaned_csv_path}")
-        print(f"[Agent 3] Cleaned CSV exported → {cleaned_csv_path}")
+        print(f"[Agent 3] Cleaned CSV exported -> {cleaned_csv_path}")
 
     return {
         **state,
-        "cleaned_df":        df,
-        "cleaned_csv_path":  cleaned_csv_path,
-        "scaling_params":    scaling_params,
+        "cleaned_df": df,
+        "cleaned_csv_path": cleaned_csv_path,
+        "scaling_params": scaling_params,
         "preprocessing_log": preprocessing_log,
-        "data_quality":      data_quality,
-        "errors":            errors,
+        "data_quality": data_quality,
+        "errors": errors,
     }

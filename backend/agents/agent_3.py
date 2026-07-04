@@ -4,6 +4,19 @@ import numpy as np
 from agents.agent_1 import GraphState
 
 
+NULL_STRINGS = {
+    "nan", "none", "null", "n/a", "na", "-", "", "unknown",
+    "not available", "not applicable", "nil", "#n/a", "nan ",
+}
+
+
+def _normalize_missing_text(series):
+    """Normalize common textual null markers while preserving true missing values."""
+    trimmed = series.astype("string").str.strip()
+    normalized = trimmed.str.casefold()
+    return trimmed.mask(normalized.isin(NULL_STRINGS), pd.NA)
+
+
 def _coerce_types(df, schema_blueprint):
     notes = []
     df = df.copy()
@@ -31,8 +44,7 @@ def _coerce_types(df, schema_blueprint):
                 )
                 notes.append(f"{col}: coerced to boolean")
             elif intended in ("category", "string"):
-                df[col] = df[col].astype(str).str.strip()
-                df[col] = df[col].replace("nan", np.nan)
+                df[col] = _normalize_missing_text(df[col])
         except Exception as e:
             notes.append(f"{col}: coercion failed — {e}")
     return df, notes
@@ -68,10 +80,6 @@ def _clean_currency_values(df, schema_blueprint):
 
 def _standardize_text_columns(df, schema_blueprint):
     notes = []
-    NULL_STRINGS = {
-        "nan", "none", "null", "n/a", "na", "-", "", "unknown",
-        "not available", "not applicable", "nil", "#n/a", "nan ",
-    }
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
             continue
@@ -79,11 +87,15 @@ def _standardize_text_columns(df, schema_blueprint):
             continue
         if meta.get("is_identifier"):
             continue
-        df[col] = df[col].astype(str).str.strip().str.title()
-        df[col] = df[col].apply(
-            lambda x: np.nan if str(x).strip().lower() in NULL_STRINGS else x
-        )
-        notes.append(f"{col}: text standardized (stripped, title-cased, null strings → NaN)")
+        text_series = _normalize_missing_text(df[col])
+
+        # Title-casing is opt-in because it can corrupt acronyms/brand names.
+        if meta.get("text_case_strategy") == "title":
+            df[col] = text_series.str.title()
+            notes.append(f"{col}: text standardized (stripped, title-cased, null strings → NaN)")
+        else:
+            df[col] = text_series
+            notes.append(f"{col}: text standardized (stripped, null strings → NaN)")
     return df, notes
 
 
@@ -108,10 +120,16 @@ def _impute(df, schema_blueprint):
         try:
             if strategy == "mean":
                 fill_value = df[col].mean()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: mean imputation skipped (all values missing/non-numeric)")
+                    continue
                 df[col] = df[col].fillna(fill_value)
                 notes.append(f"{col}: imputed {missing_count} NaNs with mean ({fill_value:.4f})")
             elif strategy == "median":
                 fill_value = df[col].median()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: median imputation skipped (all values missing/non-numeric)")
+                    continue
                 df[col] = df[col].fillna(fill_value)
                 notes.append(f"{col}: imputed {missing_count} NaNs with median ({fill_value:.4f})")
             elif strategy == "mode":
@@ -119,6 +137,8 @@ def _impute(df, schema_blueprint):
                 if len(mode_val) > 0:
                     df[col] = df[col].fillna(mode_val[0])
                     notes.append(f"{col}: imputed {missing_count} NaNs with mode ({mode_val[0]})")
+                else:
+                    notes.append(f"{col}: mode imputation skipped (no valid mode)")
             elif strategy == "unknown_label":
                 df[col] = df[col].fillna("Unknown")
                 notes.append(f"{col}: imputed {missing_count} NaNs with 'Unknown'")
@@ -205,7 +225,7 @@ def _extract_date_features(df, schema_blueprint):
             df[f"{col}_day"]          = dt.dt.day
             df[f"{col}_day_of_week"]  = dt.dt.dayofweek
             df[f"{col}_is_weekend"]   = (dt.dt.dayofweek >= 5).astype(int)
-            df[f"{col}_week_of_year"] = dt.dt.isocalendar().week.astype(int)
+            df[f"{col}_week_of_year"] = dt.dt.isocalendar().week.astype("Int64")
             notes.append(f"{col}: extracted year, month, quarter, day, day_of_week, is_weekend, week_of_year")
         except Exception as e:
             notes.append(f"{col}: date feature extraction failed — {e}")
@@ -334,13 +354,14 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     preprocessing_log = []
     print(f"[Agent 3] Starting preprocessing: {df.shape[0]} rows × {df.shape[1]} cols")
 
-    df, notes = _coerce_types(df, schema_blueprint)
-    preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 1 — Type coercion done ({len(notes)} actions)")
-
+    # Clean semantic currency fields before generic numeric coercion.
     df, notes = _clean_currency_values(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    print(f"[Agent 3] Step 2 — Currency cleaning done ({len(notes)} columns)")
+    print(f"[Agent 3] Step 1 — Currency cleaning done ({len(notes)} columns)")
+
+    df, notes = _coerce_types(df, schema_blueprint)
+    preprocessing_log.extend(notes)
+    print(f"[Agent 3] Step 2 — Type coercion done ({len(notes)} actions)")
 
     df, notes = _standardize_text_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)

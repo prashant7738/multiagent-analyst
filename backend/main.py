@@ -14,6 +14,8 @@ class GraphState(TypedDict):
 
     # ── Agent 3 outputs ───────────────────────────────────────────────────────
     preprocessing_config: dict # runtime thresholds and scoring weights for preprocessing
+    preprocessing_profile: str # strict|balanced|lenient, or auto-selected profile
+    dataset_domain: str        # inferred dataset domain for profile selection
     cleaned_df: Any            # fully preprocessed DataFrame for Agent 4
     cleaned_csv_path: str      # exported cleaned dataset path
     scaling_params: dict       # {col: {min, max}} for Agent 4 inverse-transform

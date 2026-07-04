@@ -72,6 +72,8 @@ if __name__ == "__main__":
         "raw_profile": {},
         "schema_blueprint": {},
         "preprocessing_config": {},
+        "preprocessing_profile": "auto",
+        "dataset_domain": "",
         "_df_cache": None,
         "cleaned_df": None,
         "cleaned_csv_path": "",

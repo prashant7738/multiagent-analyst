@@ -12,29 +12,85 @@ NULL_STRINGS = {
     "not available", "not applicable", "nil", "#n/a", "nan ",
 }
 
-DEFAULT_PREPROCESSING_CONFIG = {
-    "currency_max_abs_value": 1_000_000_000,
-    "max_reasonable_tax_rate": 0.40,
-    "reconciliation_rel_tol": 0.02,
-    "reconciliation_abs_tol": 1.0,
-    "quality_weights": {
-        "remaining_null_pct": 0.50,
-        "validation_fail_pct": 0.40,
-        "duplicate_rate_pct": 0.10,
+PREPROCESSING_PROFILES = {
+    "strict": {
+        "currency_max_abs_value": 100_000_000,
+        "max_reasonable_tax_rate": 0.30,
+        "reconciliation_rel_tol": 0.01,
+        "reconciliation_abs_tol": 0.50,
+        "quality_weights": {
+            "remaining_null_pct": 0.55,
+            "validation_fail_pct": 0.35,
+            "duplicate_rate_pct": 0.10,
+        },
+    },
+    "balanced": {
+        "currency_max_abs_value": 1_000_000_000,
+        "max_reasonable_tax_rate": 0.40,
+        "reconciliation_rel_tol": 0.02,
+        "reconciliation_abs_tol": 1.0,
+        "quality_weights": {
+            "remaining_null_pct": 0.50,
+            "validation_fail_pct": 0.40,
+            "duplicate_rate_pct": 0.10,
+        },
+    },
+    "lenient": {
+        "currency_max_abs_value": 10_000_000_000,
+        "max_reasonable_tax_rate": 0.60,
+        "reconciliation_rel_tol": 0.05,
+        "reconciliation_abs_tol": 2.0,
+        "quality_weights": {
+            "remaining_null_pct": 0.40,
+            "validation_fail_pct": 0.30,
+            "duplicate_rate_pct": 0.30,
+        },
     },
 }
 
+DEFAULT_PROFILE = "balanced"
 
-def _build_preprocessing_config(state_config):
+
+def _detect_dataset_domain(schema_blueprint):
+    finance_name_hits = 0
+    finance_tag_hits = 0
+
+    finance_keywords = {
+        "amount", "revenue", "cost", "tax", "price", "discount", "sales", "profit", "margin", "invoice"
+    }
+
+    for col, meta in schema_blueprint.items():
+        col_lower = col.lower()
+        if any(kw in col_lower for kw in finance_keywords):
+            finance_name_hits += 1
+        if meta.get("semantic_tag") in ("currency", "percentage"):
+            finance_tag_hits += 1
+
+    if finance_name_hits >= 3 or finance_tag_hits >= 2:
+        return "finance_sales"
+    return "generic"
+
+
+def _build_preprocessing_config(state_config, requested_profile, schema_blueprint):
+    domain = _detect_dataset_domain(schema_blueprint)
+
+    if requested_profile in PREPROCESSING_PROFILES:
+        selected_profile = requested_profile
+    elif domain == "finance_sales":
+        selected_profile = "strict"
+    else:
+        selected_profile = DEFAULT_PROFILE
+
+    base_profile = PREPROCESSING_PROFILES[selected_profile]
     cfg = {
-        "currency_max_abs_value": DEFAULT_PREPROCESSING_CONFIG["currency_max_abs_value"],
-        "max_reasonable_tax_rate": DEFAULT_PREPROCESSING_CONFIG["max_reasonable_tax_rate"],
-        "reconciliation_rel_tol": DEFAULT_PREPROCESSING_CONFIG["reconciliation_rel_tol"],
-        "reconciliation_abs_tol": DEFAULT_PREPROCESSING_CONFIG["reconciliation_abs_tol"],
-        "quality_weights": DEFAULT_PREPROCESSING_CONFIG["quality_weights"].copy(),
+        "currency_max_abs_value": base_profile["currency_max_abs_value"],
+        "max_reasonable_tax_rate": base_profile["max_reasonable_tax_rate"],
+        "reconciliation_rel_tol": base_profile["reconciliation_rel_tol"],
+        "reconciliation_abs_tol": base_profile["reconciliation_abs_tol"],
+        "quality_weights": base_profile["quality_weights"].copy(),
     }
     if not isinstance(state_config, dict):
-        return cfg
+        return cfg, selected_profile, domain
 
     for key in [
         "currency_max_abs_value",
@@ -49,7 +105,7 @@ def _build_preprocessing_config(state_config):
     if isinstance(quality_weights, dict):
         cfg["quality_weights"].update(quality_weights)
 
-    return cfg
+    return cfg, selected_profile, domain
 
 
 def _normalize_missing_text(series):
@@ -569,7 +625,7 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     total_checks = max(validation_summary.get("checks", 0), 1)
     validation_fail_pct = round((validation_summary.get("failed_rows", 0) / total_checks) * 100, 2)
 
-    weights = config.get("quality_weights", DEFAULT_PREPROCESSING_CONFIG["quality_weights"])
+    weights = config.get("quality_weights", PREPROCESSING_PROFILES[DEFAULT_PROFILE]["quality_weights"])
     # Score is driven by post-hoc failures, not by number of executed steps.
     score = (
         100.0
@@ -633,13 +689,18 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         errors.append("Agent3: schema_blueprint is empty. Agent 2 failed.")
         return {**state, "errors": errors}
 
-    preprocessing_config = _build_preprocessing_config(state.get("preprocessing_config"))
+    preprocessing_config, selected_profile, dataset_domain = _build_preprocessing_config(
+        state.get("preprocessing_config"),
+        state.get("preprocessing_profile"),
+        schema_blueprint,
+    )
 
     df_raw = df.copy()
     preprocessing_log = []
     validation_summary = {"checks": 0, "failed_rows": 0}
 
     print(f"[Agent 3] Starting preprocessing: {df.shape[0]} rows x {df.shape[1]} cols")
+    print(f"[Agent 3] Profile selected: {selected_profile} (domain={dataset_domain})")
 
     # Step 1: currency cleanup + strict assertions.
     before_step = df.copy()
@@ -745,6 +806,8 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "scaling_params": scaling_params,
         "preprocessing_log": preprocessing_log,
         "preprocessing_config": preprocessing_config,
+        "preprocessing_profile": selected_profile,
+        "dataset_domain": dataset_domain,
         "data_quality": data_quality,
         "errors": errors,
     }

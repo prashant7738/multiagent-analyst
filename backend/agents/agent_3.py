@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from agents.agent_1 import GraphState
@@ -337,6 +338,17 @@ def _compute_quality_score(df_raw, df_clean):
     }
 
 
+def _export_cleaned_dataset(df, output_path="outputs/cleaned_data.csv"):
+    """Persist cleaned DataFrame to CSV and return (path, error)."""
+    try:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(output, index=False)
+        return str(output), None
+    except Exception as e:
+        return "", f"Failed to export cleaned dataset CSV: {e}"
+
+
 def agent3_preprocessor(state: GraphState) -> GraphState:
     errors = state.get("errors", [])
     schema_blueprint = state.get("schema_blueprint", {})
@@ -405,9 +417,18 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     )
     print(f"[Agent 3] Done → {df.shape[0]} rows × {df.shape[1]} cols | Remaining NaNs: {final_missing}")
 
+    cleaned_csv_path, export_error = _export_cleaned_dataset(df)
+    if export_error:
+        errors.append(f"Agent3: {export_error}")
+        preprocessing_log.append(f"CSV export failed: {export_error}")
+    else:
+        preprocessing_log.append(f"Cleaned CSV exported to {cleaned_csv_path}")
+        print(f"[Agent 3] Cleaned CSV exported → {cleaned_csv_path}")
+
     return {
         **state,
         "cleaned_df":        df,
+        "cleaned_csv_path":  cleaned_csv_path,
         "scaling_params":    scaling_params,
         "preprocessing_log": preprocessing_log,
         "data_quality":      data_quality,

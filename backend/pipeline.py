@@ -73,6 +73,7 @@ if __name__ == "__main__":
         "schema_blueprint": {},
         "_df_cache": None,
         "cleaned_df": None,
+        "cleaned_csv_path": "",
         "scaling_params": {},
         "preprocessing_log": [],
         "data_quality": {},

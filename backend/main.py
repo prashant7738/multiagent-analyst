@@ -14,6 +14,7 @@ class GraphState(TypedDict):
 
     # ── Agent 3 outputs ───────────────────────────────────────────────────────
     cleaned_df: Any            # fully preprocessed DataFrame for Agent 4
+    cleaned_csv_path: str      # exported cleaned dataset path
     scaling_params: dict       # {col: {min, max}} for Agent 4 inverse-transform
     preprocessing_log: list    # full audit trail of every preprocessing action
     data_quality: dict         # 0-100 quality score for Agent 5 and Agent 6

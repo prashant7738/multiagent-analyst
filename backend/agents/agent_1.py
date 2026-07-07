@@ -1,7 +1,46 @@
 # agents/agent_1  -- --- ----structural_profiler.py
+import csv
+from io import StringIO
+
 import pandas as pd
 import json
 from main import GraphState
+
+
+def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
+    """Read CSV files that mix comma- and semicolon-delimited rows."""
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as handle:
+        lines = [line.rstrip("\n") for line in handle]
+
+    if not lines:
+        return pd.DataFrame()
+
+    header = next(csv.reader([lines[0]], delimiter=",", quotechar='"'))
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(header)
+
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+
+        delimiter = ";" if line.count(";") > line.count(",") else ","
+        fields = next(csv.reader([line], delimiter=delimiter, quotechar='"'))
+
+        if len(fields) != len(header):
+            alternate = "," if delimiter == ";" else ";"
+            alt_fields = next(csv.reader([line], delimiter=alternate, quotechar='"'))
+            if len(alt_fields) == len(header):
+                fields = alt_fields
+            else:
+                raise ValueError(
+                    f"Unable to parse row with {len(fields)} fields (expected {len(header)}): {line[:120]}"
+                )
+
+        writer.writerow(fields)
+
+    buffer.seek(0)
+    return pd.read_csv(buffer, low_memory=False)
 
 def agent1_structural_profiler(state: GraphState) -> GraphState:
     """
@@ -12,7 +51,7 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
     errors = state.get("errors", [])
 
     try:
-        df = pd.read_csv(csv_path, low_memory=False)
+        df = _read_mixed_delimiter_csv(csv_path)
     except Exception as e:
         errors.append(f"Agent1: CSV load failed — {e}")
         return {**state, "errors": errors}

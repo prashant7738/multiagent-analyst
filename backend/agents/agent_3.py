@@ -760,7 +760,10 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
 
     raw_completeness = 1 - (df_raw.isna().sum().sum() / max(raw_total_cells, 1))
+    raw_missing_pct = round((1 - raw_completeness) * 100, 2)
     remaining_null_pct = round((df_clean.isna().sum().sum() / max(clean_total_cells, 1)) * 100, 2)
+    missing_penalty_pct = max(raw_missing_pct, remaining_null_pct)
+    imputation_burden_pct = max(0.0, raw_missing_pct - remaining_null_pct)
     duplicate_rate_pct = round((df_raw.duplicated().sum() / max(len(df_raw), 1)) * 100, 2)
 
     total_checks = max(validation_summary.get("checks", 0), 1)
@@ -770,7 +773,7 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     # Score is driven by post-hoc failures, not by number of executed steps.
     score = (
         100.0
-        - (weights.get("remaining_null_pct", 0.50) * remaining_null_pct)
+        - (weights.get("remaining_null_pct", 0.50) * missing_penalty_pct)
         - (weights.get("validation_fail_pct", 0.40) * validation_fail_pct)
         - (weights.get("duplicate_rate_pct", 0.10) * duplicate_rate_pct)
     )
@@ -783,7 +786,10 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     return {
         "overall_quality_score": max(0.0, min(100.0, round(score, 2))),
         "raw_completeness_pct": round(raw_completeness * 100, 2),
+        "raw_missing_pct": raw_missing_pct,
         "remaining_null_pct": remaining_null_pct,
+        "missing_penalty_pct": missing_penalty_pct,
+        "imputation_burden_pct": imputation_burden_pct,
         "duplicate_rate_pct": duplicate_rate_pct,
         "validation_fail_pct": validation_fail_pct,
         "null_pct_by_column": null_pct_by_column,
@@ -961,7 +967,9 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     data_quality = _compute_quality_score(df_raw, df, validation_summary, preprocessing_config)
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
-        f"(remaining_nulls={data_quality['remaining_null_pct']}%, "
+        f"(raw_missing={data_quality['raw_missing_pct']}%, "
+        f"remaining_nulls={data_quality['remaining_null_pct']}%, "
+        f"imputation_burden={data_quality['imputation_burden_pct']}%, "
         f"validation_fail={data_quality['validation_fail_pct']}%, "
         f"duplicates={data_quality['duplicate_rate_pct']}%)"
     )
@@ -976,6 +984,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"[Agent 3] Completed: rows={df_raw.shape[0]}->{df.shape[0]} "
         f"cols={df_raw.shape[1]}->{df.shape[1]} "
         f"quality={data_quality['overall_quality_score']}/100 "
+        f"raw_missing={data_quality['raw_missing_pct']}% "
         f"remaining_nulls={data_quality['remaining_null_pct']}%"
     )
 

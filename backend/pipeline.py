@@ -79,7 +79,7 @@ if __name__ == "__main__":
     pipeline = build_pipeline()
 
     initial_state: GraphState = {
-        "csv_path": "10000 Sales Records.csv",
+        "csv_path": "bank.csv",
         "raw_profile":           {},
         "schema_blueprint":      {},
         "_df_cache":             None,

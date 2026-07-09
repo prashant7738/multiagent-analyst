@@ -413,11 +413,56 @@ def _impute(df, schema_blueprint):
             continue
 
         strategy = meta.get("imputation_strategy", "none")
+        null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
+        null_action = null_policy.get("action")
+        null_reason = null_policy.get("reason", "")
         missing_count = int(df[col].isna().sum())
         if missing_count == 0:
             continue
 
         try:
+            if null_action == "flag_only":
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: {missing_count} NaNs flagged only; no fill applied{reason_text}")
+                continue
+            if null_action == "drop_rows":
+                drop_mask = drop_mask | df[col].isna()
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: {missing_count} rows flagged for drop{reason_text}")
+                continue
+            if null_action == "impute_mean":
+                fill_value = df[col].mean()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: mean imputation skipped (all values missing/non-numeric)")
+                    continue
+                df[col] = df[col].fillna(fill_value)
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with mean ({fill_value:.4f}){reason_text}")
+                continue
+            if null_action == "impute_median":
+                fill_value = df[col].median()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: median imputation skipped (all values missing/non-numeric)")
+                    continue
+                df[col] = df[col].fillna(fill_value)
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with median ({fill_value:.4f}){reason_text}")
+                continue
+            if null_action == "impute_mode":
+                mode_val = df[col].mode()
+                if len(mode_val) > 0:
+                    df[col] = df[col].fillna(mode_val[0])
+                    reason_text = f" ({null_reason})" if null_reason else ""
+                    notes.append(f"{col}: imputed {missing_count} NaNs with mode ({mode_val[0]}){reason_text}")
+                else:
+                    notes.append(f"{col}: mode imputation skipped (no valid mode)")
+                continue
+            if null_action == "impute_unknown_label":
+                df[col] = df[col].fillna("Unknown")
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with 'Unknown'{reason_text}")
+                continue
+
             if strategy == "mean":
                 fill_value = df[col].mean()
                 if pd.isna(fill_value):

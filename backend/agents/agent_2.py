@@ -19,6 +19,11 @@ For each column output:
     "is_identifier": true|false,
     "scaling_allowed": true|false,
     "imputation_strategy": "mean|median|mode|unknown_label|drop|none",
+        "null_policy": {
+            "action": "flag_only|drop_rows|impute_mean|impute_median|impute_mode|impute_unknown_label|none",
+            "threshold_pct": number,
+            "reason": "brief reason"
+        },
     "notes": "brief reason"
   }
 }
@@ -27,7 +32,9 @@ Rules:
 - Currency/financial columns: scaling_allowed=false, imputation_strategy=median
 - Identifier columns: is_identifier=true, imputation_strategy=drop
 - Datetime columns: scaling_allowed=false, imputation_strategy=none
-- Categorical with <20 unique: semantic_tag=categorical_label, imputation_strategy=mode"""
+- Categorical with <20 unique: semantic_tag=categorical_label, imputation_strategy=mode
+- null_policy must explain what to do when missingness is low, moderate, or high.
+- Prefer flag_only for sparse or ambiguous columns, drop_rows for identifiers, impute_mode for low-cardinality categories, impute_median for numeric/currency, and none for datetime columns when imputation would distort time semantics."""
 
 
 def _infer_intended_types(df: pd.DataFrame, raw_profile: dict) -> dict:
@@ -77,6 +84,105 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict)
     return json.dumps(col_info, indent=2)
 
 
+def _derive_null_policy(profile: dict, meta: dict) -> dict:
+    missing_rate = float(profile.get("missing_rate_pct", 0.0))
+    unique_count = int(profile.get("unique_count", 0) or 0)
+    intended_type = str(meta.get("intended_type", "string"))
+    semantic_tag = str(meta.get("semantic_tag", "unknown"))
+    is_identifier = bool(meta.get("is_identifier", False))
+
+    if missing_rate <= 0:
+        return {
+            "action": "none",
+            "threshold_pct": 0.0,
+            "reason": "no missing values detected",
+        }
+
+    if is_identifier:
+        return {
+            "action": "drop_rows",
+            "threshold_pct": 0.0,
+            "reason": "identifier columns should not be imputed because missing keys break row identity",
+        }
+
+    if semantic_tag == "datetime" or intended_type == "datetime":
+        if missing_rate >= 25.0:
+            return {
+                "action": "flag_only",
+                "threshold_pct": 25.0,
+                "reason": "datetime gaps can distort time-based analysis when missingness is moderate or high",
+            }
+        return {
+            "action": "none",
+            "threshold_pct": 25.0,
+            "reason": "small datetime gaps are left unchanged to avoid inventing timestamps",
+        }
+
+    if missing_rate >= 60.0:
+        return {
+            "action": "flag_only",
+            "threshold_pct": 60.0,
+            "reason": "column is too sparse to impute reliably",
+        }
+
+    if semantic_tag in {"categorical_label", "text"} or intended_type == "string":
+        if unique_count and unique_count < 20:
+            return {
+                "action": "impute_mode",
+                "threshold_pct": 20.0,
+                "reason": "low-cardinality categorical columns usually tolerate mode imputation",
+            }
+        if missing_rate >= 30.0:
+            return {
+                "action": "flag_only",
+                "threshold_pct": 30.0,
+                "reason": "high missingness in free text or high-cardinality labels is better flagged than imputed",
+            }
+        return {
+            "action": "impute_mode",
+            "threshold_pct": 20.0,
+            "reason": "categorical/text columns with modest missingness can use mode as a conservative fill",
+        }
+
+    if semantic_tag in {"currency", "percentage", "count"} or intended_type in {"float", "int"}:
+        if missing_rate >= 35.0:
+            return {
+                "action": "flag_only",
+                "threshold_pct": 35.0,
+                "reason": "numeric columns with heavy missingness should be reviewed before any synthetic fill",
+            }
+        return {
+            "action": "impute_median",
+            "threshold_pct": 35.0,
+            "reason": "median is robust for numeric fields with limited missingness",
+        }
+
+    return {
+        "action": "flag_only",
+        "threshold_pct": 20.0,
+        "reason": "column semantics are unclear, so manual review is safer than automatic imputation",
+    }
+
+
+def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict) -> dict:
+    for col in df.columns:
+        profile = raw_profile.get("columns", {}).get(col, {})
+        meta = schema_blueprint.setdefault(col, {})
+
+        if not isinstance(meta.get("null_policy"), dict):
+            meta["null_policy"] = _derive_null_policy(profile, meta)
+
+        null_policy = meta["null_policy"]
+        null_policy.setdefault("action", "flag_only")
+        null_policy.setdefault("threshold_pct", float(profile.get("missing_rate_pct", 0.0)))
+        null_policy.setdefault("reason", "missingness policy inferred from column semantics")
+
+        if "notes" not in meta or not meta["notes"]:
+            meta["notes"] = null_policy["reason"]
+
+    return schema_blueprint
+
+
 def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
     """Used when LLM call fails. Basic but functional."""
     def _normalize_intended_type(t: str) -> str:
@@ -93,6 +199,11 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
             "is_identifier": False,
             "scaling_allowed": inferred_types[col] == "numeric",
             "imputation_strategy": "median" if inferred_types[col] == "numeric" else "mode",
+            "null_policy": {
+                "action": "impute_median" if inferred_types[col] == "numeric" else "flag_only",
+                "threshold_pct": 20.0,
+                "reason": "fallback policy inferred without LLM semantics",
+            },
             "analysis_allowed": True,
             "notes": "fallback — LLM call failed"
         }
@@ -102,6 +213,7 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
 
 def _apply_missingness_policy(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict) -> dict:
     excluded = []
+    schema_blueprint = _enrich_missingness_metadata(df, raw_profile, schema_blueprint)
     for col in df.columns:
         profile = raw_profile.get("columns", {}).get(col, {})
         missing_rate = float(profile.get("missing_rate_pct", 0.0))
@@ -120,12 +232,14 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
     print("[Agent 2] Semantic tags by column:")
     for col in df.columns:
         meta = schema_blueprint.get(col, {})
+        null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
         print(
             f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
             f"intended_type={meta.get('intended_type', 'unknown')}, "
             f"imputation={meta.get('imputation_strategy', 'unknown')}, "
             f"identifier={meta.get('is_identifier', False)}, "
-            f"analysis_allowed={meta.get('analysis_allowed', True)}"
+            f"analysis_allowed={meta.get('analysis_allowed', True)}, "
+            f"null_action={null_policy.get('action', 'none')}"
         )
 
 

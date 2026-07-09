@@ -98,6 +98,18 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
     }
 
 
+def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
+    print("[Agent 2] Semantic tags by column:")
+    for col in df.columns:
+        meta = schema_blueprint.get(col, {})
+        print(
+            f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
+            f"intended_type={meta.get('intended_type', 'unknown')}, "
+            f"imputation={meta.get('imputation_strategy', 'unknown')}, "
+            f"identifier={meta.get('is_identifier', False)}"
+        )
+
+
 def agent2_semantic_tagger(state: dict) -> dict:
     errors = state.get("errors", [])
     raw_profile = state.get("raw_profile", {})
@@ -148,13 +160,16 @@ def agent2_semantic_tagger(state: dict) -> dict:
             schema_blueprint = json.loads(raw_text)
 
         print(f"[Agent 2] Blueprint built for {len(schema_blueprint)} columns")
+        _print_semantic_summary(df, schema_blueprint)
 
     except json.JSONDecodeError as e:
         errors.append(f"Agent2: LLM returned invalid JSON — {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
+        _print_semantic_summary(df, schema_blueprint)
     except Exception as e:
         errors.append(f"Agent2: Groq call failed — {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
+        _print_semantic_summary(df, schema_blueprint)
 
     return {
         **state,

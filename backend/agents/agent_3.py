@@ -987,6 +987,15 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"raw_missing={data_quality['raw_missing_pct']}% "
         f"remaining_nulls={data_quality['remaining_null_pct']}%"
     )
+    print(
+        f"[Agent 3] Cleaning summary: deduped={actual_duplicates}, "
+        f"scaled={len(scaling_params)}, added_cols={df.shape[1] - df_raw.shape[1]}, "
+        f"removed_rows={data_quality['rows_removed']}"
+    )
+    print(
+        "[Agent 3] Note: the cleaned dataset is normalized and exported to outputs/cleaned_data.csv; "
+        "if the row count stays the same, that means there were no exact duplicates or rows to drop."
+    )
 
     cleaned_csv_path, export_error = _export_cleaned_dataset(df)
     if export_error:

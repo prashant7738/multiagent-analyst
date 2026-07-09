@@ -1,12 +1,29 @@
 # agents/agent2_semantic_tagger.py
+import re
+import os
 import pandas as pd
 import json
 from groq import Groq
 
-client = Groq()  # reads GROQ_API_KEY from env
+_GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=_GROQ_API_KEY) if _GROQ_API_KEY else None  # optional; heuristics still work without LLM
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
+
+_NAME_HINTS = [
+    ("identifier", {"id", "identifier", "uuid", "key", "code"}),
+    ("currency", {"sales", "revenue", "profit", "cost", "price", "amount", "budget", "tax", "discount", "total"}),
+    ("percentage", {"percent", "pct", "rate", "margin", "ratio"}),
+    ("count", {"count", "qty", "quantity", "units", "number", "num"}),
+    ("geographic", {"city", "state", "country", "region", "zip", "postal", "latitude", "longitude"}),
+    ("categorical_label", {"status", "segment", "category", "type", "mode", "brand", "channel", "department"}),
+    ("text", {"name", "email", "address", "description", "notes", "message", "password"}),
+]
+
+
+def _name_tokens(column_name: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", column_name.lower()))
 
 SEMANTIC_SYSTEM_PROMPT = """You are a senior data analyst. Given column names, inferred types, and sample rows from a CSV,
 produce a JSON schema blueprint. Return ONLY valid JSON, no markdown, no explanation, no backticks.
@@ -82,6 +99,81 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict)
             "samples": profile["sample_values"][:3],
         })
     return json.dumps(col_info, indent=2)
+
+
+def _infer_semantic_tag_from_metadata(column_name: str, profile: dict, inferred_type: str) -> str:
+    """Infer a semantic tag from Agent 1 metadata and the column name."""
+    name = column_name.lower()
+    tokens = _name_tokens(column_name)
+    samples = [str(value).strip().lower() for value in profile.get("sample_values", []) if value is not None]
+
+    if inferred_type == "datetime" or bool(tokens & {"date", "time", "timestamp", "created", "updated"}):
+        return "datetime"
+    if inferred_type == "numeric":
+        if bool(tokens & {"sales", "revenue", "profit", "cost", "price", "amount", "budget", "tax", "discount", "total"}):
+            return "currency"
+        if bool(tokens & {"percent", "pct", "rate", "margin", "ratio"}):
+            return "percentage"
+        if bool(tokens & {"count", "qty", "quantity", "units", "number", "num"}):
+            return "count"
+
+    for tag, keywords in _NAME_HINTS:
+        if tokens & keywords:
+            if tag == "text" and inferred_type == "string":
+                return tag
+            if tag != "text":
+                return tag
+
+    if any("@" in sample for sample in samples):
+        return "text"
+    if any(sample[:4].isdigit() and "-" in sample for sample in samples):
+        return "datetime"
+
+    if inferred_type == "string":
+        return "categorical_label" if int(profile.get("unique_count", 0) or 0) < 20 else "text"
+
+    return "unknown"
+
+
+def _assess_column_suitability(
+    column_name: str,
+    profile: dict,
+    semantic_tag: str,
+    intended_type: str,
+    total_rows: int,
+) -> dict:
+    """Assess whether a column is suitable for analysis using metadata from Agent 1."""
+    missing_rate = float(profile.get("missing_rate_pct", 0.0))
+    unique_count = int(profile.get("unique_count", 0) or 0)
+    duplicate_pressure_pct = round((1 - (unique_count / max(total_rows, 1))) * 100, 2)
+
+    if semantic_tag == "identifier":
+        is_suitable = missing_rate <= 5.0 and duplicate_pressure_pct <= 5.0
+        reason_category = "identifier_duplicates" if duplicate_pressure_pct > 5.0 else "identifier_clean"
+    elif semantic_tag in {"categorical_label", "geographic", "text"}:
+        is_suitable = missing_rate <= 30.0 and unique_count > 0
+        reason_category = "low_cardinality_category" if unique_count < 20 else "text_or_label"
+    elif semantic_tag == "datetime":
+        is_suitable = missing_rate <= 25.0
+        reason_category = "datetime_missingness"
+    elif semantic_tag in {"currency", "percentage", "count"} or intended_type in {"float", "int"}:
+        is_suitable = missing_rate <= 35.0
+        reason_category = "numeric_missingness"
+    else:
+        is_suitable = missing_rate <= 20.0 and duplicate_pressure_pct <= 95.0
+        reason_category = "unknown_semantics"
+
+    if not is_suitable and missing_rate > 60.0:
+        reason_category = "too_sparse"
+
+    return {
+        "column_name": column_name,
+        "is_suitable": is_suitable,
+        "missing_rate_pct": round(missing_rate, 2),
+        "duplicate_pressure_pct": duplicate_pressure_pct,
+        "unique_count": unique_count,
+        "reason_category": reason_category,
+    }
 
 
 def _derive_null_policy(profile: dict, meta: dict) -> dict:
@@ -164,10 +256,31 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
     }
 
 
-def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict) -> dict:
+def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict, inferred_types: dict) -> dict:
+    total_rows = int(raw_profile.get("shape", {}).get("rows", len(df)) or len(df))
     for col in df.columns:
         profile = raw_profile.get("columns", {}).get(col, {})
         meta = schema_blueprint.setdefault(col, {})
+
+        inferred_type = inferred_types.get(col, meta.get("intended_type", "string"))
+
+        if meta.get("semantic_tag", "unknown") in {None, "", "unknown"}:
+            meta["semantic_tag"] = _infer_semantic_tag_from_metadata(col, profile, inferred_type)
+
+        if not meta.get("intended_type"):
+            if inferred_type == "numeric":
+                meta["intended_type"] = "float"
+            else:
+                meta["intended_type"] = inferred_type
+
+        assessment = _assess_column_suitability(
+            column_name=col,
+            profile=profile,
+            semantic_tag=str(meta.get("semantic_tag", "unknown")),
+            intended_type=str(meta.get("intended_type", "string")),
+            total_rows=total_rows,
+        )
+        meta["column_assessment"] = assessment
 
         if not isinstance(meta.get("null_policy"), dict):
             meta["null_policy"] = _derive_null_policy(profile, meta)
@@ -211,14 +324,21 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
     }
 
 
-def _apply_missingness_policy(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict) -> dict:
+def _apply_missingness_policy(
+    df: pd.DataFrame,
+    raw_profile: dict,
+    schema_blueprint: dict,
+    inferred_types: dict | None = None,
+) -> dict:
     excluded = []
-    schema_blueprint = _enrich_missingness_metadata(df, raw_profile, schema_blueprint)
+    schema_blueprint = _enrich_missingness_metadata(df, raw_profile, schema_blueprint, inferred_types or {})
     for col in df.columns:
         profile = raw_profile.get("columns", {}).get(col, {})
         missing_rate = float(profile.get("missing_rate_pct", 0.0))
-        analysis_allowed = missing_rate <= MISSINGNESS_ANALYSIS_THRESHOLD_PCT
         meta = schema_blueprint.setdefault(col, {})
+
+        assessment = meta.get("column_assessment", {}) if isinstance(meta.get("column_assessment"), dict) else {}
+        analysis_allowed = bool(assessment.get("is_suitable", True)) and missing_rate <= MISSINGNESS_ANALYSIS_THRESHOLD_PCT
         meta["analysis_allowed"] = analysis_allowed
         if not analysis_allowed:
             excluded.append((col, missing_rate))
@@ -233,13 +353,16 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
     for col in df.columns:
         meta = schema_blueprint.get(col, {})
         null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
+        assessment = meta.get("column_assessment", {}) if isinstance(meta.get("column_assessment"), dict) else {}
         print(
             f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
             f"intended_type={meta.get('intended_type', 'unknown')}, "
             f"imputation={meta.get('imputation_strategy', 'unknown')}, "
             f"identifier={meta.get('is_identifier', False)}, "
             f"analysis_allowed={meta.get('analysis_allowed', True)}, "
-            f"null_action={null_policy.get('action', 'none')}"
+            f"null_action={null_policy.get('action', 'none')}, "
+            f"suitable={assessment.get('is_suitable', True)}, "
+            f"reason={assessment.get('reason_category', 'n/a')}"
         )
 
 
@@ -292,7 +415,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
         else:
             schema_blueprint = json.loads(raw_text)
 
-        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
 
         print(f"[Agent 2] Blueprint built for {len(schema_blueprint)} columns")
         _print_semantic_summary(df, schema_blueprint)
@@ -301,17 +424,17 @@ def agent2_semantic_tagger(state: dict) -> dict:
             print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
 
     except json.JSONDecodeError as e:
-        errors.append(f"Agent2: LLM returned invalid JSON — {e}")
+        print(f"[Agent 2] LLM returned invalid JSON; using metadata heuristics instead: {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
-        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
             print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
     except Exception as e:
-        errors.append(f"Agent2: Groq call failed — {e}")
+        print(f"[Agent 2] Groq call failed; using metadata heuristics instead: {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
-        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)

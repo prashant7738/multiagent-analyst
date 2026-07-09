@@ -52,6 +52,8 @@ def _numeric_cols(df, schema_blueprint):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
             continue
+        if pd.api.types.is_bool_dtype(df[col]):
+            continue
         if pd.api.types.is_numeric_dtype(df[col]):
             cols.append(col)
     return cols

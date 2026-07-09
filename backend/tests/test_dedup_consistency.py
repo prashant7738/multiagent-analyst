@@ -93,6 +93,23 @@ class TestNumericColumnFiltering(unittest.TestCase):
         self.assertEqual(agent4_numeric_cols(df, schema_blueprint), expected)
         self.assertEqual(agent5_numeric_cols(df, schema_blueprint), expected)
 
+    def test_analysis_helpers_exclude_boolean_columns_from_numeric_selection(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "is_active": [True, False, True],
+                "score": [1.0, 2.0, 3.0],
+            }
+        )
+        schema_blueprint = {
+            "is_active": {"is_identifier": False, "semantic_tag": "unknown"},
+            "score": {"is_identifier": False, "semantic_tag": "unknown"},
+        }
+
+        self.assertEqual(agent4_numeric_cols(df, schema_blueprint), ["score"])
+        self.assertEqual(agent5_numeric_cols(df, schema_blueprint), ["score"])
+
 
 class TestAgent2SuitabilityMetadata(unittest.TestCase):
     def test_agent2_infers_semantic_tag_from_column_name_and_metadata(self):

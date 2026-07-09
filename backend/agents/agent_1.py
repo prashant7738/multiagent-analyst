@@ -7,10 +7,30 @@ import json
 from main import GraphState
 
 
+def _read_csv_lines(csv_path: str) -> list[str]:
+    """Read CSV text using a small set of common encodings."""
+    encodings = ("utf-8-sig", "cp1252", "latin-1")
+
+    last_error = None
+    for encoding in encodings:
+        try:
+            with open(csv_path, "r", encoding=encoding, newline="") as handle:
+                return [line.rstrip("\n") for line in handle]
+        except UnicodeDecodeError as error:
+            last_error = error
+
+    raise UnicodeDecodeError(
+        last_error.encoding if last_error else "utf-8",
+        last_error.object if last_error else b"",
+        last_error.start if last_error else 0,
+        last_error.end if last_error else 0,
+        f"Unable to decode CSV using {', '.join(encodings)}"
+    )
+
+
 def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
     """Read CSV files that mix comma- and semicolon-delimited rows."""
-    with open(csv_path, "r", encoding="utf-8-sig", newline="") as handle:
-        lines = [line.rstrip("\n") for line in handle]
+    lines = _read_csv_lines(csv_path)
 
     if not lines:
         return pd.DataFrame()

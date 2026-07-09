@@ -413,11 +413,56 @@ def _impute(df, schema_blueprint):
             continue
 
         strategy = meta.get("imputation_strategy", "none")
+        null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
+        null_action = null_policy.get("action")
+        null_reason = null_policy.get("reason", "")
         missing_count = int(df[col].isna().sum())
         if missing_count == 0:
             continue
 
         try:
+            if null_action == "flag_only":
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: {missing_count} NaNs flagged only; no fill applied{reason_text}")
+                continue
+            if null_action == "drop_rows":
+                drop_mask = drop_mask | df[col].isna()
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: {missing_count} rows flagged for drop{reason_text}")
+                continue
+            if null_action == "impute_mean":
+                fill_value = df[col].mean()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: mean imputation skipped (all values missing/non-numeric)")
+                    continue
+                df[col] = df[col].fillna(fill_value)
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with mean ({fill_value:.4f}){reason_text}")
+                continue
+            if null_action == "impute_median":
+                fill_value = df[col].median()
+                if pd.isna(fill_value):
+                    notes.append(f"{col}: median imputation skipped (all values missing/non-numeric)")
+                    continue
+                df[col] = df[col].fillna(fill_value)
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with median ({fill_value:.4f}){reason_text}")
+                continue
+            if null_action == "impute_mode":
+                mode_val = df[col].mode()
+                if len(mode_val) > 0:
+                    df[col] = df[col].fillna(mode_val[0])
+                    reason_text = f" ({null_reason})" if null_reason else ""
+                    notes.append(f"{col}: imputed {missing_count} NaNs with mode ({mode_val[0]}){reason_text}")
+                else:
+                    notes.append(f"{col}: mode imputation skipped (no valid mode)")
+                continue
+            if null_action == "impute_unknown_label":
+                df[col] = df[col].fillna("Unknown")
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: imputed {missing_count} NaNs with 'Unknown'{reason_text}")
+                continue
+
             if strategy == "mean":
                 fill_value = df[col].mean()
                 if pd.isna(fill_value):
@@ -760,7 +805,10 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
 
     raw_completeness = 1 - (df_raw.isna().sum().sum() / max(raw_total_cells, 1))
+    raw_missing_pct = round((1 - raw_completeness) * 100, 2)
     remaining_null_pct = round((df_clean.isna().sum().sum() / max(clean_total_cells, 1)) * 100, 2)
+    missing_penalty_pct = max(raw_missing_pct, remaining_null_pct)
+    imputation_burden_pct = max(0.0, raw_missing_pct - remaining_null_pct)
     duplicate_rate_pct = round((df_raw.duplicated().sum() / max(len(df_raw), 1)) * 100, 2)
 
     total_checks = max(validation_summary.get("checks", 0), 1)
@@ -770,7 +818,7 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     # Score is driven by post-hoc failures, not by number of executed steps.
     score = (
         100.0
-        - (weights.get("remaining_null_pct", 0.50) * remaining_null_pct)
+        - (weights.get("remaining_null_pct", 0.50) * missing_penalty_pct)
         - (weights.get("validation_fail_pct", 0.40) * validation_fail_pct)
         - (weights.get("duplicate_rate_pct", 0.10) * duplicate_rate_pct)
     )
@@ -783,7 +831,10 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     return {
         "overall_quality_score": max(0.0, min(100.0, round(score, 2))),
         "raw_completeness_pct": round(raw_completeness * 100, 2),
+        "raw_missing_pct": raw_missing_pct,
         "remaining_null_pct": remaining_null_pct,
+        "missing_penalty_pct": missing_penalty_pct,
+        "imputation_burden_pct": imputation_burden_pct,
         "duplicate_rate_pct": duplicate_rate_pct,
         "validation_fail_pct": validation_fail_pct,
         "null_pct_by_column": null_pct_by_column,
@@ -961,7 +1012,9 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     data_quality = _compute_quality_score(df_raw, df, validation_summary, preprocessing_config)
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
-        f"(remaining_nulls={data_quality['remaining_null_pct']}%, "
+        f"(raw_missing={data_quality['raw_missing_pct']}%, "
+        f"remaining_nulls={data_quality['remaining_null_pct']}%, "
+        f"imputation_burden={data_quality['imputation_burden_pct']}%, "
         f"validation_fail={data_quality['validation_fail_pct']}%, "
         f"duplicates={data_quality['duplicate_rate_pct']}%)"
     )
@@ -976,7 +1029,17 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"[Agent 3] Completed: rows={df_raw.shape[0]}->{df.shape[0]} "
         f"cols={df_raw.shape[1]}->{df.shape[1]} "
         f"quality={data_quality['overall_quality_score']}/100 "
+        f"raw_missing={data_quality['raw_missing_pct']}% "
         f"remaining_nulls={data_quality['remaining_null_pct']}%"
+    )
+    print(
+        f"[Agent 3] Cleaning summary: deduped={actual_duplicates}, "
+        f"scaled={len(scaling_params)}, added_cols={df.shape[1] - df_raw.shape[1]}, "
+        f"removed_rows={data_quality['rows_removed']}"
+    )
+    print(
+        "[Agent 3] Note: the cleaned dataset is normalized and exported to outputs/cleaned_data.csv; "
+        "if the row count stays the same, that means there were no exact duplicates or rows to drop."
     )
 
     cleaned_csv_path, export_error = _export_cleaned_dataset(df)

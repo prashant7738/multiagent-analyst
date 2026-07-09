@@ -11,6 +11,8 @@ EPSILON              = 0.05   # tolerance for floating point comparisons
 
 # ── filter out internal validation columns (same as Agent 4) ──
 _VALIDATION_SUFFIXES = ("_parse_failed", "_range_failed")
+_BACKUP_SUFFIXES = ("_raw", "_scaled")
+ANOMALY_Z_THRESHOLD = 3.5
 
 def _numeric_cols(df, schema_blueprint):
     """Return numeric columns, excluding validation suffixes and identifiers/datetimes.
@@ -20,6 +22,8 @@ def _numeric_cols(df, schema_blueprint):
     cols = []
     for col in df.columns:
         if col.endswith(_VALIDATION_SUFFIXES):
+            continue
+        if col.endswith(_BACKUP_SUFFIXES):
             continue
         if any(col.endswith(s) for s in skip_suffixes):
             continue
@@ -410,7 +414,7 @@ def _check_anomalies(df, stats, evidence_log, failures, warnings):
         evidence_log.append("PASS — no anomalies to validate")
         return passed, total
 
-    Z_THRESHOLD = 2.5
+    Z_THRESHOLD = ANOMALY_Z_THRESHOLD
 
     for col, data in anomalies.items():
         if col not in df.columns:

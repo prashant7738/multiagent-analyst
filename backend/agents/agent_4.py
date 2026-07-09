@@ -34,6 +34,8 @@ def _save(fig, name):
 
 # ── filter out internal validation columns ──
 _VALIDATION_SUFFIXES = ("_parse_failed", "_range_failed")
+_BACKUP_SUFFIXES = ("_raw", "_scaled")
+ANOMALY_Z_THRESHOLD = 3.5
 
 def _numeric_cols(df, schema_blueprint):
     """Return numeric columns, excluding validation suffixes and identifiers/datetimes."""
@@ -41,7 +43,11 @@ def _numeric_cols(df, schema_blueprint):
     for col in df.columns:
         if col.endswith(_VALIDATION_SUFFIXES):
             continue
+        if col.endswith(_BACKUP_SUFFIXES):
+            continue
         meta = schema_blueprint.get(col, {})
+        if meta.get("analysis_allowed") is False:
+            continue
         if meta.get("is_identifier"):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
@@ -57,6 +63,8 @@ def _categorical_cols(df, schema_blueprint):
         if col.endswith(_VALIDATION_SUFFIXES):
             continue
         meta = schema_blueprint.get(col, {})
+        if meta.get("analysis_allowed") is False:
+            continue
         if meta.get("is_identifier"):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
@@ -367,8 +375,9 @@ def _seasonality(df, schema_blueprint):
 # 6 — ANOMALY DETECTION (Z-score)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _detect_anomalies(df, schema_blueprint, z_threshold=2.5):
+def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
     result = {}
+    all_anomaly_indices = set()
     for col in _numeric_cols(df, schema_blueprint):
         s = df[col].dropna()
         if len(s) < 4:
@@ -380,6 +389,7 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=2.5):
         anomaly_mask = z_scores.abs() > z_threshold
         anomaly_indices = df.index[anomaly_mask].tolist()
         if anomaly_indices:
+            all_anomaly_indices.update(anomaly_indices)
             result[col] = {
                 "count":           len(anomaly_indices),
                 "z_threshold":     z_threshold,
@@ -388,7 +398,14 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=2.5):
                 "col_mean":        round(float(mean), 4),
                 "col_std":         round(float(std), 4),
             }
-    return result
+    summary = {
+        "z_threshold": z_threshold,
+        "flagged_columns": len(result),
+        "total_flagged_values": int(sum(v["count"] for v in result.values())),
+        "unique_flagged_rows": int(len(all_anomaly_indices)),
+        "unique_flagged_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
+    }
+    return result, summary
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -647,18 +664,31 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     stats["growth_rates"], paths = _growth_rates(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 3 — Growth rates done ({len(paths)} charts)")
+    if stats["growth_rates"] or paths:
+        print(f"[Agent 4] Step 3 — Growth rates done ({len(paths)} charts)")
+    else:
+        print("[Agent 4] Step 3 — Growth rates skipped (no revenue/time axis)")
 
     stats["top_bottom"], paths = _top_bottom_rankings(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 4 — Rankings done ({len(paths)} charts)")
+    if stats["top_bottom"] or paths:
+        print(f"[Agent 4] Step 4 — Rankings done ({len(paths)} charts)")
+    else:
+        print("[Agent 4] Step 4 — Rankings skipped (no revenue/category pairing)")
 
     stats["seasonality"], paths = _seasonality(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 5 — Seasonality done ({len(paths)} charts)")
+    if stats["seasonality"] or paths:
+        print(f"[Agent 4] Step 5 — Seasonality done ({len(paths)} charts)")
+    else:
+        print("[Agent 4] Step 5 — Seasonality skipped (no time axis)")
 
-    stats["anomalies"] = _detect_anomalies(df, schema_blueprint)
-    print(f"[Agent 4] Step 6 — Anomalies: {sum(v['count'] for v in stats['anomalies'].values())} flagged")
+    stats["anomalies"], anomaly_summary = _detect_anomalies(df, schema_blueprint)
+    stats["anomaly_summary"] = anomaly_summary
+    print(
+        f"[Agent 4] Step 6 — Anomalies: {anomaly_summary['unique_flagged_rows']} unique rows "
+        f"({anomaly_summary['unique_flagged_row_pct']}%) across {anomaly_summary['flagged_columns']} columns"
+    )
 
     stats["distributions"], paths = _category_distributions(df, schema_blueprint)
     all_chart_paths.extend(paths)
@@ -666,7 +696,10 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     stats["regression"], paths = _regression_trends(df, schema_blueprint)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(paths)} charts)")
+    if stats["regression"] or paths:
+        print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(paths)} charts)")
+    else:
+        print("[Agent 4] Step 8 — Regression skipped (no time axis)")
 
     paths = _distribution_charts(df, schema_blueprint)
     all_chart_paths.extend(paths)
@@ -674,7 +707,10 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     paths = _derived_metrics_charts(df)
     all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(paths)} charts)")
+    if paths:
+        print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(paths)} charts)")
+    else:
+        print("[Agent 4] Step 10 — Derived metrics skipped (no derived metrics)")
 
     print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")
 

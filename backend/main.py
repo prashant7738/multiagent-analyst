@@ -32,6 +32,7 @@ class GraphState(TypedDict):
 
     # ── Agent 6 outputs (to be filled) ───────────────────────────────────────
     final_report_path: str
+    
 
     # ── shared ────────────────────────────────────────────────────────────────
     errors: list

@@ -7,6 +7,7 @@ from agents.agent_2 import agent2_semantic_tagger
 from agents.agent_3 import agent3_preprocessor
 from agents.agent_4 import agent4_analysis
 from agents.agent_5 import agent5_validator
+from agents.agent_6 import agent6_report_generator
 
 
 def should_continue_after_agent1(state: GraphState) -> str:
@@ -45,7 +46,7 @@ def should_continue_after_agent5(state: GraphState) -> str:
     validation = state.get("validation_result", {})
     if not validation.get("passed", False):
         return "end"   # halt — bad report won't be generated
-    return "end"       # Agent 6 replaces this second "end"
+    return "agent6"       # proceed to Agent 6
 
 
 def build_pipeline() -> StateGraph:
@@ -56,6 +57,7 @@ def build_pipeline() -> StateGraph:
     graph.add_node("agent3", agent3_preprocessor)
     graph.add_node("agent4", agent4_analysis)
     graph.add_node("agent5", agent5_validator)
+    graph.add_node("agent6", agent6_report_generator)
 
     graph.set_entry_point("agent1")
 
@@ -68,7 +70,8 @@ def build_pipeline() -> StateGraph:
     graph.add_conditional_edges("agent4", should_continue_after_agent4,
                                 {"agent5": "agent5", "end": END})
     graph.add_conditional_edges("agent5", should_continue_after_agent5,
-                                {"end": END})
+                                {"agent6": "agent6", "end": END})
+    graph.add_edge("agent6", END)
 
     return graph.compile()
 
@@ -121,8 +124,14 @@ if __name__ == "__main__":
             print(f"  ⚠ {w}")
 
     print("\n── Evidence Log ──")
-    for entry in vr.get("evidence_log", []):
+    evidence_log = vr.get("evidence_log", [])
+    print(f"  Total entries: {len(evidence_log)}")
+    preview_count = 20
+    for entry in evidence_log[:preview_count]:
         print(f"  {entry}")
+    remaining = len(evidence_log) - preview_count
+    if remaining > 0:
+        print(f"  ... (remaining {remaining} evidence entries omitted)")
 
     if final_state["errors"]:
         print("\n── Pipeline Errors ──")

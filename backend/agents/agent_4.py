@@ -46,6 +46,8 @@ def _numeric_cols(df, schema_blueprint):
         if col.endswith(_BACKUP_SUFFIXES):
             continue
         meta = schema_blueprint.get(col, {})
+        if meta.get("analysis_allowed") is False:
+            continue
         if meta.get("is_identifier"):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
@@ -61,6 +63,8 @@ def _categorical_cols(df, schema_blueprint):
         if col.endswith(_VALIDATION_SUFFIXES):
             continue
         meta = schema_blueprint.get(col, {})
+        if meta.get("analysis_allowed") is False:
+            continue
         if meta.get("is_identifier"):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):

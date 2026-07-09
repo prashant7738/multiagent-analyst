@@ -6,6 +6,7 @@ from groq import Groq
 client = Groq()  # reads GROQ_API_KEY from env
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
+MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 
 SEMANTIC_SYSTEM_PROMPT = """You are a senior data analyst. Given column names, inferred types, and sample rows from a CSV,
 produce a JSON schema blueprint. Return ONLY valid JSON, no markdown, no explanation, no backticks.
@@ -92,10 +93,27 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
             "is_identifier": False,
             "scaling_allowed": inferred_types[col] == "numeric",
             "imputation_strategy": "median" if inferred_types[col] == "numeric" else "mode",
+            "analysis_allowed": True,
             "notes": "fallback — LLM call failed"
         }
         for col in df.columns
     }
+
+
+def _apply_missingness_policy(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict) -> dict:
+    excluded = []
+    for col in df.columns:
+        profile = raw_profile.get("columns", {}).get(col, {})
+        missing_rate = float(profile.get("missing_rate_pct", 0.0))
+        analysis_allowed = missing_rate <= MISSINGNESS_ANALYSIS_THRESHOLD_PCT
+        meta = schema_blueprint.setdefault(col, {})
+        meta["analysis_allowed"] = analysis_allowed
+        if not analysis_allowed:
+            excluded.append((col, missing_rate))
+            note = meta.get("notes", "")
+            missing_note = f"excluded from analysis: missing_rate_pct={missing_rate:.2f}% exceeds {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}%"
+            meta["notes"] = f"{note}; {missing_note}".strip("; ") if note else missing_note
+    return schema_blueprint, excluded
 
 
 def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
@@ -106,7 +124,8 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
             f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
             f"intended_type={meta.get('intended_type', 'unknown')}, "
             f"imputation={meta.get('imputation_strategy', 'unknown')}, "
-            f"identifier={meta.get('is_identifier', False)}"
+            f"identifier={meta.get('is_identifier', False)}, "
+            f"analysis_allowed={meta.get('analysis_allowed', True)}"
         )
 
 
@@ -159,17 +178,30 @@ def agent2_semantic_tagger(state: dict) -> dict:
         else:
             schema_blueprint = json.loads(raw_text)
 
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
+
         print(f"[Agent 2] Blueprint built for {len(schema_blueprint)} columns")
         _print_semantic_summary(df, schema_blueprint)
+        if excluded:
+            excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
+            print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
 
     except json.JSONDecodeError as e:
         errors.append(f"Agent2: LLM returned invalid JSON — {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)
+        if excluded:
+            excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
+            print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
     except Exception as e:
         errors.append(f"Agent2: Groq call failed — {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
+        schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)
+        if excluded:
+            excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
+            print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
 
     return {
         **state,

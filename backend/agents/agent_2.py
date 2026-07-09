@@ -10,6 +10,9 @@ client = Groq(api_key=_GROQ_API_KEY) if _GROQ_API_KEY else None  # optional; heu
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
+LLM_BATCH_SIZE = 15
+LLM_SINGLE_CALL_THRESHOLD = 20
+LLM_MAX_TOKENS = 2000
 
 _NAME_HINTS = [
     ("identifier", {"id", "identifier", "uuid", "key", "code"}),
@@ -86,10 +89,11 @@ def _infer_intended_types(df: pd.DataFrame, raw_profile: dict) -> dict:
     return inferred
 
 
-def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict) -> str:
+def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict, columns: list[str] | None = None) -> str:
     """Minimal prompt — column metadata + 3 samples only. No full CSV."""
+    columns = list(df.columns) if columns is None else columns
     col_info = []
-    for col in df.columns:
+    for col in columns:
         profile = raw_profile["columns"][col]
         col_info.append({
             "name": col,
@@ -99,6 +103,57 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict)
             "samples": profile["sample_values"][:3],
         })
     return json.dumps(col_info, indent=2)
+
+
+def _split_columns_into_batches(columns: list[str], batch_size: int) -> list[list[str]]:
+    return [columns[index:index + batch_size] for index in range(0, len(columns), batch_size)]
+
+
+def _parse_schema_blueprint_response(raw_text: str) -> dict:
+    if "```" in raw_text:
+        parts = raw_text.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            try:
+                return json.loads(part)
+            except Exception:
+                continue
+        raise json.JSONDecodeError("No valid JSON block found", raw_text, 0)
+
+    return json.loads(raw_text)
+
+
+def _call_llm_for_schema_blueprint(
+    df: pd.DataFrame,
+    inferred_types: dict,
+    raw_profile: dict,
+    columns: list[str],
+) -> dict:
+    user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
+
+    response = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[
+            {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Produce schema blueprint for these columns:\n{user_prompt}"},
+        ],
+        temperature=0.1,
+        max_tokens=LLM_MAX_TOKENS,
+    )
+
+    raw_text = response.choices[0].message.content.strip()
+    return _parse_schema_blueprint_response(raw_text)
+
+
+def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> dict:
+    for column_name, metadata in incoming_blueprint.items():
+        if column_name not in base_blueprint or not isinstance(base_blueprint[column_name], dict):
+            base_blueprint[column_name] = metadata
+        else:
+            base_blueprint[column_name].update(metadata)
+    return base_blueprint
 
 
 def _infer_semantic_tag_from_metadata(column_name: str, profile: dict, inferred_type: str) -> str:
@@ -382,38 +437,15 @@ def agent2_semantic_tagger(state: dict) -> dict:
         type_counts[inferred_type] = type_counts.get(inferred_type, 0) + 1
     print(f"[Agent 2] Type sniffing summary: {type_counts}")
 
-    # Step 2: single Groq LLM call for semantic tagging
-    user_prompt = _build_llm_prompt(df, inferred_types, raw_profile)
+    # Step 2: Groq LLM calls for semantic tagging, chunked for larger schemas
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Produce schema blueprint for these columns:\n{user_prompt}"}
-            ],
-            temperature=0.1,       # low temp → more deterministic JSON
-            max_tokens=2000,
-        )
-
-        raw_text = response.choices[0].message.content.strip()
-
-        # Strip markdown fences if Groq model adds them anyway
-        if "```" in raw_text:
-            parts = raw_text.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.startswith("json"):
-                    part = part[4:].strip()
-                try:
-                    schema_blueprint = json.loads(part)
-                    break
-                except Exception:
-                    continue
-            else:
-                raise json.JSONDecodeError("No valid JSON block found", raw_text, 0)
-        else:
-            schema_blueprint = json.loads(raw_text)
+        columns = list(df.columns)
+        column_batches = [columns] if len(columns) <= LLM_SINGLE_CALL_THRESHOLD else _split_columns_into_batches(columns, LLM_BATCH_SIZE)
+        schema_blueprint = {}
+        for batch_columns in column_batches:
+            batch_blueprint = _call_llm_for_schema_blueprint(df, inferred_types, raw_profile, batch_columns)
+            _merge_schema_blueprints(schema_blueprint, batch_blueprint)
 
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
 

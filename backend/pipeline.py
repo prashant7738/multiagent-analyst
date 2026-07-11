@@ -82,7 +82,7 @@ if __name__ == "__main__":
     pipeline = build_pipeline()
 
     initial_state: GraphState = {
-        "csv_path": "DataCoSupplyChainDataset.csv",
+        "csv_path": "tokenized_access_logs.csv",
         "raw_profile":           {},
         "schema_blueprint":      {},
         "_df_cache":             None,

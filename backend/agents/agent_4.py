@@ -15,6 +15,15 @@ warnings.filterwarnings("ignore")
 CHARTS_DIR = "outputs/charts"
 os.makedirs(CHARTS_DIR, exist_ok=True)
 
+
+def _clear_chart_dir():
+    for filename in os.listdir(CHARTS_DIR):
+        if not filename.lower().endswith(".png"):
+            continue
+        path = os.path.join(CHARTS_DIR, filename)
+        if os.path.isfile(path):
+            os.remove(path)
+
 # ── palette ───────────────────────────────────────────────────────────────────
 COLORS = {
     "primary":   "#2563EB",
@@ -28,6 +37,8 @@ COLORS = {
 
 def _save(fig, name):
     path = os.path.join(CHARTS_DIR, f"{name}.png")
+    if os.path.exists(path):
+        os.remove(path)
     fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return path
@@ -650,6 +661,8 @@ def agent4_analysis(state: GraphState) -> GraphState:
     if df is None:
         errors.append("Agent4: No cleaned_df in state. Agent 3 failed.")
         return {**state, "errors": errors}
+
+    _clear_chart_dir()
 
     print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
 

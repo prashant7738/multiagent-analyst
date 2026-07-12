@@ -11,16 +11,35 @@ import os
 import pandas as pd
 import json
 
-Groq = None
+from groq import Groq
 
-_GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = None  # optional; heuristics still work without LLM
+client = None
+
+
+class SchemaBlueprint(dict):
+    """Dictionary wrapper that excludes internal metadata from length checks."""
+
+    def __len__(self):
+        return sum(1 for key in super().keys() if key != "__metadata__")
+
+
+def _get_groq_client() -> Groq:
+    """Return the active Groq client or raise a controlled error if unavailable."""
+    global client
+    if client is not None:
+        return client
+
+    if not os.getenv("GROQ_API_KEY"):
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    client = Groq()
+    return client
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 15
 LLM_SINGLE_CALL_THRESHOLD = 20
-LLM_MAX_TOKENS = 2000
+LLM_MAX_TOKENS = 3000
 
 _NAME_HINTS = [
     ("identifier", {"id", "identifier", "uuid", "key", "code"}),
@@ -313,7 +332,34 @@ def _parse_schema_blueprint_response(raw_text: str) -> dict:
                 continue
         raise json.JSONDecodeError("No valid JSON block found", raw_text, 0)
 
-    return json.loads(raw_text)
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(raw_text[start:end + 1])
+        raise
+
+
+def _call_llm_for_schema_blueprint_with_retry(
+    df: pd.DataFrame,
+    inferred_types: dict,
+    raw_profile: dict,
+    columns: list[str],
+) -> dict:
+    """Call the LLM and retry with smaller batches if the response is truncated."""
+    if len(columns) <= 1:
+        return _call_llm_for_schema_blueprint(df, inferred_types, raw_profile, columns)
+
+    try:
+        return _call_llm_for_schema_blueprint(df, inferred_types, raw_profile, columns)
+    except json.JSONDecodeError:
+        midpoint = max(1, len(columns) // 2)
+        left = _call_llm_for_schema_blueprint_with_retry(df, inferred_types, raw_profile, columns[:midpoint])
+        right = _call_llm_for_schema_blueprint_with_retry(df, inferred_types, raw_profile, columns[midpoint:])
+        merged = _merge_schema_blueprints(left, right)
+        return merged
 
 
 def _call_llm_for_schema_blueprint(
@@ -325,7 +371,7 @@ def _call_llm_for_schema_blueprint(
     """Ask the LLM for schema metadata for a subset of columns."""
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
 
-    response = client.chat.completions.create(
+    response = _get_groq_client().chat.completions.create(
         model=GROQ_MODEL,
         messages=[
             {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
@@ -739,7 +785,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
         column_batches = [columns] if len(columns) <= LLM_SINGLE_CALL_THRESHOLD else _split_columns_into_batches(columns, LLM_BATCH_SIZE)
         schema_blueprint = {}
         for batch_columns in column_batches:
-            batch_blueprint = _call_llm_for_schema_blueprint(df, inferred_types, raw_profile, batch_columns)
+            batch_blueprint = _call_llm_for_schema_blueprint_with_retry(df, inferred_types, raw_profile, batch_columns)
             _merge_schema_blueprints(schema_blueprint, batch_blueprint)
 
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
@@ -749,6 +795,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
         }
+        schema_blueprint = SchemaBlueprint(schema_blueprint)
 
         print(f"[Agent 2] Blueprint built for {len(schema_blueprint)} columns")
         _print_semantic_summary(df, schema_blueprint)
@@ -766,6 +813,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
         }
+        schema_blueprint = SchemaBlueprint(schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
@@ -780,6 +828,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
         }
+        schema_blueprint = SchemaBlueprint(schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)

@@ -1,4 +1,11 @@
-# agents/agent2_semantic_tagger.py
+"""Agent 2: semantic tagging and schema blueprint generation.
+
+This module consumes Agent 1's structural profile plus the cached DataFrame,
+infers likely column semantics, optionally consults an LLM for richer schema
+metadata, and falls back to metadata-only heuristics when the model is not
+available or returns invalid JSON.
+"""
+
 import re
 import os
 import pandas as pd
@@ -26,6 +33,7 @@ _NAME_HINTS = [
 
 
 def _name_tokens(column_name: str) -> set[str]:
+    """Split a column name into lowercase alphanumeric tokens."""
     return set(re.findall(r"[a-z0-9]+", column_name.lower()))
 
 SEMANTIC_SYSTEM_PROMPT = """You are a senior data analyst. Given column names, inferred types, and sample rows from a CSV,
@@ -111,10 +119,12 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict,
 
 
 def _split_columns_into_batches(columns: list[str], batch_size: int) -> list[list[str]]:
+    """Split a column list into deterministic batches for LLM requests."""
     return [columns[index:index + batch_size] for index in range(0, len(columns), batch_size)]
 
 
 def _parse_schema_blueprint_response(raw_text: str) -> dict:
+    """Parse a model response that may contain raw JSON or a fenced code block."""
     if "```" in raw_text:
         parts = raw_text.split("```")
         for part in parts:
@@ -136,6 +146,7 @@ def _call_llm_for_schema_blueprint(
     raw_profile: dict,
     columns: list[str],
 ) -> dict:
+    """Ask the LLM for schema metadata for a subset of columns."""
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
 
     response = client.chat.completions.create(
@@ -153,6 +164,7 @@ def _call_llm_for_schema_blueprint(
 
 
 def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> dict:
+    """Merge one partial blueprint into another in place."""
     for column_name, metadata in incoming_blueprint.items():
         if column_name not in base_blueprint or not isinstance(base_blueprint[column_name], dict):
             base_blueprint[column_name] = metadata
@@ -162,7 +174,11 @@ def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> 
 
 
 def _infer_semantic_tag_from_metadata(column_name: str, profile: dict, inferred_type: str) -> str:
-    """Infer a semantic tag from Agent 1 metadata and the column name."""
+    """Infer a semantic tag from Agent 1 metadata and the column name.
+
+    This is the main fallback when the LLM does not provide a confident tag.
+    It combines column-name hints, sample values, parseability, and cardinality.
+    """
     name = column_name.lower()
     tokens = _name_tokens(column_name)
     samples = [str(value).strip().lower() for value in profile.get("sample_values", []) if value is not None]
@@ -219,7 +235,7 @@ def _assess_column_suitability(
     intended_type: str,
     total_rows: int,
 ) -> dict:
-    """Assess whether a column is suitable for analysis using metadata from Agent 1."""
+    """Assess whether a column is suitable for analysis using Agent 1 metadata."""
     missing_rate = float(profile.get("missing_rate_pct", 0.0))
     unique_count = int(profile.get("unique_count", 0) or 0)
     duplicate_pressure_pct = round((1 - (unique_count / max(total_rows, 1))) * 100, 2)
@@ -254,6 +270,7 @@ def _assess_column_suitability(
 
 
 def _derive_null_policy(profile: dict, meta: dict) -> dict:
+    """Choose a conservative null-handling policy from column semantics."""
     missing_rate = float(profile.get("missing_rate_pct", 0.0))
     unique_count = int(profile.get("unique_count", 0) or 0)
     intended_type = str(meta.get("intended_type", "string"))
@@ -334,6 +351,7 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
 
 
 def _derive_encoding_strategy(profile: dict, meta: dict) -> dict:
+    """Choose an encoding strategy that matches the inferred semantic role."""
     unique_count = int(profile.get("unique_count", 0) or 0)
     semantic_tag = str(meta.get("semantic_tag", "unknown"))
     intended_type = str(meta.get("intended_type", "string"))
@@ -389,6 +407,7 @@ def _derive_encoding_strategy(profile: dict, meta: dict) -> dict:
 
 
 def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict, inferred_types: dict) -> dict:
+    """Populate each column's blueprint with derived analysis metadata."""
     total_rows = int(raw_profile.get("shape", {}).get("rows", len(df)) or len(df))
     for col in df.columns:
         profile = raw_profile.get("columns", {}).get(col, {})
@@ -432,7 +451,7 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
 
 
 def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
-    """Used when LLM call fails. Basic but functional."""
+    """Build a conservative schema blueprint when the LLM path fails."""
     def _normalize_intended_type(t: str) -> str:
         if t == "numeric":
             return "float"
@@ -469,6 +488,7 @@ def _apply_missingness_policy(
     schema_blueprint: dict,
     inferred_types: dict | None = None,
 ) -> dict:
+    """Attach analysis eligibility and null/encoding policies to each column."""
     excluded = []
     schema_blueprint = _enrich_missingness_metadata(df, raw_profile, schema_blueprint, inferred_types or {})
     for col in df.columns:
@@ -491,6 +511,7 @@ def _apply_missingness_policy(
 
 
 def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
+    """Print a compact human-readable summary of the generated blueprint."""
     print("[Agent 2] Semantic tags by column:")
     for col in df.columns:
         meta = schema_blueprint.get(col, {})
@@ -510,6 +531,7 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
 
 
 def agent2_semantic_tagger(state: dict) -> dict:
+    """Generate schema metadata for each column and return the updated state."""
     errors = state.get("errors", [])
     raw_profile = state.get("raw_profile", {})
     df = state.get("_df_cache")
@@ -518,14 +540,14 @@ def agent2_semantic_tagger(state: dict) -> dict:
         errors.append("Agent2: No DataFrame in state. Agent 1 failed.")
         return {**state, "errors": errors}
 
-    # Step 1: pure Python type sniffing
+    # Step 1: use cheap local heuristics before involving the LLM.
     inferred_types = _infer_intended_types(df, raw_profile)
     type_counts = {}
     for inferred_type in inferred_types.values():
         type_counts[inferred_type] = type_counts.get(inferred_type, 0) + 1
     print(f"[Agent 2] Type sniffing summary: {type_counts}")
 
-    # Step 2: Groq LLM calls for semantic tagging, chunked for larger schemas
+    # Step 2: request semantic tags in batches when the schema is large.
 
     try:
         columns = list(df.columns)

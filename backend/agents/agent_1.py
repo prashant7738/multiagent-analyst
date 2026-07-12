@@ -1,4 +1,10 @@
-# agents/agent_1  -- --- ----structural_profiler.py
+"""Agent 1: structural profiling for CSV inputs.
+
+This module reads a CSV file, gathers row/column shape information,
+computes missingness and duplication metrics, and records lightweight
+format hints that later agents can use for semantic inference.
+"""
+
 import csv
 from io import StringIO
 import re
@@ -9,7 +15,11 @@ from main import GraphState
 
 
 def _read_csv_lines(csv_path: str) -> list[str]:
-    """Read CSV text using a small set of common encodings."""
+    """Read CSV text using a small set of common encodings.
+
+    The pipeline is expected to handle user-provided files from different
+    sources, so we try a short list of common encodings before failing.
+    """
     encodings = ("utf-8-sig", "cp1252", "latin-1")
 
     last_error = None
@@ -30,7 +40,12 @@ def _read_csv_lines(csv_path: str) -> list[str]:
 
 
 def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
-    """Read CSV files that mix comma- and semicolon-delimited rows."""
+    """Read CSV files that mix comma- and semicolon-delimited rows.
+
+    Some real-world exports switch delimiters across rows. This reader uses
+    the header row as the schema anchor and normalizes the rest into a single
+    DataFrame.
+    """
     lines = _read_csv_lines(csv_path)
 
     if not lines:
@@ -65,6 +80,7 @@ def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
 
 
 def _parseability_pct(series: pd.Series, parser) -> float:
+    """Return the share of non-null values that a parser can coerce."""
     non_null = series.dropna()
     if non_null.empty:
         return 0.0
@@ -78,6 +94,11 @@ def _parseability_pct(series: pd.Series, parser) -> float:
 
 
 def _extract_format_hints(series: pd.Series) -> dict:
+    """Infer a few lightweight hints from sample values.
+
+    These are intentionally heuristic and are meant to help later agents
+    distinguish likely currency, date, and identifier columns.
+    """
     samples = [str(value).strip() for value in series.dropna().head(10).tolist()]
     if not samples:
         return {
@@ -101,8 +122,10 @@ def _extract_format_hints(series: pd.Series) -> dict:
 
 def agent1_structural_profiler(state: GraphState) -> GraphState:
     """
-    Reads CSV. Records shape, dtypes, missing values, duplicates.
-    No fixing. No inference. Just observe and record.
+    Load the CSV, compute structural metrics, and stash the DataFrame in state.
+
+    This agent is observation-only: it does not clean, coerce, or mutate the
+    input data. Its job is to produce the metadata that downstream agents use.
     """
     csv_path = state["csv_path"]
     errors = state.get("errors", [])
@@ -166,10 +189,11 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
           f"Missing: {raw_profile['overall_missing_rate_pct']}% | "
           f"Duplicates: {duplicate_rows}")
 
-    # Store df in state for Agent 2 (avoid reloading CSV downstream)
+    # Keep the parsed DataFrame in state so Agent 2 can reuse it without
+    # reopening the CSV and repeating delimiter/encoding detection.
     return {
         **state,
         "raw_profile": raw_profile,
-        "_df_cache": df,  # internal, agents share via state
+        "_df_cache": df,
         "errors": errors,
     }

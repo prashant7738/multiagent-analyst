@@ -1,11 +1,13 @@
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from agents.agent_1 import agent1_structural_profiler
-from agents.agent_2 import _assess_column_suitability, _infer_semantic_tag_from_metadata
+from agents.agent_2 import _assess_column_suitability, _derive_encoding_strategy, _infer_semantic_tag_from_metadata
 from agents.agent_4 import _numeric_cols as agent4_numeric_cols
 from agents.agent_5 import _numeric_cols as agent5_numeric_cols
-from agents.agent_3 import dedup_exact_rows
+from agents.agent_3 import agent3_preprocessor, dedup_exact_rows
 
 
 class TestDedupConsistency(unittest.TestCase):
@@ -169,6 +171,135 @@ class TestAgent2SuitabilityMetadata(unittest.TestCase):
 
         self.assertTrue(assessment["is_suitable"])
         self.assertEqual(assessment["reason_category"], "low_cardinality_category")
+
+    def test_agent2_defaults_low_cardinality_categories_to_one_hot_encoding(self):
+        profile = {
+            "dtype": "object",
+            "missing_count": 0,
+            "missing_rate_pct": 0.0,
+            "unique_count": 6,
+            "sample_values": ["Online", "Retail", "Wholesale"],
+        }
+
+        strategy = _derive_encoding_strategy(
+            profile=profile,
+            meta={
+                "semantic_tag": "categorical_label",
+                "intended_type": "string",
+                "is_identifier": False,
+                "analysis_allowed": True,
+            },
+        )
+
+        self.assertEqual(strategy["method"], "one_hot")
+
+    def test_agent2_preserves_explicit_ordinal_encoding_order(self):
+        profile = {
+            "dtype": "object",
+            "missing_count": 0,
+            "missing_rate_pct": 0.0,
+            "unique_count": 3,
+            "sample_values": ["low", "medium", "high"],
+        }
+
+        strategy = _derive_encoding_strategy(
+            profile=profile,
+            meta={
+                "semantic_tag": "categorical_label",
+                "intended_type": "string",
+                "is_identifier": False,
+                "analysis_allowed": True,
+                "encoding_strategy": {
+                    "method": "ordinal",
+                    "order": ["low", "medium", "high"],
+                    "reason": "explicit order",
+                },
+            },
+        )
+
+        self.assertEqual(strategy["method"], "ordinal")
+        self.assertEqual(strategy["order"], ["low", "medium", "high"])
+
+
+class TestAgent3EncodingAndCanonicalDedup(unittest.TestCase):
+    def test_agent3_canonicalizes_then_deduplicates_and_encodes_categories(self):
+        df = pd.DataFrame(
+            {
+                "record_id": [1, 1],
+                "shipping_mode": ["Home_Delivery", "home delivery"],
+                "amount": [10, 10],
+            }
+        )
+        raw_profile = {
+            "shape": {"rows": 2, "cols": 3},
+            "columns": {
+                "record_id": {
+                    "dtype": "int64",
+                    "missing_rate_pct": 0.0,
+                    "unique_count": 1,
+                    "sample_values": [1, 1],
+                },
+                "shipping_mode": {
+                    "dtype": "object",
+                    "missing_rate_pct": 0.0,
+                    "unique_count": 2,
+                    "sample_values": ["Home_Delivery", "home delivery"],
+                },
+                "amount": {
+                    "dtype": "float64",
+                    "missing_rate_pct": 0.0,
+                    "unique_count": 1,
+                    "sample_values": [10, 10],
+                },
+            },
+            "duplicate_rows": 0,
+            "total_missing": 0,
+            "overall_missing_rate_pct": 0.0,
+        }
+        schema_blueprint = {
+            "record_id": {
+                "intended_type": "int",
+                "semantic_tag": "identifier",
+                "is_identifier": True,
+                "scaling_allowed": False,
+                "imputation_strategy": "drop",
+                "encoding_strategy": {"method": "none", "reason": "identifier"},
+                "analysis_allowed": True,
+            },
+            "shipping_mode": {
+                "intended_type": "string",
+                "semantic_tag": "categorical_label",
+                "is_identifier": False,
+                "scaling_allowed": False,
+                "imputation_strategy": "mode",
+                "encoding_strategy": {"method": "one_hot", "reason": "low-cardinality category"},
+                "analysis_allowed": True,
+            },
+            "amount": {
+                "intended_type": "float",
+                "semantic_tag": "unknown",
+                "is_identifier": False,
+                "scaling_allowed": True,
+                "imputation_strategy": "median",
+                "encoding_strategy": {"method": "none", "reason": "numeric"},
+                "analysis_allowed": True,
+            },
+        }
+
+        state = {
+            "_df_cache": df,
+            "raw_profile": raw_profile,
+            "schema_blueprint": schema_blueprint,
+            "errors": [],
+        }
+
+        result = agent3_preprocessor(state)
+
+        cleaned_df = result["cleaned_df"]
+        self.assertEqual(len(cleaned_df), 1)
+        self.assertIn("shipping_mode__Home Delivery", cleaned_df.columns)
+        self.assertIn("shipping_mode__Home Delivery", result["schema_blueprint"])
+        self.assertFalse(result["schema_blueprint"]["shipping_mode__Home Delivery"]["analysis_allowed"])
 
 
 if __name__ == "__main__":

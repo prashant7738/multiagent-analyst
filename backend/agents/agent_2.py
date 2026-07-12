@@ -39,6 +39,11 @@ For each column output:
     "is_identifier": true|false,
     "scaling_allowed": true|false,
     "imputation_strategy": "mean|median|mode|unknown_label|drop|none",
+        "encoding_strategy": {
+            "method": "one_hot|ordinal|none",
+            "order": ["optional", "category", "order", "list"],
+            "reason": "brief reason"
+        },
         "null_policy": {
             "action": "flag_only|drop_rows|impute_mean|impute_median|impute_mode|impute_unknown_label|none",
             "threshold_pct": number,
@@ -52,7 +57,9 @@ Rules:
 - Currency/financial columns: scaling_allowed=false, imputation_strategy=median
 - Identifier columns: is_identifier=true, imputation_strategy=drop
 - Datetime columns: scaling_allowed=false, imputation_strategy=none
-- Categorical with <20 unique: semantic_tag=categorical_label, imputation_strategy=mode
+- Categorical with <20 unique: semantic_tag=categorical_label, imputation_strategy=mode, encoding_strategy=one_hot unless a real order list is provided
+- Ordinal encoding is only valid when the column has a real order and an explicit ordered list is provided
+- Use encoding_strategy=none for identifiers, free text, datetime columns, and very high-cardinality labels
 - null_policy must explain what to do when missingness is low, moderate, or high.
 - Prefer flag_only for sparse or ambiguous columns, drop_rows for identifiers, impute_mode for low-cardinality categories, impute_median for numeric/currency, and none for datetime columns when imputation would distort time semantics."""
 
@@ -311,6 +318,61 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
     }
 
 
+def _derive_encoding_strategy(profile: dict, meta: dict) -> dict:
+    unique_count = int(profile.get("unique_count", 0) or 0)
+    semantic_tag = str(meta.get("semantic_tag", "unknown"))
+    intended_type = str(meta.get("intended_type", "string"))
+    is_identifier = bool(meta.get("is_identifier", False))
+    analysis_allowed = bool(meta.get("analysis_allowed", True))
+
+    explicit = meta.get("encoding_strategy")
+    if isinstance(explicit, dict):
+        method = str(explicit.get("method", "none")).lower()
+        if method in {"one_hot", "ordinal", "none"}:
+            strategy = {"method": method}
+            order = explicit.get("order")
+            if method == "ordinal" and isinstance(order, list) and order:
+                strategy["order"] = order
+            reason = explicit.get("reason")
+            if reason:
+                strategy["reason"] = str(reason)
+            if method != "ordinal" or strategy.get("order"):
+                return strategy
+
+    if not analysis_allowed or is_identifier:
+        return {
+            "method": "none",
+            "reason": "excluded from analysis or identifier columns should not be encoded",
+        }
+
+    if semantic_tag in {"datetime", "text"} or intended_type in {"datetime", "boolean"}:
+        return {
+            "method": "none",
+            "reason": "datetime, boolean, and free-text columns should not be encoded",
+        }
+
+    if semantic_tag == "categorical_label" or intended_type in {"string", "category"}:
+        if unique_count <= 1:
+            return {
+                "method": "none",
+                "reason": "constant or empty categories do not need encoding",
+            }
+        if unique_count <= 20:
+            return {
+                "method": "one_hot",
+                "reason": "low-cardinality nominal category defaulted to one-hot encoding",
+            }
+        return {
+            "method": "none",
+            "reason": "high-cardinality label left unencoded to avoid sparse noise",
+        }
+
+    return {
+        "method": "none",
+        "reason": "non-categorical columns are not encoded",
+    }
+
+
 def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blueprint: dict, inferred_types: dict) -> dict:
     total_rows = int(raw_profile.get("shape", {}).get("rows", len(df)) or len(df))
     for col in df.columns:
@@ -339,6 +401,9 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
 
         if not isinstance(meta.get("null_policy"), dict):
             meta["null_policy"] = _derive_null_policy(profile, meta)
+
+        if not isinstance(meta.get("encoding_strategy"), dict):
+            meta["encoding_strategy"] = _derive_encoding_strategy(profile, meta)
 
         null_policy = meta["null_policy"]
         null_policy.setdefault("action", "flag_only")
@@ -372,6 +437,10 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
                 "threshold_pct": 20.0,
                 "reason": "fallback policy inferred without LLM semantics",
             },
+            "encoding_strategy": {
+                "method": "one_hot" if inferred_types[col] == "string" else "none",
+                "reason": "fallback encoding inferred without LLM semantics" if inferred_types[col] == "string" else "non-categorical fallback",
+            },
             "analysis_allowed": True,
             "notes": "fallback — LLM call failed"
         }
@@ -400,6 +469,9 @@ def _apply_missingness_policy(
             note = meta.get("notes", "")
             missing_note = f"excluded from analysis: missing_rate_pct={missing_rate:.2f}% exceeds {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}%"
             meta["notes"] = f"{note}; {missing_note}".strip("; ") if note else missing_note
+
+        if not isinstance(meta.get("encoding_strategy"), dict):
+            meta["encoding_strategy"] = _derive_encoding_strategy(profile, meta)
     return schema_blueprint, excluded
 
 
@@ -413,6 +485,7 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
             f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
             f"intended_type={meta.get('intended_type', 'unknown')}, "
             f"imputation={meta.get('imputation_strategy', 'unknown')}, "
+            f"encoding={meta.get('encoding_strategy', {}).get('method', 'none')}, "
             f"identifier={meta.get('is_identifier', False)}, "
             f"analysis_allowed={meta.get('analysis_allowed', True)}, "
             f"null_action={null_policy.get('action', 'none')}, "

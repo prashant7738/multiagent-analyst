@@ -218,6 +218,34 @@ def _canonicalize_text_values(series):
     return canonical.str.casefold().str.title()
 
 
+def _normalize_category_label(value):
+    if pd.isna(value):
+        return pd.NA
+    normalized = str(value)
+    normalized = re.sub(r"[_\-]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return pd.NA
+    return normalized.casefold()
+
+
+def _is_categorical_for_encoding(meta):
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("is_identifier"):
+        return False
+    semantic_tag = meta.get("semantic_tag")
+    intended_type = meta.get("intended_type")
+    if semantic_tag in {"categorical_label", "geographic"}:
+        return True
+    if intended_type in {"string", "category"}:
+        strategy = meta.get("encoding_strategy")
+        if isinstance(strategy, dict) and strategy.get("method") in {"one_hot", "ordinal"}:
+            return True
+        return semantic_tag not in {"text", "datetime"}
+    return False
+
+
 def _log_null_diff(before_df, after_df, step_name):
     """Return per-column null-count deltas for debugging and regression detection."""
     notes = []
@@ -371,8 +399,12 @@ def _standardize_text_columns(df, schema_blueprint):
         if meta.get("is_identifier"):
             continue
 
-        # Canonicalize category-like text to avoid split groups from casing or separators.
-        if meta.get("canonicalize_text", True):
+        encoding_strategy = meta.get("encoding_strategy") if isinstance(meta.get("encoding_strategy"), dict) else {}
+        semantic_tag = meta.get("semantic_tag")
+        should_canonicalize = semantic_tag in {"categorical_label", "geographic"} or encoding_strategy.get("method") in {"one_hot", "ordinal"}
+
+        # Canonicalize only columns Agent 2 marked as categorical-ish; free text stays conservative.
+        if should_canonicalize:
             df[col] = _canonicalize_text_values(df[col])
             notes.append(
                 f"{col}: text standardized (null normalization + separator cleanup + case canonicalization)"
@@ -386,6 +418,86 @@ def _standardize_text_columns(df, schema_blueprint):
 
             df[col] = text_series
             notes.append(f"{col}: text standardized (strip + null normalization)")
+
+    return df, notes
+
+
+def _dedup_after_canonicalization(df):
+    deduped, removed_count, samples = dedup_exact_rows(df)
+    return deduped, removed_count, samples
+
+
+def _encode_categorical_columns(df, schema_blueprint):
+    notes = []
+    encoded_schema_entries = {}
+    df = df.copy()
+
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns:
+            continue
+        if not _is_categorical_for_encoding(meta):
+            continue
+
+        strategy = meta.get("encoding_strategy") if isinstance(meta.get("encoding_strategy"), dict) else {"method": "none"}
+        method = str(strategy.get("method", "none")).lower()
+        if method == "none":
+            continue
+
+        if not meta.get("analysis_allowed", True):
+            notes.append(f"{col}: encoding skipped (analysis_allowed=false)")
+            continue
+
+        if method == "ordinal":
+            order = strategy.get("order")
+            if not isinstance(order, list) or not order:
+                notes.append(f"{col}: ordinal encoding skipped (missing order list)")
+                continue
+
+            order_map = {
+                normalized_level: index
+                for index, level in enumerate(order)
+                for normalized_level in [_normalize_category_label(level)]
+                if pd.notna(normalized_level)
+            }
+            encoded_col = f"{col}__ordinal"
+            df[encoded_col] = df[col].map(lambda value: order_map.get(_normalize_category_label(value), pd.NA)).astype("Int64")
+            encoded_schema_entries[encoded_col] = {
+                "intended_type": "int",
+                "semantic_tag": "encoded_category",
+                "is_identifier": False,
+                "scaling_allowed": False,
+                "imputation_strategy": "none",
+                "encoding_strategy": {"method": "none", "reason": f"derived ordinal encoding from {col}"},
+                "analysis_allowed": False,
+                "notes": f"ordinal encoding derived from {col}",
+                "source_column": col,
+            }
+            notes.append(f"{col}: ordinal encoded into [{encoded_col}]")
+            continue
+
+        if method == "one_hot":
+            encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)
+            encoded = encoded.astype(int)
+            df = pd.concat([df, encoded], axis=1)
+            for encoded_col in encoded.columns:
+                encoded_schema_entries[encoded_col] = {
+                    "intended_type": "int",
+                    "semantic_tag": "encoded_category",
+                    "is_identifier": False,
+                    "scaling_allowed": False,
+                    "imputation_strategy": "none",
+                    "encoding_strategy": {"method": "none", "reason": f"derived one-hot encoding from {col}"},
+                    "analysis_allowed": False,
+                    "notes": f"one-hot encoded from {col}",
+                    "source_column": col,
+                }
+            notes.append(f"{col}: one-hot encoded into {len(encoded.columns)} columns")
+            continue
+
+        notes.append(f"{col}: encoding skipped (unsupported strategy={method})")
+
+    if encoded_schema_entries:
+        schema_blueprint.update(encoded_schema_entries)
 
     return df, notes
 
@@ -928,6 +1040,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "input_rows": input_rows,
         "exact_duplicates_removed": actual_duplicates,
         "rows_after_dedup": int(len(df)),
+        "rows_dropped_by_canonical_dedup": 0,
         "rows_dropped_by_imputation": 0,
     }
 
@@ -956,6 +1069,26 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
     before_step = df.copy()
+    try:
+        df, canonical_duplicates, duplicate_samples = _dedup_after_canonicalization(df)
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: post-canonicalization dedup failed - {e}")
+
+    row_accounting["rows_dropped_by_canonical_dedup"] = int(canonical_duplicates)
+    preprocessing_log.append(
+        f"Duplicate removal (post-canonicalization): removed={canonical_duplicates}, rows_after={len(df)}"
+    )
+    if duplicate_samples:
+        preprocessing_log.append(f"Canonical duplicate samples: {duplicate_samples}")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3b"))
+    try:
+        _assert_row_survival_or_abort(input_rows, len(df), "canonical_dedup")
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: {e}")
+    if verbose:
+        print(f"[Agent 3] Step 3b - Canonical dedup done ({canonical_duplicates} rows removed)")
+
+    before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
@@ -969,35 +1102,42 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 4 - Imputation done ({len(notes)} actions)")
 
     before_step = df.copy()
-    df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
+    df, notes = _encode_categorical_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
     if verbose:
-        print(f"[Agent 3] Step 5 - Outlier clipping done ({len(notes)} columns)")
+        print(f"[Agent 3] Step 5 - Encoding done ({len(notes)} columns)")
+
+    before_step = df.copy()
+    df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
+    preprocessing_log.extend(notes)
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    if verbose:
+        print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
     if critical_errors:
         return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
     before_step = df.copy()
     df, scaling_params, notes = _scale_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
     if verbose:
-        print(f"[Agent 3] Step 6 - Scaling done ({len(scaling_params)} columns)")
+        print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
 
     before_step = df.copy()
     df, notes = _extract_date_features(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
     if verbose:
-        print(f"[Agent 3] Step 7 - Date features extracted ({len(notes)} datetime columns)")
+        print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
     df, notes = _derive_business_metrics(df)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
     if verbose:
-        print(f"[Agent 3] Step 8 - Business metrics derived ({len(notes)} metrics)")
+        print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
 
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)
@@ -1092,6 +1232,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "preprocessing_profile": selected_profile,
         "dataset_domain": dataset_domain,
         "data_quality": data_quality,
+        "schema_blueprint": schema_blueprint,
         "column_ledger": {
             "columns": ledger.columns,
             "clip_bounds": ledger.clip_bounds,

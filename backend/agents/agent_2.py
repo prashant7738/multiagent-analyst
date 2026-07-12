@@ -68,26 +68,24 @@ def _infer_intended_types(df: pd.DataFrame, raw_profile: dict) -> dict:
     """Pure Python type sniffing. No LLM. 80% coercion threshold."""
     inferred = {}
     for col in df.columns:
-        raw_dtype = raw_profile["columns"][col]["dtype"]
+        profile = raw_profile["columns"][col]
+        raw_dtype = profile["dtype"]
 
         if raw_dtype in ("int64", "int32", "float64", "float32"):
             inferred[col] = "numeric"
         elif raw_dtype == "bool":
             inferred[col] = "boolean"
         elif raw_dtype == "object":
-            coerced = pd.to_numeric(df[col], errors="coerce")
-            non_null = df[col].notna().sum()
-            if non_null > 0 and (coerced.notna().sum() / non_null) >= 0.80:
+            parseability = profile.get("parseability", {}) if isinstance(profile.get("parseability"), dict) else {}
+            numeric_parseability_pct = float(parseability.get("numeric_pct", 0.0) or 0.0)
+            datetime_parseability_pct = float(parseability.get("datetime_pct", 0.0) or 0.0)
+
+            if numeric_parseability_pct >= 80.0:
                 inferred[col] = "numeric"
+            elif datetime_parseability_pct >= 80.0:
+                inferred[col] = "datetime"
             else:
-                try:
-                    parsed = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
-                    if parsed.notna().sum() / max(non_null, 1) >= 0.80:
-                        inferred[col] = "datetime"
-                    else:
-                        inferred[col] = "string"
-                except Exception:
-                    inferred[col] = "string"
+                inferred[col] = "string"
         elif "datetime" in raw_dtype:
             inferred[col] = "datetime"
         else:
@@ -168,16 +166,25 @@ def _infer_semantic_tag_from_metadata(column_name: str, profile: dict, inferred_
     name = column_name.lower()
     tokens = _name_tokens(column_name)
     samples = [str(value).strip().lower() for value in profile.get("sample_values", []) if value is not None]
+    parseability = profile.get("parseability", {}) if isinstance(profile.get("parseability"), dict) else {}
+    format_hints = profile.get("format_hints", {}) if isinstance(profile.get("format_hints"), dict) else {}
+    cardinality_ratio = float(profile.get("cardinality_ratio", 0.0) or 0.0)
+    candidate_key_hint = bool(profile.get("candidate_key_hint", False))
+    candidate_key_score = float(profile.get("candidate_key_score", 0.0) or 0.0)
+    numeric_parseability_pct = float(parseability.get("numeric_pct", 0.0) or 0.0)
+    datetime_parseability_pct = float(parseability.get("datetime_pct", 0.0) or 0.0)
 
-    if inferred_type == "datetime" or bool(tokens & {"date", "time", "timestamp", "created", "updated"}):
+    if inferred_type == "datetime" or datetime_parseability_pct >= 80.0 or bool(tokens & {"date", "time", "timestamp", "created", "updated"}):
         return "datetime"
-    if inferred_type == "numeric":
-        if bool(tokens & {"sales", "revenue", "profit", "cost", "price", "amount", "budget", "tax", "discount", "total"}):
+    if inferred_type == "numeric" or numeric_parseability_pct >= 80.0 or format_hints.get("currency_like"):
+        if bool(tokens & {"sales", "revenue", "profit", "cost", "price", "amount", "budget", "tax", "discount", "total"}) or format_hints.get("currency_like"):
             return "currency"
         if bool(tokens & {"percent", "pct", "rate", "margin", "ratio"}):
             return "percentage"
         if bool(tokens & {"count", "qty", "quantity", "units", "number", "num"}):
             return "count"
+    if candidate_key_hint or candidate_key_score >= 0.98 or format_hints.get("identifier_like"):
+        return "identifier"
 
     for tag, keywords in _NAME_HINTS:
         if tokens & keywords:
@@ -186,13 +193,21 @@ def _infer_semantic_tag_from_metadata(column_name: str, profile: dict, inferred_
             if tag != "text":
                 return tag
 
-    if any("@" in sample for sample in samples):
+    if format_hints.get("currency_like") or any("@" in sample for sample in samples):
+        if format_hints.get("currency_like") and inferred_type in {"numeric", "string"}:
+            return "currency"
         return "text"
-    if any(sample[:4].isdigit() and "-" in sample for sample in samples):
+    if format_hints.get("date_like") or any(sample[:4].isdigit() and "-" in sample for sample in samples):
         return "datetime"
 
     if inferred_type == "string":
-        return "categorical_label" if int(profile.get("unique_count", 0) or 0) < 20 else "text"
+        unique_count = int(profile.get("unique_count", 0) or 0)
+        unique_non_null_count = int(profile.get("unique_non_null_count", unique_count) or unique_count)
+        if unique_count < 20 or cardinality_ratio <= 0.2:
+            return "categorical_label"
+        if unique_non_null_count > 0 and (candidate_key_score >= 0.9 or cardinality_ratio >= 0.8):
+            return "text"
+        return "categorical_label" if unique_count < 20 else "text"
 
     return "unknown"
 

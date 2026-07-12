@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import tempfile
 
 import pandas as pd
 
@@ -219,6 +220,51 @@ class TestAgent2SuitabilityMetadata(unittest.TestCase):
 
         self.assertEqual(strategy["method"], "ordinal")
         self.assertEqual(strategy["order"], ["low", "medium", "high"])
+
+    def test_agent1_profiles_parseability_and_agent2_uses_it_for_semantics(self):
+        csv_text = """customer_id,order_date,amount
+A100,2024-01-05,$10.50
+A101,2024-02-01,$20.25
+"""
+
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as handle:
+            handle.write(csv_text)
+            temp_path = Path(handle.name)
+
+        try:
+            state = agent1_structural_profiler({"csv_path": str(temp_path), "errors": []})
+            profile = state["raw_profile"]["columns"]
+
+            self.assertTrue(profile["customer_id"]["candidate_key_hint"])
+            self.assertGreaterEqual(profile["order_date"]["parseability"]["datetime_pct"], 100.0)
+            self.assertTrue(profile["amount"]["format_hints"]["currency_like"])
+
+            self.assertEqual(
+                _infer_semantic_tag_from_metadata(
+                    column_name="customer_id",
+                    profile=profile["customer_id"],
+                    inferred_type="string",
+                ),
+                "identifier",
+            )
+            self.assertEqual(
+                _infer_semantic_tag_from_metadata(
+                    column_name="order_date",
+                    profile=profile["order_date"],
+                    inferred_type="datetime",
+                ),
+                "datetime",
+            )
+            self.assertEqual(
+                _infer_semantic_tag_from_metadata(
+                    column_name="amount",
+                    profile=profile["amount"],
+                    inferred_type="string",
+                ),
+                "currency",
+            )
+        finally:
+            temp_path.unlink(missing_ok=True)
 
 
 class TestAgent3EncodingAndCanonicalDedup(unittest.TestCase):

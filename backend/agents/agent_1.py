@@ -8,10 +8,15 @@ format hints that later agents can use for semantic inference.
 import csv
 from io import StringIO
 import re
+import warnings
 
+import numpy as np
 import pandas as pd
 import json
 from main import GraphState
+
+
+warnings.filterwarnings('ignore', category=UserWarning)
 
 
 def _read_csv_lines(csv_path: str) -> list[str]:
@@ -120,6 +125,201 @@ def _extract_format_hints(series: pd.Series) -> dict:
         "identifier_like": bool(identifier_like),
     }
 
+
+def _analyze_column_distribution(series: pd.Series) -> dict:
+    """Analyze distribution shape, skewness, and normality for one column."""
+    non_null = series.dropna()
+    if len(non_null) < 10:
+        return {
+            "skewness": 0.0,
+            "kurtosis": 0.0,
+            "is_normal_distribution": False,
+            "is_normal": False,
+            "distribution_type": "insufficient_data",
+        }
+
+    numeric = pd.to_numeric(non_null, errors="coerce").dropna()
+    if len(numeric) < 3:
+        return {
+            "skewness": 0.0,
+            "kurtosis": 0.0,
+            "is_normal_distribution": False,
+            "is_normal": False,
+            "distribution_type": "not_numeric",
+        }
+
+    mean = float(np.mean(numeric))
+    std = float(np.std(numeric, ddof=0))
+    skewness = float(np.mean(((numeric - mean) / std) ** 3)) if std else 0.0
+    kurt = float(np.mean(((numeric - mean) / std) ** 4) - 3) if std else 0.0
+
+    is_normal = False
+    if len(numeric) <= 5000:
+        is_normal = abs(skewness) < 0.5 and abs(kurt) < 1
+    else:
+        is_normal = abs(skewness) < 0.5 and abs(kurt) < 1
+
+    if is_normal:
+        distribution_type = "normal"
+    elif skewness > 0.5:
+        distribution_type = "right_skewed"
+    elif skewness < -0.5:
+        distribution_type = "left_skewed"
+    else:
+        distribution_type = "symmetric"
+
+    return {
+        "skewness": round(skewness, 3),
+        "kurtosis": round(kurt, 3),
+        "is_normal_distribution": is_normal,
+        "is_normal": is_normal,
+        "distribution_type": distribution_type,
+    }
+
+
+def _detect_implicit_missingness(df: pd.DataFrame) -> dict:
+    """Find sentinel values and common textual placeholders for missing data."""
+    implicit_patterns = {}
+
+    for col in df.columns:
+        series = df[col]
+        implicit_flags = []
+
+        if pd.api.types.is_numeric_dtype(series):
+            numeric = pd.to_numeric(series, errors="coerce")
+            total = len(numeric)
+            if total > 0:
+                for sentinel in [-1, -999, 9999, 0, 99999, 999999]:
+                    count = int((numeric == sentinel).sum())
+                    if count > 0 and (count / total) > 0.005:
+                        implicit_flags.append({
+                            "sentinel": sentinel,
+                            "count": count,
+                            "pct": round((count / total) * 100, 2),
+                            "recommendation": "treat as missing value",
+                        })
+
+        if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+            stripped = series.astype("string").str.strip()
+            total = len(stripped)
+            if total > 0:
+                for pattern in ["0000-00-00", "1900-01-01", "n/a", "none", "null", "na", ""]:
+                    count = int((stripped.str.casefold() == pattern).sum())
+                    if count > 0 and (count / total) > 0.005:
+                        implicit_flags.append({
+                            "pattern": pattern,
+                            "count": count,
+                            "pct": round((count / total) * 100, 2),
+                            "recommendation": "treat as missing value",
+                        })
+
+        if implicit_flags:
+            implicit_patterns[col] = implicit_flags
+
+    return implicit_patterns
+
+
+def _detect_potential_outliers(series: pd.Series) -> dict:
+    """Detect potential outliers using IQR and z-score heuristics."""
+    non_null = series.dropna()
+    if len(non_null) < 10:
+        return {}
+
+    numeric = pd.to_numeric(non_null, errors="coerce").dropna()
+    if len(numeric) < 4:
+        return {}
+
+    q1 = numeric.quantile(0.25)
+    q3 = numeric.quantile(0.75)
+    iqr = q3 - q1
+    if iqr == 0:
+        return {
+            "outlier_count": 0,
+            "iqr_outlier_count": 0,
+            "iqr_outlier_pct": 0.0,
+            "z_score_outlier_count": 0,
+            "z_score_outlier_pct": 0.0,
+            "iqr_bounds": {"lower": float(q1), "upper": float(q3)},
+            "has_significant_outliers": False,
+            "method": "iqr",
+            "note": "zero IQR - likely constant column",
+        }
+
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    iqr_mask = (numeric < lower_bound) | (numeric > upper_bound)
+    iqr_outliers = int(iqr_mask.sum())
+
+    std = float(np.std(numeric, ddof=0))
+    if std > 0:
+        z_scores = np.abs((numeric - float(np.mean(numeric))) / std)
+        z_outliers = int(np.sum(np.asarray(z_scores) > 3))
+    else:
+        z_outliers = 0
+
+    return {
+        "outlier_count": int(max(iqr_outliers, z_outliers)),
+        "iqr_outlier_count": int(iqr_outliers),
+        "iqr_outlier_pct": round((iqr_outliers / len(numeric)) * 100, 2),
+        "z_score_outlier_count": int(z_outliers),
+        "z_score_outlier_pct": round((z_outliers / len(numeric)) * 100, 2),
+        "iqr_bounds": {"lower": float(lower_bound), "upper": float(upper_bound)},
+        "has_significant_outliers": bool(iqr_outliers > max(5, len(numeric) * 0.05)),
+        "method": "iqr_and_zscore",
+    }
+
+
+def _detect_column_relationships(df: pd.DataFrame, column_profiles: dict) -> dict:
+    """Find candidate keys, duplicate columns, and strong numeric correlations."""
+    relationships = {
+        "potential_keys": [],
+        "high_cardinality_text": [],
+        "numeric_correlations": [],
+        "suspicious_duplicates": [],
+    }
+
+    total_rows = max(len(df), 1)
+
+    for col, profile in column_profiles.items():
+        if profile.get("cardinality_ratio", 0) > 0.98 and profile.get("missing_count", 0) == 0:
+            relationships["potential_keys"].append(col)
+
+        if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+            unique_count = int(profile.get("unique_count", df[col].nunique(dropna=False)))
+            if unique_count > total_rows * 0.9:
+                relationships["high_cardinality_text"].append({
+                    "column": col,
+                    "unique_count": unique_count,
+                    "uniqueness_pct": round((unique_count / total_rows) * 100, 1),
+                    "likely_identifier": True,
+                })
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(numeric_cols) >= 2:
+        corr_matrix = df[numeric_cols].corr()
+        for index, col1 in enumerate(numeric_cols):
+            for col2 in numeric_cols[index + 1:]:
+                corr_val = corr_matrix.loc[col1, col2]
+                if pd.notna(corr_val) and abs(float(corr_val)) > 0.95:
+                    relationships["numeric_correlations"].append({
+                        "col1": col1,
+                        "col2": col2,
+                        "correlation": round(float(abs(corr_val)), 3),
+                        "warning": "highly correlated - may indicate redundancy or multicollinearity",
+                    })
+
+    columns = list(df.columns)
+    for index, col1 in enumerate(columns):
+        for col2 in columns[index + 1:]:
+            if df[col1].equals(df[col2]):
+                relationships["suspicious_duplicates"].append({
+                    "col1": col1,
+                    "col2": col2,
+                    "reason": "columns contain identical values",
+                })
+
+    return relationships
+
 def agent1_structural_profiler(state: GraphState) -> GraphState:
     """
     Load the CSV, compute structural metrics, and stash the DataFrame in state.
@@ -175,6 +375,15 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
 
     duplicate_rows = int(df.duplicated().sum())
 
+    distribution_analysis = {}
+    implicit_missing = _detect_implicit_missingness(df)
+    relationships = _detect_column_relationships(df, column_profiles)
+
+    for col in df.columns:
+        distribution_analysis[col] = _analyze_column_distribution(df[col])
+        if pd.api.types.is_numeric_dtype(df[col]):
+            column_profiles[col]["outlier_analysis"] = _detect_potential_outliers(df[col])
+
     raw_profile = {
         "shape": {"rows": df.shape[0], "cols": df.shape[1]},
         "total_cells": total_cells,
@@ -182,6 +391,9 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         "overall_missing_rate_pct": round(df.isna().sum().sum() / total_cells * 100, 2) if total_cells > 0 else 0,
         "duplicate_rows": duplicate_rows,
         "duplicate_rate_pct": round(duplicate_rows / df.shape[0] * 100, 2) if df.shape[0] > 0 else 0,
+        "distribution_analysis": distribution_analysis,
+        "implicit_missing_values": implicit_missing,
+        "column_relationships": relationships,
         "columns": column_profiles,
     }
 

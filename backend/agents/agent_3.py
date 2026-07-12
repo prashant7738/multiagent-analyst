@@ -616,7 +616,65 @@ def _impute(df, schema_blueprint):
     return df, notes
 
 
-def _clip_outliers(df, schema_blueprint, ledger=None):
+def _adaptive_outlier_clipping(series, meta, config, profile=None, data_quality_context=None):
+    """Clip outliers using distribution-aware bounds instead of a fixed IQR rule."""
+    numeric_col = pd.to_numeric(series, errors="coerce")
+    non_null = numeric_col.dropna()
+
+    if len(non_null) < 4:
+        return numeric_col, 0, {"method": "insufficient_data"}
+
+    profile = profile or {}
+    distribution = profile.get("distribution_analysis", {}) if isinstance(profile.get("distribution_analysis"), dict) else {}
+    risk_assessment = str((data_quality_context or {}).get("risk_assessment", "low"))
+    semantic_tag = str(meta.get("semantic_tag", "unknown"))
+
+    use_percentile = bool(
+        distribution.get("has_significant_outliers")
+        or distribution.get("distribution_type") in {"right_skewed", "left_skewed"}
+        or risk_assessment in {"critical", "high"}
+        or semantic_tag in {"currency", "percentage", "count"}
+    )
+
+    if use_percentile:
+        if risk_assessment == "critical":
+            lower_pct, upper_pct = 1.0, 99.0
+        elif risk_assessment == "high":
+            lower_pct, upper_pct = 5.0, 95.0
+        else:
+            lower_pct, upper_pct = 2.5, 97.5
+
+        lower = float(np.nanpercentile(non_null, lower_pct))
+        upper = float(np.nanpercentile(non_null, upper_pct))
+        method = f"percentile_{int(lower_pct)}_{int(upper_pct)}"
+    else:
+        q1 = non_null.quantile(0.25)
+        q3 = non_null.quantile(0.75)
+        iqr = q3 - q1
+        if iqr == 0:
+            return numeric_col, 0, {"method": "iqr", "note": "zero IQR - likely constant column"}
+
+        lower = float(q1 - 1.5 * iqr)
+        upper = float(q3 + 1.5 * iqr)
+        method = "iqr"
+
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+        return numeric_col, 0, {"method": method, "note": "invalid bounds"}
+
+    clipped_mask = (numeric_col < lower) | (numeric_col > upper)
+    clipped_count = int(clipped_mask.sum())
+    clipped_series = numeric_col.clip(lower=lower, upper=upper)
+
+    return clipped_series, clipped_count, {
+        "lower": lower,
+        "upper": upper,
+        "method": method,
+        "risk_assessment": risk_assessment,
+        "distribution_type": distribution.get("distribution_type", "unknown"),
+    }
+
+
+def _clip_outliers(df, schema_blueprint, ledger=None, raw_profile=None, data_quality_context=None):
     notes = []
     critical_errors = []
     df = df.copy()
@@ -631,34 +689,40 @@ def _clip_outliers(df, schema_blueprint, ledger=None):
         if meta.get("intended_type") not in ("float", "int"):
             continue
 
-        numeric_col = pd.to_numeric(df[col], errors="coerce")
-        q1 = numeric_col.quantile(0.25)
-        q3 = numeric_col.quantile(0.75)
-        iqr = q3 - q1
-        if iqr == 0:
+        profile = (raw_profile or {}).get("columns", {}).get(col, {})
+        clipped_series, clipped, bounds = _adaptive_outlier_clipping(
+            df[col],
+            meta,
+            {},
+            profile=profile,
+            data_quality_context=data_quality_context,
+        )
+
+        if bounds.get("method") == "insufficient_data":
+            notes.append(f"{col}: outlier clipping skipped (insufficient data)")
+            continue
+        if bounds.get("note") == "zero IQR - likely constant column":
             notes.append(f"{col}: outlier clipping skipped (zero IQR)")
             continue
 
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
-        clipped = int(((numeric_col < lower) | (numeric_col > upper)).sum())
-        df[col] = numeric_col.clip(lower=lower, upper=upper)
-        notes.append(f"{col}: IQR clipping (lower={lower:.3f}, upper={upper:.3f}), {clipped} values clipped")
-        
-        if ledger:
-            ledger.record_clip_bounds(col, lower, upper)
+        df[col] = clipped_series
+        notes.append(
+            f"{col}: {bounds.get('method', 'adaptive')} clipping (lower={bounds['lower']:.3f}, upper={bounds['upper']:.3f}), {clipped} values clipped"
+        )
 
-        # Post-step assertion.
+        if ledger:
+            ledger.record_clip_bounds(col, bounds["lower"], bounds["upper"])
+
         non_null = df[col].dropna()
         if not non_null.empty:
             actual_min = float(non_null.min())
             actual_max = float(non_null.max())
             if ledger:
                 ledger.record_clip_post_bounds(col, actual_min, actual_max)
-            if actual_min < lower - 1e-9 or actual_max > upper + 1e-9:
+            if actual_min < bounds["lower"] - 1e-9 or actual_max > bounds["upper"] + 1e-9:
                 critical_errors.append(
                     f"Agent3: CRITICAL clipping assertion failed for [{col}] "
-                    f"(min={actual_min:.4f}, max={actual_max:.4f}, bounds={lower:.4f}..{upper:.4f})"
+                    f"(min={actual_min:.4f}, max={actual_max:.4f}, bounds={bounds['lower']:.4f}..{bounds['upper']:.4f})"
                 )
 
     return df, notes, critical_errors
@@ -912,7 +976,7 @@ def _validate_financial_constraints(df, config, ledger=None):
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
 
-def _compute_quality_score(df_raw, df_clean, validation_summary, config):
+def _compute_enhanced_quality_score(df_raw, df_clean, validation_summary, config, data_quality_context=None):
     raw_total_cells = df_raw.shape[0] * df_raw.shape[1]
     clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
 
@@ -927,13 +991,29 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     validation_fail_pct = round((validation_summary.get("failed_rows", 0) / total_checks) * 100, 2)
 
     weights = config.get("quality_weights", PREPROCESSING_PROFILES[DEFAULT_PROFILE]["quality_weights"])
-    # Score is driven by post-hoc failures, not by number of executed steps.
+    component_scores = {
+        "completeness": round(max(0.0, 100.0 - missing_penalty_pct), 2),
+        "consistency": round(max(0.0, 100.0 - validation_fail_pct), 2),
+        "deduplication": round(max(0.0, 100.0 - duplicate_rate_pct), 2),
+        "structure": round((len(df_clean) / max(len(df_raw), 1)) * 100, 2),
+    }
+
     score = (
-        100.0
-        - (weights.get("remaining_null_pct", 0.50) * missing_penalty_pct)
-        - (weights.get("validation_fail_pct", 0.40) * validation_fail_pct)
-        - (weights.get("duplicate_rate_pct", 0.10) * duplicate_rate_pct)
+        (weights.get("remaining_null_pct", 0.50) * component_scores["completeness"])
+        + (weights.get("validation_fail_pct", 0.40) * component_scores["consistency"])
+        + (weights.get("duplicate_rate_pct", 0.10) * component_scores["deduplication"])
     )
+
+    risk_assessment = "low"
+    preprocessing_recommendation = "balanced"
+    if isinstance(data_quality_context, dict):
+        risk_assessment = str(data_quality_context.get("risk_assessment", "low"))
+        preprocessing_recommendation = str(data_quality_context.get("preprocessing_recommendation", "balanced"))
+
+    if risk_assessment == "critical":
+        score -= 5.0
+    elif risk_assessment == "high":
+        score -= 2.5
 
     null_pct_by_column = {
         col: round((df_clean[col].isna().sum() / max(len(df_clean), 1)) * 100, 2)
@@ -949,6 +1029,9 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
         "imputation_burden_pct": imputation_burden_pct,
         "duplicate_rate_pct": duplicate_rate_pct,
         "validation_fail_pct": validation_fail_pct,
+        "component_scores": component_scores,
+        "risk_assessment": risk_assessment,
+        "preprocessing_recommendation": preprocessing_recommendation,
         "null_pct_by_column": null_pct_by_column,
         "rows_before": int(df_raw.shape[0]),
         "rows_after": int(df_clean.shape[0]),
@@ -956,6 +1039,11 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
         "columns_before": int(df_raw.shape[1]),
         "columns_after": int(df_clean.shape[1]),
     }
+
+
+def _compute_quality_score(df_raw, df_clean, validation_summary, config):
+    """Backward-compatible wrapper for the enhanced quality score."""
+    return _compute_enhanced_quality_score(df_raw, df_clean, validation_summary, config)
 
 
 def _export_cleaned_dataset(df, output_path="outputs/cleaned_data.csv"):
@@ -998,6 +1086,10 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         state.get("preprocessing_profile"),
         schema_blueprint,
     )
+
+    data_quality_context = {}
+    if isinstance(schema_blueprint.get("__metadata__"), dict):
+        data_quality_context = schema_blueprint["__metadata__"].get("data_quality_assessment", {}) or {}
 
     df_raw = df.copy()
     preprocessing_log = []
@@ -1109,7 +1201,13 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 5 - Encoding done ({len(notes)} columns)")
 
     before_step = df.copy()
-    df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
+    df, notes, critical_errors = _clip_outliers(
+        df,
+        schema_blueprint,
+        ledger,
+        raw_profile=state.get("raw_profile", {}),
+        data_quality_context=data_quality_context,
+    )
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
     if verbose:
@@ -1149,7 +1247,13 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     validation_summary["checks"] += financial_validation["checks"]
     validation_summary["failed_rows"] += financial_validation["failed_rows"]
 
-    data_quality = _compute_quality_score(df_raw, df, validation_summary, preprocessing_config)
+    data_quality = _compute_enhanced_quality_score(
+        df_raw,
+        df,
+        validation_summary,
+        preprocessing_config,
+        data_quality_context,
+    )
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
         f"(raw_missing={data_quality['raw_missing_pct']}%, "

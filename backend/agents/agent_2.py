@@ -10,10 +10,11 @@ import re
 import os
 import pandas as pd
 import json
-from groq import Groq
+
+Groq = None
 
 _GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=_GROQ_API_KEY) if _GROQ_API_KEY else None  # optional; heuristics still work without LLM
+client = None  # optional; heuristics still work without LLM
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
@@ -35,6 +36,181 @@ _NAME_HINTS = [
 def _name_tokens(column_name: str) -> set[str]:
     """Split a column name into lowercase alphanumeric tokens."""
     return set(re.findall(r"[a-z0-9]+", column_name.lower()))
+
+
+def _confidence_level_from_score(score: float) -> str:
+    """Convert a 0-100 confidence score into a coarse label."""
+    if score >= 80:
+        return "high"
+    if score >= 60:
+        return "medium"
+    return "low"
+
+
+def _calculate_semantic_confidence(
+    column_name: str,
+    profile: dict,
+    inferred_type: str,
+    semantic_tag: str,
+    format_hints: dict,
+) -> dict:
+    """Calculate a confidence score for semantic tag inference."""
+    score = 50.0
+    evidence_points = []
+    signal_breakdown = {}
+
+    name_tokens = _name_tokens(column_name)
+    tag_keywords = {
+        "identifier": {"id", "identifier", "uuid", "key", "code", "pk"},
+        "currency": {"sales", "revenue", "cost", "price", "amount", "budget", "tax", "discount", "total", "profit"},
+        "datetime": {"date", "time", "timestamp", "created", "updated", "modified", "datetime"},
+        "percentage": {"percent", "pct", "rate", "margin", "ratio", "share"},
+        "count": {"count", "qty", "quantity", "units", "num", "number", "volume"},
+        "geographic": {"city", "state", "country", "region", "zip", "postal", "latitude", "longitude"},
+        "categorical_label": {"status", "segment", "category", "type", "mode", "brand", "channel", "department"},
+    }
+
+    name_bonus = 0.0
+    if semantic_tag in tag_keywords and name_tokens & tag_keywords[semantic_tag]:
+        name_bonus = 20.0
+        score += name_bonus
+        evidence_points.append(f"name_match: '{semantic_tag}' keyword in column name")
+    signal_breakdown["name_match"] = name_bonus
+
+    type_alignment = {
+        "currency": ["numeric"],
+        "datetime": ["datetime"],
+        "identifier": ["string", "numeric"],
+        "count": ["numeric"],
+        "percentage": ["numeric"],
+        "geographic": ["string"],
+        "categorical_label": ["string"],
+    }
+
+    type_bonus = 0.0
+    type_penalty = 0.0
+    if inferred_type in type_alignment.get(semantic_tag, []):
+        type_bonus = 15.0
+        score += type_bonus
+        evidence_points.append(f"type_alignment: {inferred_type} matches {semantic_tag}")
+    elif semantic_tag in type_alignment and inferred_type not in type_alignment[semantic_tag]:
+        type_penalty = 10.0
+        score -= type_penalty
+        evidence_points.append(f"type_mismatch: {inferred_type} does not match {semantic_tag}")
+    signal_breakdown["type_alignment"] = type_bonus - type_penalty
+
+    format_bonus = 0.0
+    if semantic_tag == "currency" and format_hints.get("currency_like"):
+        format_bonus += 15.0
+        evidence_points.append("format_hint: currency symbols detected")
+    if semantic_tag == "datetime" and format_hints.get("date_like"):
+        format_bonus += 15.0
+        evidence_points.append("format_hint: date patterns detected")
+    if semantic_tag == "identifier" and format_hints.get("identifier_like"):
+        format_bonus += 10.0
+        evidence_points.append("format_hint: identifier patterns detected")
+    score += format_bonus
+    signal_breakdown["format_hints"] = format_bonus
+
+    missing_rate = float(profile.get("missing_rate_pct", 0))
+    unique_count = int(profile.get("unique_count", 0))
+    cardinality_bonus = 0.0
+
+    if semantic_tag == "identifier":
+        if missing_rate == 0:
+            cardinality_bonus += 10.0
+            evidence_points.append("quality: no missing values in identifier")
+        if profile.get("candidate_key_hint"):
+            cardinality_bonus += 5.0
+            evidence_points.append("quality: candidate key hint present")
+    elif semantic_tag == "categorical_label" and 1 < unique_count < 20:
+        cardinality_bonus += 10.0
+        evidence_points.append(f"cardinality: {unique_count} unique values suitable for categorical")
+    score += cardinality_bonus
+    signal_breakdown["cardinality"] = cardinality_bonus
+
+    penalty = 0.0
+    if missing_rate > 50:
+        penalty += 10.0
+        evidence_points.append(f"penalty: high missingness ({missing_rate}%)")
+    if profile.get("has_significant_outliers"):
+        penalty += 5.0
+        evidence_points.append("penalty: significant outlier signal present")
+    score -= penalty
+    signal_breakdown["penalties"] = -penalty
+
+    score = max(0.0, min(100.0, round(score, 2)))
+    return {
+        "confidence_score": score,
+        "confidence_level": _confidence_level_from_score(score),
+        "evidence": evidence_points,
+        "signal_breakdown": signal_breakdown,
+    }
+
+
+def _assess_data_quality_signals(df: pd.DataFrame, raw_profile: dict) -> dict:
+    """Summarize quality risk signals that downstream preprocessing can use."""
+    total_cols = max(len(df.columns), 1)
+    missing_rate_pct = float(raw_profile.get("overall_missing_rate_pct", 0.0) or 0.0)
+    duplicate_rate_pct = float(raw_profile.get("duplicate_rate_pct", 0.0) or 0.0)
+    implicit_missing = raw_profile.get("implicit_missing_values", {}) or {}
+    distribution_analysis = raw_profile.get("distribution_analysis", {}) or {}
+
+    implicit_missing_columns = len(implicit_missing)
+    significant_outlier_columns = sum(
+        1
+        for profile in distribution_analysis.values()
+        if isinstance(profile, dict) and profile.get("has_significant_outliers")
+    )
+
+    quality_issues = []
+    if missing_rate_pct >= 30:
+        quality_issues.append(f"critical_missingness: {missing_rate_pct:.1f}%")
+    elif missing_rate_pct >= 15:
+        quality_issues.append(f"elevated_missingness: {missing_rate_pct:.1f}%")
+
+    if duplicate_rate_pct >= 8:
+        quality_issues.append(f"critical_duplication: {duplicate_rate_pct:.1f}%")
+    elif duplicate_rate_pct >= 3:
+        quality_issues.append(f"elevated_duplication: {duplicate_rate_pct:.1f}%")
+
+    if implicit_missing_columns > 0:
+        quality_issues.append(f"multiple_implicit_nulls: {implicit_missing_columns} columns affected")
+
+    if significant_outlier_columns > 0:
+        quality_issues.append(f"outlier_signals: {significant_outlier_columns} columns flagged")
+
+    if missing_rate_pct >= 30 or duplicate_rate_pct >= 8 or implicit_missing_columns >= 4:
+        risk_assessment = "critical"
+        preprocessing_recommendation = "strict"
+    elif missing_rate_pct >= 15 or duplicate_rate_pct >= 3 or significant_outlier_columns >= max(1, total_cols // 3):
+        risk_assessment = "high"
+        preprocessing_recommendation = "strict"
+    elif missing_rate_pct >= 5 or significant_outlier_columns > 0:
+        risk_assessment = "moderate"
+        preprocessing_recommendation = "balanced"
+    else:
+        risk_assessment = "low"
+        preprocessing_recommendation = "lenient"
+
+    component_scores = {
+        "completeness": round(max(0.0, 100.0 - missing_rate_pct), 2),
+        "duplication": round(max(0.0, 100.0 - duplicate_rate_pct), 2),
+        "implicit_missingness": round(max(0.0, 100.0 - (implicit_missing_columns * 12.5)), 2),
+        "distribution_health": round(max(0.0, 100.0 - (significant_outlier_columns * 12.5)), 2),
+    }
+
+    return {
+        "risk_assessment": risk_assessment,
+        "preprocessing_recommendation": preprocessing_recommendation,
+        "quality_issues": quality_issues,
+        "component_scores": component_scores,
+        "signal_counts": {
+            "columns": total_cols,
+            "implicit_missing_columns": implicit_missing_columns,
+            "significant_outlier_columns": significant_outlier_columns,
+        },
+    }
 
 SEMANTIC_SYSTEM_PROMPT = """You are a senior data analyst. Given column names, inferred types, and sample rows from a CSV,
 produce a JSON schema blueprint. Return ONLY valid JSON, no markdown, no explanation, no backticks.
@@ -507,6 +683,14 @@ def _apply_missingness_policy(
 
         if not isinstance(meta.get("encoding_strategy"), dict):
             meta["encoding_strategy"] = _derive_encoding_strategy(profile, meta)
+
+        meta["confidence"] = _calculate_semantic_confidence(
+            col,
+            profile,
+            str(inferred_types.get(col, meta.get("intended_type", "unknown"))),
+            str(meta.get("semantic_tag", "unknown")),
+            profile.get("format_hints", {}) if isinstance(profile.get("format_hints"), dict) else {},
+        )
     return schema_blueprint, excluded
 
 
@@ -524,6 +708,7 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
             f"encoding={meta.get('encoding_strategy', {}).get('method', 'none')}, "
             f"identifier={meta.get('is_identifier', False)}, "
             f"analysis_allowed={meta.get('analysis_allowed', True)}, "
+            f"confidence={meta.get('confidence', {}).get('confidence_score', 'n/a')}, "
             f"null_action={null_policy.get('action', 'none')}, "
             f"suitable={assessment.get('is_suitable', True)}, "
             f"reason={assessment.get('reason_category', 'n/a')}"
@@ -558,6 +743,12 @@ def agent2_semantic_tagger(state: dict) -> dict:
             _merge_schema_blueprints(schema_blueprint, batch_blueprint)
 
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
+        data_quality_signals = _assess_data_quality_signals(df, raw_profile)
+        schema_blueprint["__metadata__"] = {
+            "data_quality_assessment": data_quality_signals,
+            "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
+            "risk_assessment": data_quality_signals["risk_assessment"],
+        }
 
         print(f"[Agent 2] Blueprint built for {len(schema_blueprint)} columns")
         _print_semantic_summary(df, schema_blueprint)
@@ -569,6 +760,12 @@ def agent2_semantic_tagger(state: dict) -> dict:
         print(f"[Agent 2] LLM returned invalid JSON; using metadata heuristics instead: {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
+        data_quality_signals = _assess_data_quality_signals(df, raw_profile)
+        schema_blueprint["__metadata__"] = {
+            "data_quality_assessment": data_quality_signals,
+            "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
+            "risk_assessment": data_quality_signals["risk_assessment"],
+        }
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
@@ -577,6 +774,12 @@ def agent2_semantic_tagger(state: dict) -> dict:
         print(f"[Agent 2] Groq call failed; using metadata heuristics instead: {e}")
         schema_blueprint = _fallback_blueprint(df, inferred_types)
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
+        data_quality_signals = _assess_data_quality_signals(df, raw_profile)
+        schema_blueprint["__metadata__"] = {
+            "data_quality_assessment": data_quality_signals,
+            "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
+            "risk_assessment": data_quality_signals["risk_assessment"],
+        }
         _print_semantic_summary(df, schema_blueprint)
         if excluded:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)

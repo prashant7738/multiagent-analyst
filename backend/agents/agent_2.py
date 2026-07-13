@@ -257,7 +257,7 @@ For each column output:
 }
 
 Rules:
-- Currency/financial columns: scaling_allowed=false, imputation_strategy=median
+- Currency/financial columns: scaling_allowed=false, imputation_strategy=flag_only
 - Identifier columns: is_identifier=true, imputation_strategy=drop
 - Datetime columns: scaling_allowed=false, imputation_strategy=none
 - Categorical with <20 unique: semantic_tag=categorical_label, imputation_strategy=mode, encoding_strategy=one_hot unless a real order list is provided
@@ -524,6 +524,13 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
             "action": "none",
             "threshold_pct": 25.0,
             "reason": "small datetime gaps are left unchanged to avoid inventing timestamps",
+        }
+
+    if semantic_tag in {"currency", "financial"}:
+        return {
+            "action": "flag_only",
+            "threshold_pct": 0.0,
+            "reason": "financial/currency columns are never imputed; missing values must be reviewed, not estimated",
         }
 
     if missing_rate >= 60.0:

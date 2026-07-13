@@ -229,6 +229,53 @@ def _normalize_category_label(value):
     return normalized.casefold()
 
 
+def _normalize_currency_text(value):
+    if pd.isna(value):
+        return pd.NA
+
+    text = str(value).strip()
+    if not text:
+        return text
+
+    text = re.sub(r"^\((.+)\)$", r"-\1", text)
+    text = re.sub(r"[₹$€£¥₩\s]", "", text)
+    text = re.sub(r"(?i)^rs\.?", "", text)
+    text = re.sub(r"(?i)\b(?:usd|eur|gbp|inr|aud|cad|jpy|cny|rmb|yen|won)\b", "", text).strip()
+
+    sign = ""
+    if text[:1] in {"+", "-"}:
+        sign = text[0]
+        text = text[1:]
+
+    if not text:
+        return pd.NA
+
+    last_comma = text.rfind(",")
+    last_dot = text.rfind(".")
+
+    if last_comma != -1 and last_dot != -1:
+        decimal_sep = "," if last_comma > last_dot else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        text = text.replace(thousands_sep, "")
+        text = text.replace(decimal_sep, ".")
+    elif last_comma != -1:
+        tail = text[last_comma + 1 :]
+        if re.fullmatch(r"\d{2}", tail):
+            text = text[:last_comma].replace(",", "") + "." + tail
+        else:
+            text = text.replace(",", "")
+    elif last_dot != -1:
+        tail = text[last_dot + 1 :]
+        if re.fullmatch(r"\d{1,2}", tail):
+            text = text[:last_dot].replace(".", "") + "." + tail
+        elif re.fullmatch(r"\d{3}", tail):
+            text = text.replace(".", "")
+        else:
+            text = text[:last_dot].replace(".", "") + "." + tail
+
+    return f"{sign}{text}" if sign else text
+
+
 def _is_categorical_for_encoding(meta):
     if not isinstance(meta, dict):
         return False
@@ -338,18 +385,7 @@ def _clean_currency_values(df, schema_blueprint, config, ledger=None):
         original_nulls = int(original_series.isna().sum())
         before_null_pct = (original_nulls / max(len(df), 1)) * 100
 
-        working = original_series.astype("string").str.strip()
-        working = working.str.replace(r"^\((.+)\)$", r"-\1", regex=True)
-        working = working.str.replace(r"[₹$€£¥₩\s]", "", regex=True)
-        working = working.str.replace(r"^Rs\.?", "", regex=True)
-
-        has_comma = working.str.contains(",", na=False)
-        working.loc[has_comma] = (
-            working.loc[has_comma]
-            .str.replace(r"\.(?=\d{3})", "", regex=True)
-            .str.replace(",", ".", regex=False)
-        )
-        working = working.str.replace(",", "", regex=False)
+        working = original_series.map(_normalize_currency_text)
 
         parsed = pd.to_numeric(working, errors="coerce")
         parse_failed_mask = original_series.notna() & parsed.isna()

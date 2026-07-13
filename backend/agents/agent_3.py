@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from agents.agent_1 import GraphState
+from main import update_reliability
 
 
 NULL_STRINGS = {
@@ -1082,8 +1083,24 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     row_accounting["final_rows"] = int(len(df))
 
+    confidence = round(
+        min(1.0, max(0.0, 0.5 * (data_quality.get("overall_quality_score", 0.0) / 100.0) + 0.5 * (len(df) / max(input_rows, 1)))),
+        3,
+    )
+    state_with_reliability = update_reliability(
+        state,
+        "agent3",
+        confidence,
+        evidence=[
+            f"quality_score={data_quality.get('overall_quality_score', 0.0)}",
+            f"rows_after={len(df)}",
+            f"rows_before={input_rows}",
+        ],
+        decision_readiness="ready" if confidence >= 0.8 else "needs_review",
+    )
+
     return {
-        **state,
+        **state_with_reliability,
         "cleaned_df": df,
         "cleaned_csv_path": cleaned_csv_path,
         "scaling_params": scaling_params,

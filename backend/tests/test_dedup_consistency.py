@@ -65,6 +65,22 @@ class TestBankCsvIngestion(unittest.TestCase):
         self.assertEqual(raw_profile["total_missing"], 0)
         self.assertEqual(raw_profile["overall_missing_rate_pct"], 0.0)
 
+    def test_agent1_populates_reliability_metadata(self):
+        state = {
+            "csv_path": str(self.csv_path),
+            "errors": [],
+        }
+
+        state = agent1_structural_profiler(state)
+        reliability = state.get("reliability", {})
+
+        self.assertIsInstance(reliability, dict)
+        self.assertIn("overall_confidence", reliability)
+        self.assertIn("decision_readiness", reliability)
+        self.assertIn("agent1", reliability.get("stage_confidence", {}))
+        self.assertGreaterEqual(reliability["overall_confidence"], 0.0)
+        self.assertLessEqual(reliability["overall_confidence"], 1.0)
+
 
 class TestNumericColumnFiltering(unittest.TestCase):
     def test_analysis_helpers_ignore_raw_and_scaled_backups(self):

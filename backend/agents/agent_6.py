@@ -26,6 +26,7 @@ from jinja2 import Environment, BaseLoader, select_autoescape
 from groq import Groq
 
 from agents.agent_1 import GraphState
+from main import update_reliability
 
 client = Groq()  # reads GROQ_API_KEY from env
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -877,8 +878,16 @@ def agent6_report_generator(state: GraphState) -> GraphState:
 
     print(f"[Agent 6] Report written to {report_path}")
 
+    state_with_reliability = update_reliability(
+        state,
+        "agent6",
+        1.0 if report_path else 0.0,
+        evidence=[f"report_path={report_path}", f"charts_embedded={len(charts)}"],
+        decision_readiness="ready" if report_path else "blocked",
+    )
+
     return {
-        **state,
+        **state_with_reliability,
         "final_report_path": report_path,
         "errors": errors,
     }

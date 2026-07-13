@@ -4,7 +4,7 @@ from io import StringIO
 
 import pandas as pd
 import json
-from main import GraphState
+from main import GraphState, update_reliability
 
 
 def _read_csv_lines(csv_path: str) -> list[str]:
@@ -62,6 +62,22 @@ def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
     buffer.seek(0)
     return pd.read_csv(buffer, low_memory=False)
 
+def _compute_agent1_confidence(raw_profile: dict, df: pd.DataFrame) -> tuple[float, list[str]]:
+    overall_missing = float(raw_profile.get("overall_missing_rate_pct", 0.0))
+    duplicate_rate = float(raw_profile.get("duplicate_rate_pct", 0.0))
+    rows = int(df.shape[0]) if df is not None else 0
+    confidence = round(
+        min(1.0, max(0.0, 1.0 - (overall_missing / 100.0) * 0.5 - (duplicate_rate / 100.0) * 0.3)),
+        3,
+    )
+    evidence = [
+        f"rows={rows}",
+        f"missing_rate_pct={overall_missing}",
+        f"duplicate_rate_pct={duplicate_rate}",
+    ]
+    return confidence, evidence
+
+
 def agent1_structural_profiler(state: GraphState) -> GraphState:
     """
     Reads CSV. Records shape, dtypes, missing values, duplicates.
@@ -92,6 +108,7 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
 
     duplicate_rows = int(df.duplicated().sum())
 
+
     raw_profile = {
         "shape": {"rows": df.shape[0], "cols": df.shape[1]},
         "total_cells": total_cells,
@@ -106,10 +123,33 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
           f"Missing: {raw_profile['overall_missing_rate_pct']}% | "
           f"Duplicates: {duplicate_rows}")
 
+    confidence, evidence = _compute_agent1_confidence(raw_profile, df)
+    state_with_reliability = update_reliability(
+        state,
+        "agent1",
+        confidence,
+        evidence=evidence,
+        decision_readiness="ready" if confidence >= 0.8 else "needs_review",
+    )
+
     # Store df in state for Agent 2 (avoid reloading CSV downstream)
     return {
-        **state,
+        **state_with_reliability,
         "raw_profile": raw_profile,
         "_df_cache": df,  # internal, agents share via state
         "errors": errors,
     }
+
+
+    def fibonacci(n):
+       """Return the nth Fibonacci number."""
+       if n <= 0:
+           return 0
+       elif n == 1:
+           return 1
+       else:
+           a, b = 0, 1
+           for _ in range(2, n + 1):
+               a, b = b, a + b
+           return b     
+

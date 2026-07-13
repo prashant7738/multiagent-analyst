@@ -4,6 +4,7 @@ import math
 import numpy as np
 import pandas as pd
 from agents.agent_1 import GraphState
+from main import update_reliability
 
 CONFIDENCE_THRESHOLD = 0.80   # τ — lower than report's 0.95 for small datasets
 DATA_QUALITY_MINIMUM = 50.0   # minimum acceptable quality score from Agent 3
@@ -815,8 +816,21 @@ def agent5_validator(state: GraphState) -> GraphState:
         "warning_count":    len(warnings),
     }
 
+    state_with_reliability = update_reliability(
+        state,
+        "agent5",
+        confidence_score,
+        evidence=[
+            f"checks_run={total_checks}",
+            f"checks_passed={total_passed}",
+            f"failures={len(failures)}",
+            f"warnings={len(warnings)}",
+        ],
+        decision_readiness="ready" if passed_gate else "needs_review",
+    )
+
     return {
-        **state,
+        **state_with_reliability,
         "validation_result": validation_result,
         "errors":            errors,
     }

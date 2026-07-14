@@ -36,3 +36,43 @@ class GraphState(TypedDict):
 
     # ── shared ────────────────────────────────────────────────────────────────
     errors: list
+    reliability: dict  # stage confidence, decision readiness, and evidence trail
+
+
+def update_reliability(state: dict, stage_name: str, confidence: float, evidence: list | None = None,
+                      decision_readiness: str | None = None) -> dict:
+    """Merge per-stage confidence/decision metadata into the shared state."""
+    reliability = dict(state.get("reliability") or {})
+    stage_confidence = dict(reliability.get("stage_confidence") or {})
+
+    try:
+        stage_confidence[stage_name] = round(float(confidence), 3)
+    except (TypeError, ValueError):
+        stage_confidence[stage_name] = 0.0
+
+    values = [value for value in stage_confidence.values() if isinstance(value, (int, float))]
+    overall_confidence = round(sum(values) / len(values), 3) if values else 0.0
+
+    evidence_items = list(reliability.get("evidence") or [])
+    if evidence:
+        if isinstance(evidence, list):
+            evidence_items.extend(evidence)
+        else:
+            evidence_items.append(evidence)
+
+    if decision_readiness is None:
+        if overall_confidence >= 0.85:
+            decision_readiness = "ready"
+        elif overall_confidence >= 0.65:
+            decision_readiness = "needs_review"
+        else:
+            decision_readiness = "blocked"
+
+    reliability.update({
+        "stage_confidence": stage_confidence,
+        "overall_confidence": overall_confidence,
+        "decision_readiness": decision_readiness,
+        "evidence": evidence_items,
+    })
+
+    return {**state, "reliability": reliability}

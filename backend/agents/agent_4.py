@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from scipy import stats as scipy_stats
 from agents.agent_1 import GraphState
+from main import update_reliability
 
 warnings.filterwarnings("ignore")
 
@@ -729,8 +730,16 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")
 
+    state_with_reliability = update_reliability(
+        state,
+        "agent4",
+        0.9 if stats else 0.4,
+        evidence=[f"stat_sections={len(stats)}", f"charts={len(all_chart_paths)}"],
+        decision_readiness="ready" if stats else "blocked",
+    )
+
     return {
-        **state,
+        **state_with_reliability,
         "stats":       stats,
         "chart_paths": all_chart_paths,
         "errors":      errors,

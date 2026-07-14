@@ -78,11 +78,16 @@ def build_pipeline() -> StateGraph:
 
 if __name__ == "__main__":
     import json
+    import os
 
     pipeline = build_pipeline()
 
+    # Use absolute path relative to this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(script_dir, "bank-full.csv")
+
     initial_state: GraphState = {
-        "csv_path": "bank.csv",
+        "csv_path": csv_path,
         "raw_profile":           {},
         "schema_blueprint":      {},
         "_df_cache":             None,
@@ -100,6 +105,7 @@ if __name__ == "__main__":
         "validation_result":     {},
         "final_report_path":     "",
         "errors":                [],
+        "reliability":           {},
     }
 
     final_state = pipeline.invoke(initial_state)
@@ -137,3 +143,17 @@ if __name__ == "__main__":
         print("\n── Pipeline Errors ──")
         for e in final_state["errors"]:
             print(f"  • {e}")
+
+
+def binary_search(arr, target):
+    """Perform binary search on a sorted array."""
+    left, right = 0, len(arr) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1  # Target not found

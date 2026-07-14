@@ -78,11 +78,16 @@ def build_pipeline() -> StateGraph:
 
 if __name__ == "__main__":
     import json
+    import os
 
     pipeline = build_pipeline()
 
+    # Use absolute path relative to this script's location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_path = os.path.join(script_dir, "bank-full.csv")
+
     initial_state: GraphState = {
-        "csv_path": "10000 Sales Records.csv",
+        "csv_path": csv_path,
         "raw_profile":           {},
         "schema_blueprint":      {},
         "_df_cache":             None,

@@ -35,7 +35,9 @@ def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
     if not lines:
         return pd.DataFrame()
 
-    header = next(csv.reader([lines[0]], delimiter=",", quotechar='"'))
+    # Detect header delimiter (same logic as data rows)
+    header_delimiter = ";" if lines[0].count(";") > lines[0].count(",") else ","
+    header = next(csv.reader([lines[0]], delimiter=header_delimiter, quotechar='"'))
     buffer = StringIO()
     writer = csv.writer(buffer)
     writer.writerow(header)
@@ -140,16 +142,4 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         "errors": errors,
     }
 
-
-    def fibonacci(n):
-       """Return the nth Fibonacci number."""
-       if n <= 0:
-           return 0
-       elif n == 1:
-           return 1
-       else:
-           a, b = 0, 1
-           for _ in range(2, n + 1):
-               a, b = b, a + b
-           return b     
 

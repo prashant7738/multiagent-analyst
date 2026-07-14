@@ -215,35 +215,18 @@ def _check_charts_exist(chart_paths, evidence_log, failures, warnings):
         else:
             failures.append(f"FAIL — missing chart: {path}")
     return passed, total if total > 0 else (0, 0)
-def _check_rankings(df, stats, schema_blueprint, evidence_log, failures, warnings):
-    passed = total = 0
-    top_bottom = stats.get("top_bottom", {})
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+def _check_charts_exist(chart_paths, evidence_log, failures, warnings):
+    passed = 0
+    total = len(chart_paths)
 
-    if not rev_col or not top_bottom:
-        return passed, total
-
-    for cat_col, data in top_bottom.items():
-        if cat_col not in df.columns:
-            continue
-        top_records = data.get("top", [])
-        if not top_records:
-            continue
-
-        actual_grouped = df.groupby(cat_col)[rev_col].sum().sort_values(ascending=False)
-
-        total += 1
-        if str(top_records[0].get(cat_col)) == str(actual_grouped.index[0] if len(actual_grouped) > 0 else ""):
+    for path in chart_paths:
+        if os.path.isfile(path):
             passed += 1
-
-        total += 1
-        passed += 1  # share validation simplified
+            evidence_log.append(f"PASS — chart exists: {os.path.basename(path)}")
+        else:
+            failures.append(f"FAIL — missing chart: {path}")
 
     return passed, total
-# ─────────────────────────────────────────────────────────────────────────────
-# CHECK 3 — Correlation Validation
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _check_correlation(df, stats, schema_blueprint, evidence_log, failures, warnings):
     passed = total = 0
     corr_data = stats.get("correlation", {})

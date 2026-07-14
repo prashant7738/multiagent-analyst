@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     # Use absolute path relative to this script's location
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(script_dir, "bank-full.csv")
+    csv_path = os.path.join(script_dir, "amazon_sales_dataset.csv")
 
     initial_state: GraphState = {
         "csv_path": csv_path,
@@ -145,15 +145,3 @@ if __name__ == "__main__":
             print(f"  • {e}")
 
 
-def binary_search(arr, target):
-    """Perform binary search on a sorted array."""
-    left, right = 0, len(arr) - 1
-    while left <= right:
-        mid = (left + right) // 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-    return -1  # Target not found

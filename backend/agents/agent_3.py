@@ -16,7 +16,7 @@ NULL_STRINGS = {
 
 PREPROCESSING_PROFILES = {
     "strict": {
-        "currency_max_abs_value": 100_000_000,
+        "currency_max_abs_value": 1_100_000_000,
         "max_reasonable_tax_rate": 0.30,
         "reconciliation_rel_tol": 0.01,
         "reconciliation_abs_tol": 0.50,

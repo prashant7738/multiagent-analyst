@@ -464,6 +464,19 @@ def _dedup_after_canonicalization(df):
     return deduped, removed_count, samples
 
 
+ONE_HOT_MAX_CARDINALITY = 50  # above this, one-hot would create too many columns; fall back instead
+
+
+def _frequency_encode_column(df, col):
+    """Map each category to its relative frequency (0-1). Cheap, fixed-width (1 col),
+    safe for any cardinality — used as a fallback when one-hot would explode."""
+    series = df[col].astype("string")
+    freq_map = series.value_counts(normalize=True, dropna=True)
+    encoded_col = f"{col}__freq"
+    encoded_series = series.map(freq_map).astype(float)
+    return encoded_col, encoded_series
+
+
 def _encode_categorical_columns(df, schema_blueprint):
     notes = []
     encoded_schema_entries = {}
@@ -513,6 +526,27 @@ def _encode_categorical_columns(df, schema_blueprint):
             continue
 
         if method == "one_hot":
+            cardinality = int(df[col].nunique(dropna=True))
+            if cardinality > ONE_HOT_MAX_CARDINALITY:
+                encoded_col, encoded_series = _frequency_encode_column(df, col)
+                df[encoded_col] = encoded_series
+                encoded_schema_entries[encoded_col] = {
+                    "intended_type": "float",
+                    "semantic_tag": "encoded_category",
+                    "is_identifier": False,
+                    "scaling_allowed": False,
+                    "imputation_strategy": "none",
+                    "encoding_strategy": {"method": "none", "reason": f"derived frequency encoding from {col}"},
+                    "analysis_allowed": True,
+                    "notes": f"frequency encoding derived from {col} (cardinality={cardinality} exceeded one_hot cap of {ONE_HOT_MAX_CARDINALITY})",
+                    "source_column": col,
+                }
+                notes.append(
+                    f"{col}: one-hot skipped (cardinality={cardinality} > {ONE_HOT_MAX_CARDINALITY}); "
+                    f"frequency-encoded into [{encoded_col}] instead"
+                )
+                continue
+
             encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)
             encoded = encoded.astype(int)
             df = pd.concat([df, encoded], axis=1)

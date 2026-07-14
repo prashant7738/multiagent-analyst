@@ -1,5 +1,6 @@
 # agents/agent_1  -- --- ----structural_profiler.py
 import csv
+import os
 from io import StringIO
 
 import pandas as pd
@@ -64,6 +65,81 @@ def _read_mixed_delimiter_csv(csv_path: str) -> pd.DataFrame:
     buffer.seek(0)
     return pd.read_csv(buffer, low_memory=False)
 
+
+def _read_excel_file(file_path: str, sheet_name: str | int | None = None) -> pd.DataFrame:
+    """Read an Excel (.xlsx/.xlsm/.xls) file into a DataFrame.
+
+    - If sheet_name is given, reads only that sheet.
+    - If sheet_name is None and the workbook has multiple sheets, reads ALL
+      sheets and concatenates them into a single DataFrame, tagging each row
+      with its source sheet in a `_source_sheet` column. If the sheets don't
+      share the same columns, they're still concatenated (outer join), and a
+      warning is recorded in df.attrs so the caller can surface it.
+    """
+    try:
+        xls = pd.ExcelFile(file_path)
+    except Exception as e:
+        raise ValueError(f"Unable to open Excel file: {e}")
+
+    all_sheets = xls.sheet_names
+
+    if sheet_name is not None:
+        try:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+        except Exception as e:
+            raise ValueError(f"Unable to read sheet '{sheet_name}': {e}")
+        df.attrs["sheet_used"] = sheet_name
+        df.attrs["all_sheets"] = all_sheets
+        return df
+
+    if len(all_sheets) == 1:
+        try:
+            df = pd.read_excel(xls, sheet_name=all_sheets[0])
+        except Exception as e:
+            raise ValueError(f"Unable to read sheet '{all_sheets[0]}': {e}")
+        df.attrs["sheet_used"] = all_sheets[0]
+        df.attrs["all_sheets"] = all_sheets
+        return df
+
+    # Multiple sheets, none specified: read and concatenate all of them
+    frames = []
+    schema_mismatch = False
+    reference_columns = None
+    for name in all_sheets:
+        try:
+            sheet_df = pd.read_excel(xls, sheet_name=name)
+        except Exception as e:
+            raise ValueError(f"Unable to read sheet '{name}': {e}")
+
+        if reference_columns is None:
+            reference_columns = list(sheet_df.columns)
+        elif list(sheet_df.columns) != reference_columns:
+            schema_mismatch = True
+
+        sheet_df = sheet_df.copy()
+        sheet_df["_source_sheet"] = name
+        frames.append(sheet_df)
+
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    df.attrs["sheet_used"] = "ALL (concatenated)"
+    df.attrs["all_sheets"] = all_sheets
+    df.attrs["schema_mismatch"] = schema_mismatch
+    return df
+
+
+def _load_dataframe(file_path: str, sheet_name: str | int | None = None) -> pd.DataFrame:
+    """Dispatch to the correct reader based on file extension."""
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in (".xlsx", ".xlsm", ".xls"):
+        return _read_excel_file(file_path, sheet_name=sheet_name)
+    elif ext == ".csv":
+        return _read_mixed_delimiter_csv(file_path)
+    else:
+        # Fall back to CSV parsing for unknown/missing extensions (previous behavior)
+        return _read_mixed_delimiter_csv(file_path)
+
+
 def _compute_agent1_confidence(raw_profile: dict, df: pd.DataFrame) -> tuple[float, list[str]]:
     overall_missing = float(raw_profile.get("overall_missing_rate_pct", 0.0))
     duplicate_rate = float(raw_profile.get("duplicate_rate_pct", 0.0))
@@ -82,16 +158,17 @@ def _compute_agent1_confidence(raw_profile: dict, df: pd.DataFrame) -> tuple[flo
 
 def agent1_structural_profiler(state: GraphState) -> GraphState:
     """
-    Reads CSV. Records shape, dtypes, missing values, duplicates.
+    Reads CSV or Excel (.xlsx/.xlsm/.xls). Records shape, dtypes, missing values, duplicates.
     No fixing. No inference. Just observe and record.
     """
     csv_path = state["csv_path"]
+    sheet_name = state.get("sheet_name")  # optional: caller can pin a specific sheet
     errors = state.get("errors", [])
 
     try:
-        df = _read_mixed_delimiter_csv(csv_path)
+        df = _load_dataframe(csv_path, sheet_name=sheet_name)
     except Exception as e:
-        errors.append(f"Agent1: CSV load failed — {e}")
+        errors.append(f"Agent1: File load failed — {e}")
         return {**state, "errors": errors}
 
     total_cells = df.shape[0] * df.shape[1]
@@ -110,7 +187,6 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
 
     duplicate_rows = int(df.duplicated().sum())
 
-
     raw_profile = {
         "shape": {"rows": df.shape[0], "cols": df.shape[1]},
         "total_cells": total_cells,
@@ -120,6 +196,24 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         "duplicate_rate_pct": round(duplicate_rows / df.shape[0] * 100, 2) if df.shape[0] > 0 else 0,
         "columns": column_profiles,
     }
+
+    # Surface Excel sheet metadata, if applicable
+    sheet_used = df.attrs.get("sheet_used")
+    all_sheets = df.attrs.get("all_sheets")
+    schema_mismatch = df.attrs.get("schema_mismatch", False)
+    if sheet_used is not None:
+        raw_profile["sheet_used"] = sheet_used
+    if all_sheets is not None:
+        raw_profile["all_sheets"] = all_sheets
+        if len(all_sheets) > 1 and sheet_name is None:
+            print(f"[Agent 1] Combined {len(all_sheets)} sheets {all_sheets} into one DataFrame "
+                  f"({df.shape[0]} total rows, tagged via '_source_sheet').")
+            if schema_mismatch:
+                errors.append(
+                    f"Agent1: Sheets {all_sheets} have differing columns; concatenated with "
+                    f"an outer join, so some cells may be NaN due to schema mismatch rather than "
+                    f"missing source data. Pass state['sheet_name'] to read a single sheet instead."
+                )
 
     print(f"[Agent 1] Profiled: {df.shape[0]} rows × {df.shape[1]} cols | "
           f"Missing: {raw_profile['overall_missing_rate_pct']}% | "
@@ -134,12 +228,10 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         decision_readiness="ready" if confidence >= 0.8 else "needs_review",
     )
 
-    # Store df in state for Agent 2 (avoid reloading CSV downstream)
+    # Store df in state for Agent 2 (avoid reloading source file downstream)
     return {
         **state_with_reliability,
         "raw_profile": raw_profile,
         "_df_cache": df,  # internal, agents share via state
         "errors": errors,
     }
-
-

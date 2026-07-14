@@ -219,6 +219,81 @@ def _canonicalize_text_values(series):
     return canonical.str.casefold().str.title()
 
 
+def _normalize_category_label(value):
+    if pd.isna(value):
+        return pd.NA
+    normalized = str(value)
+    normalized = re.sub(r"[_\-]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return pd.NA
+    return normalized.casefold()
+
+
+def _normalize_currency_text(value):
+    if pd.isna(value):
+        return pd.NA
+
+    text = str(value).strip()
+    if not text:
+        return text
+
+    text = re.sub(r"^\((.+)\)$", r"-\1", text)
+    text = re.sub(r"[₹$€£¥₩\s]", "", text)
+    text = re.sub(r"(?i)^rs\.?", "", text)
+    text = re.sub(r"(?i)\b(?:usd|eur|gbp|inr|aud|cad|jpy|cny|rmb|yen|won)\b", "", text).strip()
+
+    sign = ""
+    if text[:1] in {"+", "-"}:
+        sign = text[0]
+        text = text[1:]
+
+    if not text:
+        return pd.NA
+
+    last_comma = text.rfind(",")
+    last_dot = text.rfind(".")
+
+    if last_comma != -1 and last_dot != -1:
+        decimal_sep = "," if last_comma > last_dot else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        text = text.replace(thousands_sep, "")
+        text = text.replace(decimal_sep, ".")
+    elif last_comma != -1:
+        tail = text[last_comma + 1 :]
+        if re.fullmatch(r"\d{2}", tail):
+            text = text[:last_comma].replace(",", "") + "." + tail
+        else:
+            text = text.replace(",", "")
+    elif last_dot != -1:
+        tail = text[last_dot + 1 :]
+        if re.fullmatch(r"\d{1,2}", tail):
+            text = text[:last_dot].replace(".", "") + "." + tail
+        elif re.fullmatch(r"\d{3}", tail):
+            text = text.replace(".", "")
+        else:
+            text = text[:last_dot].replace(".", "") + "." + tail
+
+    return f"{sign}{text}" if sign else text
+
+
+def _is_categorical_for_encoding(meta):
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("is_identifier"):
+        return False
+    semantic_tag = meta.get("semantic_tag")
+    intended_type = meta.get("intended_type")
+    if semantic_tag in {"categorical_label", "geographic"}:
+        return True
+    if intended_type in {"string", "category"}:
+        strategy = meta.get("encoding_strategy")
+        if isinstance(strategy, dict) and strategy.get("method") in {"one_hot", "ordinal"}:
+            return True
+        return semantic_tag not in {"text", "datetime"}
+    return False
+
+
 def _log_null_diff(before_df, after_df, step_name):
     """Return per-column null-count deltas for debugging and regression detection."""
     notes = []
@@ -311,18 +386,7 @@ def _clean_currency_values(df, schema_blueprint, config, ledger=None):
         original_nulls = int(original_series.isna().sum())
         before_null_pct = (original_nulls / max(len(df), 1)) * 100
 
-        working = original_series.astype("string").str.strip()
-        working = working.str.replace(r"^\((.+)\)$", r"-\1", regex=True)
-        working = working.str.replace(r"[₹$€£¥₩\s]", "", regex=True)
-        working = working.str.replace(r"^Rs\.?", "", regex=True)
-
-        has_comma = working.str.contains(",", na=False)
-        working.loc[has_comma] = (
-            working.loc[has_comma]
-            .str.replace(r"\.(?=\d{3})", "", regex=True)
-            .str.replace(",", ".", regex=False)
-        )
-        working = working.str.replace(",", "", regex=False)
+        working = original_series.map(_normalize_currency_text)
 
         parsed = pd.to_numeric(working, errors="coerce")
         parse_failed_mask = original_series.notna() & parsed.isna()
@@ -372,8 +436,12 @@ def _standardize_text_columns(df, schema_blueprint):
         if meta.get("is_identifier"):
             continue
 
-        # Canonicalize category-like text to avoid split groups from casing or separators.
-        if meta.get("canonicalize_text", True):
+        encoding_strategy = meta.get("encoding_strategy") if isinstance(meta.get("encoding_strategy"), dict) else {}
+        semantic_tag = meta.get("semantic_tag")
+        should_canonicalize = semantic_tag in {"categorical_label", "geographic"} or encoding_strategy.get("method") in {"one_hot", "ordinal"}
+
+        # Canonicalize only columns Agent 2 marked as categorical-ish; free text stays conservative.
+        if should_canonicalize:
             df[col] = _canonicalize_text_values(df[col])
             notes.append(
                 f"{col}: text standardized (null normalization + separator cleanup + case canonicalization)"
@@ -387,6 +455,86 @@ def _standardize_text_columns(df, schema_blueprint):
 
             df[col] = text_series
             notes.append(f"{col}: text standardized (strip + null normalization)")
+
+    return df, notes
+
+
+def _dedup_after_canonicalization(df):
+    deduped, removed_count, samples = dedup_exact_rows(df)
+    return deduped, removed_count, samples
+
+
+def _encode_categorical_columns(df, schema_blueprint):
+    notes = []
+    encoded_schema_entries = {}
+    df = df.copy()
+
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns:
+            continue
+        if not _is_categorical_for_encoding(meta):
+            continue
+
+        strategy = meta.get("encoding_strategy") if isinstance(meta.get("encoding_strategy"), dict) else {"method": "none"}
+        method = str(strategy.get("method", "none")).lower()
+        if method == "none":
+            continue
+
+        if not meta.get("analysis_allowed", True):
+            notes.append(f"{col}: encoding skipped (analysis_allowed=false)")
+            continue
+
+        if method == "ordinal":
+            order = strategy.get("order")
+            if not isinstance(order, list) or not order:
+                notes.append(f"{col}: ordinal encoding skipped (missing order list)")
+                continue
+
+            order_map = {
+                normalized_level: index
+                for index, level in enumerate(order)
+                for normalized_level in [_normalize_category_label(level)]
+                if pd.notna(normalized_level)
+            }
+            encoded_col = f"{col}__ordinal"
+            df[encoded_col] = df[col].map(lambda value: order_map.get(_normalize_category_label(value), pd.NA)).astype("Int64")
+            encoded_schema_entries[encoded_col] = {
+                "intended_type": "int",
+                "semantic_tag": "encoded_category",
+                "is_identifier": False,
+                "scaling_allowed": False,
+                "imputation_strategy": "none",
+                "encoding_strategy": {"method": "none", "reason": f"derived ordinal encoding from {col}"},
+                "analysis_allowed": False,
+                "notes": f"ordinal encoding derived from {col}",
+                "source_column": col,
+            }
+            notes.append(f"{col}: ordinal encoded into [{encoded_col}]")
+            continue
+
+        if method == "one_hot":
+            encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)
+            encoded = encoded.astype(int)
+            df = pd.concat([df, encoded], axis=1)
+            for encoded_col in encoded.columns:
+                encoded_schema_entries[encoded_col] = {
+                    "intended_type": "int",
+                    "semantic_tag": "encoded_category",
+                    "is_identifier": False,
+                    "scaling_allowed": False,
+                    "imputation_strategy": "none",
+                    "encoding_strategy": {"method": "none", "reason": f"derived one-hot encoding from {col}"},
+                    "analysis_allowed": False,
+                    "notes": f"one-hot encoded from {col}",
+                    "source_column": col,
+                }
+            notes.append(f"{col}: one-hot encoded into {len(encoded.columns)} columns")
+            continue
+
+        notes.append(f"{col}: encoding skipped (unsupported strategy={method})")
+
+    if encoded_schema_entries:
+        schema_blueprint.update(encoded_schema_entries)
 
     return df, notes
 
@@ -505,7 +653,65 @@ def _impute(df, schema_blueprint):
     return df, notes
 
 
-def _clip_outliers(df, schema_blueprint, ledger=None):
+def _adaptive_outlier_clipping(series, meta, config, profile=None, data_quality_context=None):
+    """Clip outliers using distribution-aware bounds instead of a fixed IQR rule."""
+    numeric_col = pd.to_numeric(series, errors="coerce")
+    non_null = numeric_col.dropna()
+
+    if len(non_null) < 4:
+        return numeric_col, 0, {"method": "insufficient_data"}
+
+    profile = profile or {}
+    distribution = profile.get("distribution_analysis", {}) if isinstance(profile.get("distribution_analysis"), dict) else {}
+    risk_assessment = str((data_quality_context or {}).get("risk_assessment", "low"))
+    semantic_tag = str(meta.get("semantic_tag", "unknown"))
+
+    use_percentile = bool(
+        distribution.get("has_significant_outliers")
+        or distribution.get("distribution_type") in {"right_skewed", "left_skewed"}
+        or risk_assessment in {"critical", "high"}
+        or semantic_tag in {"currency", "percentage", "count"}
+    )
+
+    if use_percentile:
+        if risk_assessment == "critical":
+            lower_pct, upper_pct = 1.0, 99.0
+        elif risk_assessment == "high":
+            lower_pct, upper_pct = 5.0, 95.0
+        else:
+            lower_pct, upper_pct = 2.5, 97.5
+
+        lower = float(np.nanpercentile(non_null, lower_pct))
+        upper = float(np.nanpercentile(non_null, upper_pct))
+        method = f"percentile_{int(lower_pct)}_{int(upper_pct)}"
+    else:
+        q1 = non_null.quantile(0.25)
+        q3 = non_null.quantile(0.75)
+        iqr = q3 - q1
+        if iqr == 0:
+            return numeric_col, 0, {"method": "iqr", "note": "zero IQR - likely constant column"}
+
+        lower = float(q1 - 1.5 * iqr)
+        upper = float(q3 + 1.5 * iqr)
+        method = "iqr"
+
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+        return numeric_col, 0, {"method": method, "note": "invalid bounds"}
+
+    clipped_mask = (numeric_col < lower) | (numeric_col > upper)
+    clipped_count = int(clipped_mask.sum())
+    clipped_series = numeric_col.clip(lower=lower, upper=upper)
+
+    return clipped_series, clipped_count, {
+        "lower": lower,
+        "upper": upper,
+        "method": method,
+        "risk_assessment": risk_assessment,
+        "distribution_type": distribution.get("distribution_type", "unknown"),
+    }
+
+
+def _clip_outliers(df, schema_blueprint, ledger=None, raw_profile=None, data_quality_context=None):
     notes = []
     critical_errors = []
     df = df.copy()
@@ -520,34 +726,40 @@ def _clip_outliers(df, schema_blueprint, ledger=None):
         if meta.get("intended_type") not in ("float", "int"):
             continue
 
-        numeric_col = pd.to_numeric(df[col], errors="coerce")
-        q1 = numeric_col.quantile(0.25)
-        q3 = numeric_col.quantile(0.75)
-        iqr = q3 - q1
-        if iqr == 0:
+        profile = (raw_profile or {}).get("columns", {}).get(col, {})
+        clipped_series, clipped, bounds = _adaptive_outlier_clipping(
+            df[col],
+            meta,
+            {},
+            profile=profile,
+            data_quality_context=data_quality_context,
+        )
+
+        if bounds.get("method") == "insufficient_data":
+            notes.append(f"{col}: outlier clipping skipped (insufficient data)")
+            continue
+        if bounds.get("note") == "zero IQR - likely constant column":
             notes.append(f"{col}: outlier clipping skipped (zero IQR)")
             continue
 
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
-        clipped = int(((numeric_col < lower) | (numeric_col > upper)).sum())
-        df[col] = numeric_col.clip(lower=lower, upper=upper)
-        notes.append(f"{col}: IQR clipping (lower={lower:.3f}, upper={upper:.3f}), {clipped} values clipped")
-        
-        if ledger:
-            ledger.record_clip_bounds(col, lower, upper)
+        df[col] = clipped_series
+        notes.append(
+            f"{col}: {bounds.get('method', 'adaptive')} clipping (lower={bounds['lower']:.3f}, upper={bounds['upper']:.3f}), {clipped} values clipped"
+        )
 
-        # Post-step assertion.
+        if ledger:
+            ledger.record_clip_bounds(col, bounds["lower"], bounds["upper"])
+
         non_null = df[col].dropna()
         if not non_null.empty:
             actual_min = float(non_null.min())
             actual_max = float(non_null.max())
             if ledger:
                 ledger.record_clip_post_bounds(col, actual_min, actual_max)
-            if actual_min < lower - 1e-9 or actual_max > upper + 1e-9:
+            if actual_min < bounds["lower"] - 1e-9 or actual_max > bounds["upper"] + 1e-9:
                 critical_errors.append(
                     f"Agent3: CRITICAL clipping assertion failed for [{col}] "
-                    f"(min={actual_min:.4f}, max={actual_max:.4f}, bounds={lower:.4f}..{upper:.4f})"
+                    f"(min={actual_min:.4f}, max={actual_max:.4f}, bounds={bounds['lower']:.4f}..{bounds['upper']:.4f})"
                 )
 
     return df, notes, critical_errors
@@ -801,7 +1013,7 @@ def _validate_financial_constraints(df, config, ledger=None):
     return df, notes, {"checks": checks, "failed_rows": failed_rows}
 
 
-def _compute_quality_score(df_raw, df_clean, validation_summary, config):
+def _compute_enhanced_quality_score(df_raw, df_clean, validation_summary, config, data_quality_context=None):
     raw_total_cells = df_raw.shape[0] * df_raw.shape[1]
     clean_total_cells = df_clean.shape[0] * df_clean.shape[1]
 
@@ -816,13 +1028,29 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
     validation_fail_pct = round((validation_summary.get("failed_rows", 0) / total_checks) * 100, 2)
 
     weights = config.get("quality_weights", PREPROCESSING_PROFILES[DEFAULT_PROFILE]["quality_weights"])
-    # Score is driven by post-hoc failures, not by number of executed steps.
+    component_scores = {
+        "completeness": round(max(0.0, 100.0 - missing_penalty_pct), 2),
+        "consistency": round(max(0.0, 100.0 - validation_fail_pct), 2),
+        "deduplication": round(max(0.0, 100.0 - duplicate_rate_pct), 2),
+        "structure": round((len(df_clean) / max(len(df_raw), 1)) * 100, 2),
+    }
+
     score = (
-        100.0
-        - (weights.get("remaining_null_pct", 0.50) * missing_penalty_pct)
-        - (weights.get("validation_fail_pct", 0.40) * validation_fail_pct)
-        - (weights.get("duplicate_rate_pct", 0.10) * duplicate_rate_pct)
+        (weights.get("remaining_null_pct", 0.50) * component_scores["completeness"])
+        + (weights.get("validation_fail_pct", 0.40) * component_scores["consistency"])
+        + (weights.get("duplicate_rate_pct", 0.10) * component_scores["deduplication"])
     )
+
+    risk_assessment = "low"
+    preprocessing_recommendation = "balanced"
+    if isinstance(data_quality_context, dict):
+        risk_assessment = str(data_quality_context.get("risk_assessment", "low"))
+        preprocessing_recommendation = str(data_quality_context.get("preprocessing_recommendation", "balanced"))
+
+    if risk_assessment == "critical":
+        score -= 5.0
+    elif risk_assessment == "high":
+        score -= 2.5
 
     null_pct_by_column = {
         col: round((df_clean[col].isna().sum() / max(len(df_clean), 1)) * 100, 2)
@@ -838,6 +1066,9 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
         "imputation_burden_pct": imputation_burden_pct,
         "duplicate_rate_pct": duplicate_rate_pct,
         "validation_fail_pct": validation_fail_pct,
+        "component_scores": component_scores,
+        "risk_assessment": risk_assessment,
+        "preprocessing_recommendation": preprocessing_recommendation,
         "null_pct_by_column": null_pct_by_column,
         "rows_before": int(df_raw.shape[0]),
         "rows_after": int(df_clean.shape[0]),
@@ -845,6 +1076,11 @@ def _compute_quality_score(df_raw, df_clean, validation_summary, config):
         "columns_before": int(df_raw.shape[1]),
         "columns_after": int(df_clean.shape[1]),
     }
+
+
+def _compute_quality_score(df_raw, df_clean, validation_summary, config):
+    """Backward-compatible wrapper for the enhanced quality score."""
+    return _compute_enhanced_quality_score(df_raw, df_clean, validation_summary, config)
 
 
 def _export_cleaned_dataset(df, output_path="outputs/cleaned_data.csv"):
@@ -888,6 +1124,10 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         schema_blueprint,
     )
 
+    data_quality_context = {}
+    if isinstance(schema_blueprint.get("__metadata__"), dict):
+        data_quality_context = schema_blueprint["__metadata__"].get("data_quality_assessment", {}) or {}
+
     df_raw = df.copy()
     preprocessing_log = []
     validation_summary = {"checks": 0, "failed_rows": 0}
@@ -929,6 +1169,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "input_rows": input_rows,
         "exact_duplicates_removed": actual_duplicates,
         "rows_after_dedup": int(len(df)),
+        "rows_dropped_by_canonical_dedup": 0,
         "rows_dropped_by_imputation": 0,
     }
 
@@ -957,6 +1198,26 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
     before_step = df.copy()
+    try:
+        df, canonical_duplicates, duplicate_samples = _dedup_after_canonicalization(df)
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: post-canonicalization dedup failed - {e}")
+
+    row_accounting["rows_dropped_by_canonical_dedup"] = int(canonical_duplicates)
+    preprocessing_log.append(
+        f"Duplicate removal (post-canonicalization): removed={canonical_duplicates}, rows_after={len(df)}"
+    )
+    if duplicate_samples:
+        preprocessing_log.append(f"Canonical duplicate samples: {duplicate_samples}")
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3b"))
+    try:
+        _assert_row_survival_or_abort(input_rows, len(df), "canonical_dedup")
+    except Exception as e:
+        return _early_exit_with_error(state, errors, preprocessing_log, f"Agent3: {e}")
+    if verbose:
+        print(f"[Agent 3] Step 3b - Canonical dedup done ({canonical_duplicates} rows removed)")
+
+    before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
@@ -970,35 +1231,48 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 4 - Imputation done ({len(notes)} actions)")
 
     before_step = df.copy()
-    df, notes, critical_errors = _clip_outliers(df, schema_blueprint, ledger)
+    df, notes = _encode_categorical_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 5"))
     if verbose:
-        print(f"[Agent 3] Step 5 - Outlier clipping done ({len(notes)} columns)")
+        print(f"[Agent 3] Step 5 - Encoding done ({len(notes)} columns)")
+
+    before_step = df.copy()
+    df, notes, critical_errors = _clip_outliers(
+        df,
+        schema_blueprint,
+        ledger,
+        raw_profile=state.get("raw_profile", {}),
+        data_quality_context=data_quality_context,
+    )
+    preprocessing_log.extend(notes)
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    if verbose:
+        print(f"[Agent 3] Step 6 - Outlier clipping done ({len(notes)} columns)")
     if critical_errors:
         return _early_exit_with_error(state, errors, preprocessing_log, "; ".join(critical_errors))
 
     before_step = df.copy()
     df, scaling_params, notes = _scale_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 6"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
     if verbose:
-        print(f"[Agent 3] Step 6 - Scaling done ({len(scaling_params)} columns)")
+        print(f"[Agent 3] Step 7 - Scaling done ({len(scaling_params)} columns)")
 
     before_step = df.copy()
     df, notes = _extract_date_features(df, schema_blueprint)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 7"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
     if verbose:
-        print(f"[Agent 3] Step 7 - Date features extracted ({len(notes)} datetime columns)")
+        print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
     df, notes = _derive_business_metrics(df)
     preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 8"))
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
     if verbose:
-        print(f"[Agent 3] Step 8 - Business metrics derived ({len(notes)} metrics)")
+        print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
 
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)
@@ -1010,7 +1284,13 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     validation_summary["checks"] += financial_validation["checks"]
     validation_summary["failed_rows"] += financial_validation["failed_rows"]
 
-    data_quality = _compute_quality_score(df_raw, df, validation_summary, preprocessing_config)
+    data_quality = _compute_enhanced_quality_score(
+        df_raw,
+        df,
+        validation_summary,
+        preprocessing_config,
+        data_quality_context,
+    )
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
         f"(raw_missing={data_quality['raw_missing_pct']}%, "
@@ -1109,6 +1389,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "preprocessing_profile": selected_profile,
         "dataset_domain": dataset_domain,
         "data_quality": data_quality,
+        "schema_blueprint": schema_blueprint,
         "column_ledger": {
             "columns": ledger.columns,
             "clip_bounds": ledger.clip_bounds,

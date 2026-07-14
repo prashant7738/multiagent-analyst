@@ -14,6 +14,7 @@ import json
 from groq import Groq
 
 client = None
+gemini_client = None
 
 
 class SchemaBlueprint(dict):
@@ -35,7 +36,24 @@ def _get_groq_client() -> Groq:
     client = Groq()
     return client
 
+
+def _get_gemini_client():
+    """Return the active Gemini client, importing the SDK only when needed."""
+    global gemini_client
+    if gemini_client is not None:
+        return gemini_client
+
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_Key") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+
+    from google import genai
+
+    gemini_client = genai.Client(api_key=api_key)
+    return gemini_client
+
 GROQ_MODEL = "llama-3.3-70b-versatile" 
+GEMINI_MODEL = "gemini-2.5-flash"
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 15
 LLM_SINGLE_CALL_THRESHOLD = 20
@@ -368,21 +386,39 @@ def _call_llm_for_schema_blueprint(
     raw_profile: dict,
     columns: list[str],
 ) -> dict:
-    """Ask the LLM for schema metadata for a subset of columns."""
+    """Ask Groq for schema metadata, falling back to Gemini on provider failure."""
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
+    user_content = f"Produce schema blueprint for these columns:\n{user_prompt}"
 
-    response = _get_groq_client().chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Produce schema blueprint for these columns:\n{user_prompt}"},
-        ],
-        temperature=0.1,
-        max_tokens=LLM_MAX_TOKENS,
-    )
+    try:
+        response = _get_groq_client().chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.1,
+            max_tokens=LLM_MAX_TOKENS,
+        )
+        raw_text = response.choices[0].message.content.strip()
+        return _parse_schema_blueprint_response(raw_text)
+    except Exception as groq_error:
+        print(f"[Agent 2] Groq unavailable; trying Gemini: {groq_error}")
 
-    raw_text = response.choices[0].message.content.strip()
-    return _parse_schema_blueprint_response(raw_text)
+    try:
+        response = _get_gemini_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_content,
+            config={
+                "system_instruction": SEMANTIC_SYSTEM_PROMPT,
+                "temperature": 0.1,
+                "max_output_tokens": LLM_MAX_TOKENS,
+            },
+        )
+        raw_text = response.text.strip()
+        return _parse_schema_blueprint_response(raw_text)
+    except Exception as gemini_error:
+        raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
 
 
 def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> dict:

@@ -27,14 +27,40 @@ from groq import Groq
 
 from agents.agent_1 import GraphState
 
-client = Groq()  # reads GROQ_API_KEY from env
+client = None
+gemini_client = None
 GROQ_MODEL = "llama-3.3-70b-versatile"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 OUTPUT_DIR = "outputs"
 REPORT_NAME = "final_insight_report.html"
 
 # Below this quality score we surface a reliability disclaimer in the report.
 QUALITY_DISCLAIMER_THRESHOLD = 60.0
+
+
+def _get_groq_client():
+    """Create the Groq client only when a report actually needs it."""
+    global client
+    if client is not None:
+        return client
+    if not os.getenv("GROQ_API_KEY"):
+        raise RuntimeError("GROQ_API_KEY is not set")
+    client = Groq()
+    return client
+
+
+def _get_gemini_client():
+    """Create the Gemini client only when Groq cannot generate insights."""
+    global gemini_client
+    if gemini_client is not None:
+        return gemini_client
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_Key") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    from google import genai
+    gemini_client = genai.Client(api_key=api_key)
+    return gemini_client
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -490,20 +516,35 @@ def _generate_insights(stats: dict, errors: list, chart_titles: list | None = No
     }
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": INSIGHT_SYSTEM_PROMPT},
-                {"role": "user", "content":
-                    "Produce the analytical report JSON from these derived signals. "
-                    "Synthesize across signals, rank by impact, reference charts by name, and "
-                    "do not restate raw statistics:\n"
-                    + json.dumps(user_payload, indent=2, default=str)},
-            ],
-            temperature=0.3,
-            max_tokens=2000,
+        user_content = (
+            "Produce the analytical report JSON from these derived signals. "
+            "Synthesize across signals, rank by impact, reference charts by name, and "
+            "do not restate raw statistics:\n"
+            + json.dumps(user_payload, indent=2, default=str)
         )
-        raw_text = response.choices[0].message.content.strip()
+        try:
+            response = _get_groq_client().chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": INSIGHT_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+            )
+            raw_text = response.choices[0].message.content.strip()
+        except Exception as groq_error:
+            print(f"[Agent 6] Groq unavailable; trying Gemini: {groq_error}")
+            response = _get_gemini_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=user_content,
+                config={
+                    "system_instruction": INSIGHT_SYSTEM_PROMPT,
+                    "temperature": 0.3,
+                    "max_output_tokens": 2000,
+                },
+            )
+            raw_text = response.text.strip()
 
         # Strip markdown fences if the model adds them anyway.
         if "```" in raw_text:

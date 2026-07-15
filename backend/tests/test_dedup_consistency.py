@@ -7,7 +7,7 @@ import pandas as pd
 from agents.agent_1 import agent1_structural_profiler
 from agents.agent_2 import _assess_column_suitability, _derive_encoding_strategy, _infer_semantic_tag_from_metadata
 from agents.agent_4 import _numeric_cols as agent4_numeric_cols
-from agents.agent_5 import _numeric_cols as agent5_numeric_cols
+from agents.agent_4 import _numeric_cols as agent5_numeric_cols
 from agents.agent_3 import agent3_preprocessor, dedup_exact_rows
 
 

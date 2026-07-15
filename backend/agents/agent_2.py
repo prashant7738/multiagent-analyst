@@ -97,15 +97,7 @@ def _calculate_semantic_confidence(
     signal_breakdown = {}
 
     name_tokens = _name_tokens(column_name)
-    tag_keywords = {
-        "identifier": {"id", "identifier", "uuid", "key", "code", "pk"},
-        "currency": {"sales", "revenue", "cost", "price", "amount", "budget", "tax", "discount", "total", "profit"},
-        "datetime": {"date", "time", "timestamp", "created", "updated", "modified", "datetime"},
-        "percentage": {"percent", "pct", "rate", "margin", "ratio", "share"},
-        "count": {"count", "qty", "quantity", "units", "num", "number", "volume"},
-        "geographic": {"city", "state", "country", "region", "zip", "postal", "latitude", "longitude"},
-        "categorical_label": {"status", "segment", "category", "type", "mode", "brand", "channel", "department"},
-    }
+    tag_keywords = _NAME_HINTS
 
     name_bonus = 0.0
     if semantic_tag in tag_keywords and name_tokens & tag_keywords[semantic_tag]:

@@ -23,16 +23,9 @@ class GraphState(TypedDict):
     data_quality: dict         # 0-100 quality score for Agent 5 and Agent 6
     column_ledger: dict        # per-column transformation tracking and validation failures
 
-    # ── Agent 4 outputs (to be filled) ───────────────────────────────────────
+    # ── Agent 4 outputs ───────────────────────────────────────────────────────
     stats: dict
     chart_paths: list
-
-    # ── Agent 5 outputs (to be filled) ───────────────────────────────────────
-    validation_result: dict
-
-    # ── Agent 6 outputs (to be filled) ───────────────────────────────────────
-    final_report_path: str
-    
 
     # ── shared ────────────────────────────────────────────────────────────────
     errors: list

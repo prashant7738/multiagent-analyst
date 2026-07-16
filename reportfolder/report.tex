@@ -16,8 +16,39 @@
 \usepackage{xcolor}
 \usepackage{caption}
 \usepackage{microtype}
+\usepackage{listings}
 \usepackage{hyperref}
 \hypersetup{hidelinks}
+
+% -------------------- CODE LISTING STYLE --------------------
+\definecolor{codebg}{gray}{0.96}
+\definecolor{codekw}{RGB}{0,0,180}
+\definecolor{codecomment}{RGB}{0,128,0}
+\definecolor{codestr}{RGB}{163,21,21}
+\definecolor{codeline}{gray}{0.5}
+\lstdefinestyle{pystyle}{
+	language=Python,
+	basicstyle=\ttfamily\footnotesize,
+	keywordstyle=\color{codekw}\bfseries,
+	commentstyle=\color{codecomment}\itshape,
+	stringstyle=\color{codestr},
+	numbers=left,
+	numberstyle=\tiny\color{codeline},
+	numbersep=8pt,
+	frame=single,
+	rulecolor=\color{codeline},
+	backgroundcolor=\color{codebg},
+	showstringspaces=false,
+	breaklines=true,
+	breakatwhitespace=true,
+	tabsize=4,
+	captionpos=b,
+	xleftmargin=14pt,
+	xrightmargin=6pt,
+	aboveskip=6pt,
+	belowskip=6pt,
+	literate={-}{-}1
+}
 
 % -------------------- LINE SPACING --------------------
 \onehalfspacing
@@ -54,7 +85,7 @@
 	{\normalfont\bfseries\fontsize{12}{14}\selectfont}
 	{\thesection.}{1em}{}
 \titleformat{\subsection}
-	{\normalfont\itshape\fontsize{12}{14}\selectfont}
+	{\normalfont\bfseries\fontsize{12}{14}\selectfont}
 	{\thesubsection.}{1em}{}
 
 % -------------------- TITLES --------------------
@@ -332,125 +363,62 @@ Multi-format expansion & Planned & Future support target \\
 
 \chapter{THEORETICAL APPROACH}
 
-The implementation in this project depends on two theoretical foundations: the internal mechanics of Transformer-based Large Language Models (LLMs), which power the semantic tagging stage, and the local inference pipeline provided by Ollama, which is treated as the official LLM backend of the system. This chapter explains only the concepts that are directly required to understand how the project generates schema metadata and grounded narrative text, keeping the treatment implementation-oriented rather than exhaustive.
+The semantic tagging stage of this project relies on a Transformer-based Large Language Model (LLM) served locally through Ollama. This chapter summarises only the concepts needed to understand how the model produces the JSON schema blueprint that drives preprocessing, and deliberately avoids theory that the implementation does not use.
 
 \section{Large Language Model Theory}
 
-A Large Language Model is a neural network trained to model the probability distribution of natural language, so that given a sequence of previous tokens it can estimate the most likely next token. In this project the LLM is not used to write free-form prose only; it is used as a structured reasoning component that reads column metadata and returns a strict JSON schema blueprint. Understanding how the model turns text into predictions is therefore necessary to explain why the semantic tagging agent is reliable enough to drive deterministic preprocessing.
-
-\subsection{From Transformers to Modern LLMs}
-Early sequence models such as recurrent neural networks (RNNs) and long short-term memory (LSTM) networks processed tokens one step at a time. This sequential dependency made training slow and made it difficult to capture relationships between tokens that are far apart in a sentence. The Transformer architecture removed recurrence entirely and replaced it with a self-attention mechanism that relates every token to every other token in parallel. Because all positions are processed simultaneously, Transformers train efficiently on modern hardware and model long-range dependencies directly. Modern LLMs such as the Llama family are scaled Transformer networks trained on large text corpora, and they are the class of models executed locally through Ollama in this project.
+A Large Language Model is a neural network trained to model the probability distribution of natural language: given a sequence of previous tokens, it estimates the most likely next token. In this project the model is not used for free-form prose but as a structured reasoning component that reads column metadata and returns a strict JSON schema blueprint.
 
 \subsection{Decoder-Only Transformer Architecture}
-The models used for text generation, including Llama, adopt a \emph{decoder-only} Transformer design. The network is a stack of identical decoder blocks, each containing a masked multi-head self-attention sub-layer and a position-wise feed-forward sub-layer. A causal mask ensures that the prediction for a token at position $t$ can only attend to tokens at positions $1$ to $t$, never to future tokens. This left-to-right constraint is what makes the model autoregressive and suitable for generating one token at a time.
+Earlier sequence models such as RNNs and LSTMs processed tokens one step at a time, which made training slow and long-range relationships hard to capture. The Transformer replaces recurrence with a self-attention mechanism that relates every token to every other token in parallel. Text-generation models such as the Llama family use a \emph{decoder-only} Transformer: a stack of identical blocks in which a causal mask allows the prediction at position $t$ to attend only to positions $1$ to $t$. This left-to-right constraint makes the model autoregressive, generating one token at a time.
 
-\subsection{Tokenization and Vocabulary}
-Before any computation, raw text is split into discrete units called tokens using a subword tokenizer (typically byte-pair encoding). Each unique token maps to an integer index in a fixed \emph{vocabulary} of size $V$. Subword tokenization keeps the vocabulary compact while still being able to represent rare or unseen words as combinations of smaller units. In the project, the prompt sent to the model, which contains column names, inferred types, and sample values, is tokenized in exactly this way before inference.
-
-\subsection{Embedding Layer}
-Each token index is converted into a dense vector using a learned embedding matrix $E \in \mathbb{R}^{V \times d}$, where $d$ is the model dimension:
+\subsection{Tokenization and Embedding}
+Raw text is first split into subword tokens, each mapped to an integer index in a fixed vocabulary of size $V$. Every index is then converted into a dense vector through a learned embedding matrix $E \in \mathbb{R}^{V \times d}$, where $d$ is the model dimension:
 \begin{equation}
 x = E(\text{token})
+\label{eq:embed}
 \end{equation}
-Here $\text{token}$ is the integer index of the token, $E$ is the embedding lookup table, and $x \in \mathbb{R}^{d}$ is the resulting embedding vector. This vector is the numerical representation of the token that the rest of the network operates on.
+Because self-attention is order-agnostic, a positional encoding is added to each embedding so the model can distinguish tokens by position as well as identity. In this project, the prompt containing column names, inferred types, and sample values is tokenized and embedded in exactly this way before inference.
 
-\subsection{Positional Encoding}
-Because self-attention is order-agnostic, positional information must be injected explicitly. Sinusoidal positional encodings add a position-dependent signal to each embedding:
-\begin{equation}
-PE_{(pos,\,2i)} = \sin\!\left(\frac{pos}{10000^{2i/d}}\right)
-\end{equation}
-\begin{equation}
-PE_{(pos,\,2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d}}\right)
-\end{equation}
-where $pos$ is the position of the token in the sequence, $i$ is the dimension index, and $d$ is the model dimension. Even dimensions use a sine function and odd dimensions use a cosine function. The encoding is added to the token embedding so that the model can distinguish tokens by their position as well as their identity.
-
-\subsection{Self-Attention and Multi-Head Attention}
-Self-attention lets each token gather information from other tokens. From the input, three projections are formed: queries $Q$, keys $K$, and values $V$. The scaled dot-product attention is defined as:
+\subsection{Self-Attention}
+Self-attention lets each token gather information from other tokens. Three projections are formed from the input --- queries $Q$, keys $K$, and values $V$ --- and combined using scaled dot-product attention:
 \begin{equation}
 \text{Attention}(Q,K,V) = \text{Softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+\label{eq:attention}
 \end{equation}
-Here $Q$, $K$, and $V$ are matrices of query, key, and value vectors, $d_k$ is the dimension of the key vectors, and $\sqrt{d_k}$ is a scaling factor that prevents the dot products from becoming too large and destabilising the softmax. The term $QK^{\top}$ measures the similarity between each query and every key; the softmax converts these similarities into weights that are used to form a weighted sum of the value vectors.
+where $d_k$ is the key dimension and $\sqrt{d_k}$ scales the dot products to keep the softmax stable. The Transformer runs several attention \emph{heads} in parallel so the model can capture different relationships at once. Each block also applies a position-wise feed-forward network with residual connections and layer normalization, which add capacity and keep the deep computation numerically stable.
 
-Rather than performing attention once, the Transformer uses several parallel attention \emph{heads}, each with its own projections, and concatenates their outputs:
-\begin{equation}
-\text{MultiHead}(Q,K,V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h)\,W^{O}
-\end{equation}
-where each $\text{head}_i = \text{Attention}(QW_i^{Q}, KW_i^{K}, VW_i^{V})$, $h$ is the number of heads, $W_i^{Q}, W_i^{K}, W_i^{V}$ are per-head projection matrices, and $W^{O}$ is the output projection. Multiple heads allow the model to attend to different types of relationships simultaneously.
-
-\subsection{Feed-Forward Network}
-Each decoder block applies a position-wise feed-forward network (FFN) independently to every token vector:
-\begin{equation}
-\text{FFN}(x) = W_2\big(\text{ReLU}(W_1 x + b_1)\big) + b_2
-\end{equation}
-where $x$ is the token representation, $W_1$ and $W_2$ are weight matrices, $b_1$ and $b_2$ are bias vectors, and $\text{ReLU}$ is the rectified linear activation. The FFN expands the representation to a higher dimension, applies a non-linearity, and projects it back, giving the model additional capacity to transform each token.
-
-\subsection{Residual Connections and Layer Normalization}
-To train deep stacks stably, each sub-layer output is added back to its input through a residual connection and then normalized:
-\begin{equation}
-\text{LayerNorm}\big(x + \text{Attention}(x)\big)
-\end{equation}
-The residual term $x$ preserves the original signal and helps gradients flow through many layers, while layer normalization rescales the summed vector to have a stable mean and variance:
-\begin{equation}
-\text{LayerNorm}(u) = \gamma\,\frac{u - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta
-\end{equation}
-where $u$ is the input vector, $\mu$ and $\sigma^2$ are its mean and variance, $\epsilon$ is a small constant for numerical stability, and $\gamma$ and $\beta$ are learned scale and shift parameters.
-
-\subsection{Logits, Softmax, and Next-Token Prediction}
-After the final decoder block, a linear projection maps the last token representation to a vector of \emph{logits} $z$ of length $V$, one score per vocabulary token. A softmax converts these logits into a probability distribution:
+\subsection{Next-Token Prediction}
+After the final block, the last token representation is projected to a vector of logits $z$ of length $V$, which a softmax converts into a probability distribution over the vocabulary:
 \begin{equation}
 P(y_i) = \frac{\exp(z_i)}{\sum_j \exp(z_j)}
+\label{eq:softmax}
 \end{equation}
-where $z_i$ is the logit for token $i$ and the denominator sums over all vocabulary tokens $j$. The model then predicts the next token conditioned on all previous tokens:
-\begin{equation}
-P(x_t \mid x_{<t})
-\end{equation}
-where $x_t$ is the token being predicted and $x_{<t}$ denotes all tokens before position $t$. Text is generated \emph{autoregressively}: the predicted token is appended to the sequence and fed back in to predict the following token, repeating until a stopping condition is reached.
-
-During the model's original training, these predictions are optimised with the cross-entropy loss:
-\begin{equation}
-L = -\sum_i y_i \log(p_i)
-\end{equation}
-where $y_i$ is $1$ for the correct next token and $0$ otherwise, and $p_i$ is the predicted probability for token $i$. This objective drives the probability mass toward the correct token. The project itself performs inference only and does not train the model, but the loss explains why the pre-trained model assigns high probability to coherent, well-formed output such as the valid JSON schema the tagging agent depends on.
+The model predicts the next token conditioned on all previous tokens and generates text autoregressively: each predicted token is appended to the sequence and fed back in to predict the following one, until a stopping condition is reached. A low sampling temperature is used in this project so the output is nearly deterministic, which is important because the response must be strictly valid JSON.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.88\textwidth,height=0.72\textheight,keepaspectratio]{\detokenize{transformer_architecture.png}}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{\detokenize{transformer_architecture.png}}
 \caption{Decoder-only Transformer architecture used by modern LLMs}
 \label{fig:transformer-architecture}
 \end{figure}
 
 \section{Ollama Model and Inference Architecture}
 
-Ollama is the official LLM backend of this system. It is a lightweight runtime that loads and serves open-source Transformer models, such as the Llama family, entirely on the local machine and exposes them through a local REST API. Rather than viewing Ollama merely as a piece of software, this section describes the full Transformer inference pipeline that Ollama executes when the semantic tagging agent sends it a prompt.
+Ollama is the official LLM backend of this system: a lightweight runtime that loads and serves open-source Transformer models entirely on the local machine and exposes them through a local REST API.
 
 \subsection{Why Ollama Is Used}
-The project uses Ollama because it performs inference locally, which gives the system four practical benefits. First, \emph{privacy}: the dataset-derived prompts never leave the machine, which matters for financial and sales data. Second, \emph{offline execution}: the pipeline can run without internet access once the model is pulled. Third, \emph{low and predictable latency and cost}: there are no per-request API charges or network round-trips to a cloud provider. Fourth, \emph{easy deployment}: a single runtime manages model loading and serving, which simplifies reproducing the system. These properties make Ollama an appropriate production backend for an analytics tool intended for small organizations.
+Local inference gives the system four practical benefits: \emph{privacy}, since dataset-derived prompts never leave the machine; \emph{offline execution} once the model is pulled; \emph{low and predictable cost}, with no per-request charges; and \emph{easy deployment}, since a single runtime manages model loading and serving. These properties make Ollama an appropriate backend for an analytics tool intended for small organizations that handle sensitive financial and sales data.
 
 \subsection{Local Model Loading and REST API}
-When a model such as Llama~3.x is requested, Ollama loads the model weights from local storage into CPU or GPU memory and keeps them resident so repeated requests avoid reload overhead. Inference can run on CPU or be accelerated on a GPU, and memory usage is dominated by the model weights plus the attention cache described below. Agent~2 communicates with the running model through Ollama's local REST API: it issues a chat-completion request containing a system instruction and a user message, and receives the generated text in response. From the application's perspective this is a simple local HTTP call, while all the Transformer computation happens inside the Ollama process.
+When a model such as Llama~3.x is requested, Ollama loads its weights into CPU or GPU memory and keeps them resident so repeated requests avoid reload overhead. Agent~2 communicates with the running model through a local chat-completion request containing a system instruction and a user message, and receives the generated text in response. From the application's perspective this is a simple local HTTP call, while all Transformer computation happens inside the Ollama process.
 
 \subsection{Prompt Processing Pipeline}
-Inference proceeds through the same Transformer stages described in the previous section, executed in the forward direction only.
-
-\textbf{Tokenization.} The incoming prompt is split into subword tokens and mapped to integer indices in the model's vocabulary.
-
-\textbf{Embedding generation.} Each token index is converted into a vector through the embedding matrix, $x = E(\text{token})$, and positional information is added using the sinusoidal encoding $PE_{(pos,2i)} = \sin(pos/10000^{2i/d})$ and $PE_{(pos,2i+1)} = \cos(pos/10000^{2i/d})$.
-
-\textbf{Decoder stack and multi-head attention.} The embedded sequence passes through the stack of decoder blocks. In each block, masked multi-head self-attention computes $\text{Attention}(Q,K,V) = \text{Softmax}(QK^{\top}/\sqrt{d_k})V$, letting each token attend to all earlier tokens in the prompt.
-
-\textbf{Feed-forward network.} Each block then applies $\text{FFN}(x) = W_2(\text{ReLU}(W_1 x + b_1)) + b_2$ to every token position.
-
-\textbf{Residual connections and layer normalization.} Every sub-layer is wrapped with a residual connection and normalization, $\text{LayerNorm}(x + \text{Attention}(x))$, keeping the deep computation numerically stable during inference.
-
-\textbf{Logits, softmax, and token sampling.} After the final block, the last position is projected to logits over the vocabulary and normalized with the softmax $P(y_i) = \exp(z_i)/\sum_j \exp(z_j)$, producing the next-token distribution $P(x_t \mid x_{<t})$. A sampling strategy (for example temperature-controlled sampling) selects the next token from this distribution. The project sets a low temperature so that the output is nearly deterministic, which is important because the response must be strictly valid JSON.
-
-\textbf{KV cache.} To generate efficiently, Ollama stores the key and value tensors computed for previous tokens in a \emph{KV cache}. When the next token is produced, only the new token's query must attend to the cached keys and values, so the model does not recompute attention over the entire sequence at every step. This is the main optimization that makes autoregressive local generation fast.
-
-\textbf{Autoregressive generation and response decoding.} The sampled token is appended to the sequence and fed back into the model to predict the following token. This loop continues until an end-of-sequence token or length limit is reached. The generated token indices are finally decoded back into text and returned over the REST API to Agent~2, which parses the JSON schema blueprint from it.
+During inference Ollama executes the stages described above in the forward direction only: the prompt is tokenized and embedded (Equation~\ref{eq:embed}), passed through the decoder stack where masked multi-head attention (Equation~\ref{eq:attention}) lets each token attend to earlier ones, and projected to a next-token distribution through the softmax (Equation~\ref{eq:softmax}). To generate efficiently, Ollama keeps the key and value tensors of previous tokens in a \emph{KV cache}, so each new token only attends to cached values instead of recomputing attention over the whole sequence. The decoded tokens are returned over the REST API to Agent~2, which parses the JSON schema blueprint from the response.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.88\textwidth,height=0.88\textheight,keepaspectratio]{\detokenize{ollama_architecture.png}}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{\detokenize{ollama_architecture.png}}
 \caption{Local Transformer inference pipeline executed by Ollama}
 \label{fig:ollama-architecture}
 \end{figure}
@@ -462,14 +430,14 @@ The backend pipeline is built as a directed sequence of agents. Each agent consu
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.88\textwidth,height=0.72\textheight,keepaspectratio]{last.jpg}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{last.jpg}
 \caption{System architecture and agent flow}
 \label{fig:system-architecture}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.88\textwidth,height=0.88\textheight,keepaspectratio]{second2.png}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{second2.png}
 \caption{Agent workflow}
 \label{fig:agent-workflow}
 \end{figure}
@@ -490,97 +458,256 @@ The implementation approach is also incremental. Each agent was developed as a d
 
 \section{Agent 1: Structural Profiler}
 
-\textbf{Purpose.} Agent~1 (\texttt{agent1\_structural\_profiler}) reads the input file and records its structure. It deliberately performs no fixing and no inference; it only observes and records, giving later stages a factual baseline. The overall workflow is shown in Figure~\ref{fig:agent1}.
+\subsection{Overview and Purpose}
+Agent~1 (\texttt{agent1\_structural\_profiler}) is the entry point of the pipeline. It reads the input file and records a factual description of its structure, performing no cleaning or inference so that every later stage works from an unmodified baseline.
 
-\textbf{Inputs.} It reads \texttt{csv\_path} from the shared \texttt{GraphState}, an optional \texttt{sheet\_name} for Excel inputs, and the running \texttt{errors} list.
+\subsection{Inputs and Outputs}
+\begin{itemize}
+	\item \textbf{Inputs:} \texttt{csv\_path} from the shared \texttt{GraphState}, an optional \texttt{sheet\_name} for Excel workbooks, and the running \texttt{errors} list.
+	\item \textbf{Outputs:} \texttt{raw\_profile} (per-column and dataset-level summary), the cached DataFrame \texttt{\_df\_cache}, updated \texttt{errors}, and stage \texttt{reliability} metadata.
+\end{itemize}
+
+\subsection{Processing Workflow}
+The agent proceeds in four ordered stages, summarised in Figure~\ref{fig:agent1}:
+\begin{enumerate}
+	\item \texttt{\_load\_dataframe} selects a reader based on the file extension, routing Excel and CSV files to dedicated loaders.
+	\item the chosen reader tolerates real-world messiness such as mixed delimiters and non-UTF encodings.
+	\item each column is measured for type, missingness, uniqueness, and sample values.
+	\item a confidence value is computed from the observed missingness and duplication.
+\end{enumerate}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\textwidth,keepaspectratio]{agent1pic.png}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent1pic.png}
 \caption{Workflow of Agent~1: Structural Profiling}
 \label{fig:agent1}
 \end{figure}
 
-\textbf{File loading.} Loading is dispatched by extension in \texttt{\_load\_dataframe}. Excel files are read by \texttt{\_read\_excel\_file}, which reads a pinned sheet directly or concatenates all sheets (outer join) while tagging each row with a \texttt{\_source\_sheet} column and warning on schema mismatch. CSV files are read by \texttt{\_read\_mixed\_delimiter\_csv}, which reads raw lines through \texttt{\_read\_csv\_lines} using the encodings \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1} in turn.
+\subsection{Key Functions}
+\textbf{\texttt{\_read\_mixed\_delimiter\_csv} --- resilient CSV ingestion.} Business exports are often inconsistent, mixing comma- and semicolon-separated rows under non-UTF encodings. This function first reads the text through \texttt{\_read\_csv\_lines} (trying \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1}), then detects the delimiter \emph{per line} and, when the field count does not match the header, retries with the alternate delimiter before raising an error (Figure~\ref{fig:code-agent1-csv}). It matters because a wrong delimiter would silently merge columns and corrupt every later stage. The column profiling that follows records each column's dtype, missing count and rate, unique count, and first three sample values, which Agent~2 later uses instead of the full dataset.
 
-That reader detects the delimiter per line by comparing comma and semicolon counts, rebuilds each row with Python's \texttt{csv} module, and retries with the alternate delimiter when the field count does not match the header. Unknown extensions fall back to CSV parsing.
+\begin{figure}[H]
+\centering
+\begin{lstlisting}[style=pystyle]
+for line in lines[1:]:
+    if not line.strip():
+        continue
 
-\textbf{Structural profiling.} Per column it records the Pandas \texttt{dtype}, missing count (\texttt{isna().sum()}), missing rate, unique count (\texttt{nunique(dropna=False)}), and the first three non-null \texttt{sample\_values}. Dataset-level fields include shape, overall missing rate, and duplicate rows from \texttt{df.duplicated().sum()} with the duplicate rate.
+    delimiter = ";" if line.count(";") > line.count(",") else ","
+    fields = next(csv.reader([line], delimiter=delimiter, quotechar='"'))
 
-\textbf{Reliability.} \texttt{\_compute\_agent1\_confidence} produces a confidence value that decreases with missingness and duplication:
+    if len(fields) != len(header):
+        alternate = "," if delimiter == ";" else ";"
+        alt_fields = next(csv.reader([line], delimiter=alternate, quotechar='"'))
+        if len(alt_fields) == len(header):
+            fields = alt_fields
+        else:
+            raise ValueError(
+                f"Unable to parse row with {len(fields)} fields "
+                f"(expected {len(header)}): {line[:120]}"
+            )
+
+    writer.writerow(fields)
+\end{lstlisting}
+\caption{Per-line delimiter detection and fallback in \texttt{\_read\_mixed\_delimiter\_csv} (Agent~1)}
+\label{fig:code-agent1-csv}
+\end{figure}
+
+\subsection{Reliability and Pipeline Interaction}
+\texttt{\_compute\_agent1\_confidence} converts the observed data health into a single confidence value that decreases with missingness and duplication:
 \begin{equation}
 c_1 = \text{clamp}\!\left(1 - 0.5\,\frac{m}{100} - 0.3\,\frac{d}{100},\; 0,\; 1\right)
+\label{eq:agent1-conf}
 \end{equation}
-where $m$ is the overall missing rate and $d$ the duplicate rate (percentages). The stage is marked \texttt{ready} when $c_1 \geq 0.8$ and \texttt{needs\_review} otherwise, via \texttt{update\_reliability}.
-
-\textbf{Output and interaction.} On success it writes \texttt{raw\_profile}, caches the DataFrame in \texttt{\_df\_cache}, and updates \texttt{errors} and \texttt{reliability}. If loading fails, the exception is appended to \texttt{errors} and the state returns early. The cached DataFrame and profile are consumed directly by Agent~2.
+where $m$ is the overall missing rate and $d$ the duplicate rate as percentages. The stage is marked \texttt{ready} when $c_1 \geq 0.8$ and \texttt{needs\_review} otherwise. On success it writes \texttt{raw\_profile}, caches the DataFrame in \texttt{\_df\_cache}, and passes both to Agent~2; if loading fails, the error is recorded and the pipeline stops early. Tested on the Amazon Sales Dataset, Agent~1 parsed the file without row loss and produced the per-column missingness and duplicate counts consumed by the later agents.
 
 \section{Agent 2: Semantic Tagger}
 
-\textbf{Purpose.} Agent~2 (\texttt{agent2\_semantic\_tagger}) produces the \texttt{schema\_blueprint}, a per-column description of intended type, semantic role, and cleaning policy. When the LLM is invoked, the model is served locally through Ollama running a Llama-family Transformer. Figure~\ref{fig:agent2} summarizes the flow.
+\subsection{Overview and Purpose}
+Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a \texttt{schema\_blueprint}: a per-column description of the intended type, semantic role, and cleaning policy. Where Agent~1 only observed the data, Agent~2 assigns meaning to each column so that preprocessing can be driven by rules rather than guesswork. When the language model is invoked, it is served locally through Ollama; the inference mechanics are described in Chapter~4 and are not repeated here.
 
-\textbf{Inputs.} It uses \texttt{raw\_profile} and the cached DataFrame \texttt{\_df\_cache} from Agent~1, plus the \texttt{errors} list. If no DataFrame is present, it records an error and returns.
+\subsection{Inputs and Outputs}
+\begin{itemize}
+	\item \textbf{Inputs:} \texttt{raw\_profile} and the cached DataFrame \texttt{\_df\_cache} from Agent~1, plus the \texttt{errors} list.
+	\item \textbf{Outputs:} the \texttt{schema\_blueprint} (per-column type, semantic tag, identifier flag, scaling and imputation policy, encoding strategy, and null policy) with a \texttt{\_\_metadata\_\_} block and updated \texttt{errors}.
+\end{itemize}
+
+\subsection{Processing Workflow}
+The agent combines cheap local heuristics with a controlled model call. The workflow is illustrated in three stages in Figures~\ref{fig:agent2-1}--\ref{fig:agent2-3}.
+
+First, local type sniffing (\texttt{\_infer\_intended\_types}) assigns a provisional type to every column, and a minimal prompt containing only column metadata and three sample values is built (Figure~\ref{fig:agent2-1}).
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\textwidth,keepaspectratio]{agent2pic.png}
-\caption{Workflow of Agent~2: Semantic Tagging}
-\label{fig:agent2}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent21.png}
+\caption{Agent~2 workflow (stage 1): local type inference and prompt construction}
+\label{fig:agent2-1}
 \end{figure}
 
-\textbf{Type sniffing.} Before any model call, \texttt{\_infer\_intended\_types} performs cheap local inference, mapping each column to \texttt{numeric}, \texttt{datetime}, \texttt{boolean}, \texttt{string}, or \texttt{unknown} using the dtype and an 80\% parseability threshold for object columns.
+Next, the model is called --- once for small schemas or in retry-safe batches for wide datasets --- and its JSON response is parsed defensively into the schema blueprint (Figure~\ref{fig:agent2-2}).
 
-\textbf{Prompt construction and inference.} \texttt{\_build\_llm\_prompt} builds a minimal prompt with each column's name, inferred type, missing rate, unique count, and three samples. A fixed system prompt requires the model to return \emph{only} valid JSON describing \texttt{intended\_type}, \texttt{semantic\_tag}, \texttt{is\_identifier}, \texttt{scaling\_allowed}, \texttt{imputation\_strategy}, \texttt{encoding\_strategy}, and \texttt{null\_policy}, at a low temperature (0.1) for near-deterministic output.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent22.png}
+\caption{Agent~2 workflow (stage 2): batched LLM inference and schema parsing}
+\label{fig:agent2-2}
+\end{figure}
 
-When the schema exceeds \texttt{LLM\_SINGLE\_CALL\_THRESHOLD} (20) columns, \texttt{\_split\_columns\_into\_batches} splits it into batches of \texttt{LLM\_BATCH\_SIZE} (15). \texttt{\_call\_llm\_for\_schema\_blueprint\_with\_retry} calls the model per batch and, if a truncated response fails JSON parsing, recursively halves the batch, retries, and merges results with \texttt{\_merge\_schema\_blueprints}. \texttt{\_parse\_schema\_blueprint\_response} accepts raw or fenced JSON and, as a last resort, extracts the outermost \texttt{\{...\}} span.
+Finally, the blueprint is enriched: missing tags are filled, a missingness policy is applied, per-column confidence is scored, and a conservative fallback is used if the model output is unusable (Figure~\ref{fig:agent2-3}).
 
-\textbf{Enrichment and confidence.} \texttt{\_apply\_missingness\_policy} and \texttt{\_enrich\_missingness\_metadata} fill any missing \texttt{semantic\_tag} via \texttt{\_infer\_semantic\_tag\_from\_metadata} and attach a \texttt{column\_assessment}, \texttt{null\_policy}, and \texttt{encoding\_strategy}. Columns above \texttt{MISSINGNESS\_ANALYSIS\_THRESHOLD\_PCT} (20\%) are marked \texttt{analysis\_allowed = false}. \texttt{\_calculate\_semantic\_confidence} scores each tag from 0--100, and a \texttt{\_\_metadata\_\_} block records the risk assessment and preprocessing recommendation.
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent23.png}
+\caption{Agent~2 workflow (stage 3): enrichment, confidence scoring, and fallback}
+\label{fig:agent2-3}
+\end{figure}
 
-\textbf{Fallback and output.} On invalid JSON or any exception, \texttt{\_fallback\_blueprint} assigns conservative types and policies from the sniffed types, keeping the pipeline running without the LLM. The agent writes \texttt{schema\_blueprint} and \texttt{errors}; this blueprint drives every decision in Agent~3.
+\subsection{Key Functions}
+\textbf{\texttt{\_infer\_intended\_types}} performs local type sniffing without the model, using the Pandas dtype and an 80\% parseability threshold for object columns; its result seeds both the prompt and the fallback, so every column has a defensible type even when the LLM is unavailable. \textbf{\texttt{\_build\_llm\_prompt}} sends only column metadata and three samples rather than the full table, and a fixed system prompt requires strictly valid JSON at a low temperature (0.1). For wide schemas, \textbf{\texttt{\_call\_llm\_for\_schema\_blueprint\_with\_retry}} splits columns into batches and, if a truncated response fails to parse, recursively halves the batch and merges the results, which lets the agent tag very wide datasets reliably. \textbf{\texttt{\_parse\_schema\_blueprint\_response}} accepts raw or fenced JSON and, as a last resort, extracts the outermost \texttt{\{...\}} span, so a single formatting quirk does not discard a valid schema.
+
+\subsection{Reliability and Pipeline Interaction}
+After tagging, missing \texttt{semantic\_tag} values are filled and each column receives a \texttt{null\_policy} and \texttt{encoding\_strategy}; columns whose missing rate exceeds 20\% are marked \texttt{analysis\_allowed = false} so later analysis ignores unreliable fields, and \texttt{\_calculate\_semantic\_confidence} scores each tag from 0--100. If the model output is invalid, \texttt{\_fallback\_blueprint} assigns conservative policies from the sniffed types. On the Amazon Sales Dataset, Agent~2 tagged the price and discount columns as currency and the rating and quantity columns as numeric, while flagging high-missingness columns for exclusion from analysis. The resulting \texttt{schema\_blueprint} is the contract that drives every decision in Agent~3.
 
 \section{Agent 3: Preprocessor}
 
-\textbf{Purpose.} Agent~3 (\texttt{agent3\_preprocessor}) performs deterministic cleaning and feature construction guided entirely by the \texttt{schema\_blueprint}. It reads \texttt{\_df\_cache}, \texttt{schema\_blueprint}, and \texttt{raw\_profile}, returning early if either input is missing. The staged pipeline is shown in Figure~\ref{fig:agent3}.
+\subsection{Overview and Purpose}
+Agent~3 (\texttt{agent3\_preprocessor}) performs deterministic cleaning and feature construction, guided entirely by the \texttt{schema\_blueprint} from Agent~2. It is the stage that turns raw, inconsistent values into a trustworthy, analysis-ready table. Unlike Agent~2, it uses no language model at all: every transformation is a fixed, logged rule, which makes the output reproducible and auditable.
 
-\textbf{Profile selection.} \texttt{\_build\_preprocessing\_config} selects a \texttt{strict}, \texttt{balanced}, or \texttt{lenient} profile. A pinned profile is honoured; otherwise \texttt{\_detect\_dataset\_domain} inspects finance keywords and currency/percentage tags, choosing \texttt{strict} for finance/sales data. Each profile sets currency limits, a maximum tax rate, reconciliation tolerances, and quality weights.
+\subsection{Inputs and Outputs}
+\begin{itemize}
+	\item \textbf{Inputs:} the cached DataFrame \texttt{\_df\_cache}, the \texttt{schema\_blueprint}, and \texttt{raw\_profile}. The agent returns early if either the frame or the blueprint is missing.
+	\item \textbf{Outputs:} \texttt{cleaned\_df}, \texttt{cleaned\_csv\_path}, \texttt{scaling\_params}, \texttt{preprocessing\_log}, \texttt{data\_quality}, a \texttt{column\_ledger}, and reliability metadata.
+\end{itemize}
+
+\subsection{Profile Selection}
+Before any cleaning, \texttt{\_build\_preprocessing\_config} chooses a \texttt{strict}, \texttt{balanced}, or \texttt{lenient} configuration profile. A profile pinned by the caller is always honoured; otherwise \texttt{\_detect\_dataset\_domain} inspects finance keywords and currency/percentage tags and selects \texttt{strict} for finance and sales data. Each profile fixes the currency limits, the maximum plausible tax rate, the reconciliation tolerances, and the weights used later in the quality score. This step matters because it lets a single code base apply appropriately cautious rules to sensitive financial data while staying flexible on generic datasets.
+
+\subsection{Processing Workflow}
+Cleaning runs as an ordered, fully logged sequence of steps; each step records its per-column null differences so the effect of every action is visible. The stages, shown in Figure~\ref{fig:agent3}, are:
+\begin{enumerate}
+	\item \textbf{Step 0 --- Deduplication:} \texttt{dedup\_exact\_rows} removes exact duplicate rows, asserts the count matches Agent~1's profile, and aborts through \texttt{\_assert\_row\_survival\_or\_abort} if fewer than half the rows survive (a safeguard against accidental data loss).
+	\item \textbf{Step 1 --- Currency cleaning:} \texttt{\_clean\_currency\_values} normalises monetary text and writes a \texttt{\_parse\_failed} flag for values it cannot parse.
+	\item \textbf{Step 2 --- Type coercion:} \texttt{\_coerce\_types} casts each column to its intended type while tracking any new NaNs created by the cast.
+	\item \textbf{Step 3 / 3b --- Text standardisation and re-dedup:} text columns are canonicalised, then duplicates are removed again in case canonicalisation merged rows.
+	\item \textbf{Step 4 --- Imputation:} \texttt{\_impute} fills or drops missing values according to each column's policy.
+	\item \textbf{Step 5 --- Encoding:} categorical columns are encoded for later analysis.
+	\item \textbf{Step 6 --- Outlier clipping:} \texttt{\_clip\_outliers} caps extreme values using percentile bounds for skewed columns and the IQR $1.5\times$ rule otherwise.
+	\item \textbf{Step 7 --- Scaling:} \texttt{\_scale\_columns} applies Min--Max scaling while preserving raw copies.
+	\item \textbf{Step 8 --- Date features:} \texttt{\_extract\_date\_features} derives calendar features from datetime columns.
+	\item \textbf{Step 9 --- Business metrics:} \texttt{\_derive\_business\_metrics} constructs profit, margin, and related fields where the necessary columns exist.
+\end{enumerate}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\textwidth,keepaspectratio]{agent3pic.png}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent3pic.png}
 \caption{Workflow of Agent~3: Preprocessing Pipeline}
 \label{fig:agent3}
 \end{figure}
 
-\textbf{Cleaning pipeline.} Processing runs as an ordered, logged sequence. Step~0 removes exact duplicates with \texttt{dedup\_exact\_rows}, asserting the count matches Agent~1 and aborting via \texttt{\_assert\_row\_survival\_or\_abort} if under half the rows survive. Step~1 (\texttt{\_clean\_currency\_values}) uses \texttt{\_normalize\_currency\_text} to convert parenthetical negatives, strip currency symbols and codes, and resolve European versus US decimals, writing a \texttt{\_parse\_failed} flag. Step~2 (\texttt{\_coerce\_types}) casts to intended types, tracking new NaNs; Step~3 standardizes text and Step~3b re-deduplicates after canonicalization.
+\subsection{Key Functions}
 
-Step~4 (\texttt{\_impute}) handles missing values per each column's \texttt{null\_policy}/\texttt{imputation\_strategy}, supporting flag-only, identifier row drop, and mean, median, mode, or unknown-label fills. Step~5 encodes categoricals; Step~6 (\texttt{\_clip\_outliers}) applies \texttt{\_adaptive\_outlier\_clipping} with percentile bounds for skewed/high-risk columns and the IQR $1.5\times$ rule otherwise; Step~7 (\texttt{\_scale\_columns}) applies Min--Max scaling while keeping \texttt{\_raw} and \texttt{\_scaled} copies in \texttt{scaling\_params}. Step~8 (\texttt{\_extract\_date\_features}) derives calendar features, and Step~9 (\texttt{\_derive\_business\_metrics}) uses whole-word matching (\texttt{\_find\_col}) and an 80\% numeric check to derive profit, margin, revenue per unit, total revenue, discount, budget variance, and total cost when possible.
-
-\textbf{Validation and quality.} \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} flag invalid counts and implausible tax rates into a \texttt{ColumnLedger}, and \texttt{\_compute\_enhanced\_quality\_score} combines remaining nulls, validation failures, and duplication into a 0--100 \texttt{data\_quality} score.
-
-\textbf{Output and interaction.} Every step appends to \texttt{preprocessing\_log} with null diffs, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. The agent updates \texttt{cleaned\_df}, \texttt{cleaned\_csv\_path}, \texttt{scaling\_params}, \texttt{preprocessing\_log}, \texttt{data\_quality}, \texttt{column\_ledger}, and reliability. Critical failures trigger \texttt{\_early\_exit\_with\_error}. The \texttt{cleaned\_df} and \texttt{scaling\_params} feed Agent~4.
-
-\section{Agent 4: Statistical Analysis}
-
-\textbf{Purpose.} Agent~4 (\texttt{agent4\_analysis}) turns the cleaned dataset into descriptive statistics and chart artifacts. It reads \texttt{cleaned\_df} and \texttt{schema\_blueprint}, errors out if no cleaned frame exists, clears previous PNGs with \texttt{\_clear\_chart\_dir}, and saves figures through \texttt{\_save} into \texttt{outputs/charts}. Figure~\ref{fig:agent4} outlines the analysis flow.
-
-\textbf{Column selection.} \texttt{\_numeric\_cols} and \texttt{\_categorical\_cols} exclude validation columns (\texttt{\_parse\_failed}, \texttt{\_range\_failed}), scaling backups (\texttt{\_raw}, \texttt{\_scaled}), identifiers, datetime columns, and columns marked \texttt{analysis\_allowed = false}, so analysis runs only on meaningful fields.
+\textbf{\texttt{\_normalize\_currency\_text} --- monetary parsing.} Financial exports mix symbols, currency codes, parenthetical negatives such as \texttt{(123)}, and locale-specific separators (for example the European \texttt{1.234,56} versus the US \texttt{1,234.56}). This function converts all of these to a plain numeric string so the values can be cast to \texttt{float}. Its most important part, shown in Figure~\ref{fig:code-agent3-currency}, decides which separator is the decimal point by comparing the positions of the last comma and last dot, then strips the thousands separator. Without this step, monetary columns would be read as text and every downstream financial metric would be impossible.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\textwidth,keepaspectratio]{agent4pic.png}
+\begin{lstlisting}[style=pystyle]
+last_comma = text.rfind(",")
+last_dot = text.rfind(".")
+
+if last_comma != -1 and last_dot != -1:
+    decimal_sep = "," if last_comma > last_dot else "."
+    thousands_sep = "." if decimal_sep == "," else ","
+    text = text.replace(thousands_sep, "")
+    text = text.replace(decimal_sep, ".")
+elif last_comma != -1:
+    tail = text[last_comma + 1:]
+    if re.fullmatch(r"\d{2}", tail):        # 1234,56 -> 1234.56
+        text = text[:last_comma].replace(",", "") + "." + tail
+    else:                                    # 1,234 -> 1234 (thousands)
+        text = text.replace(",", "")
+\end{lstlisting}
+\caption{Decimal/thousands-separator resolution in \texttt{\_normalize\_currency\_text} (Agent~3)}
+\label{fig:code-agent3-currency}
+\end{figure}
+
+\textbf{Other key functions.} \texttt{\_impute} fills or drops missing values according to each column's \texttt{null\_policy} (mean, median, mode, unknown-label, flag-only, or identifier row-drop), recording the exact value used for each column. \texttt{\_scale\_columns} applies Min--Max normalisation,
+\begin{equation}
+x' = \frac{x - x_{\min}}{x_{\max} - x_{\min}}
+\label{eq:minmax}
+\end{equation}
+while keeping \texttt{\_raw} and \texttt{\_scaled} copies and storing $x_{\min}$ and $x_{\max}$ in \texttt{scaling\_params}, so the transform can be inverted later. \texttt{\_derive\_business\_metrics} uses whole-word matching (\texttt{\_find\_col}, which avoids false hits such as ``count'' matching ``Country'') to locate revenue, cost, unit, price, discount, and budget columns, then derives profit, margin, revenue per unit, discount percentage, and budget variance wherever the required columns exist, giving Agent~4 richer fields to summarise.
+
+\subsection{Validation and Data Quality}
+After the transformation steps, \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} flag invalid counts and implausible tax rates into a \texttt{ColumnLedger}, and \texttt{\_compute\_enhanced\_quality\_score} combines the remaining null rate, the validation-failure rate, and the duplication rate into a single 0--100 \texttt{data\_quality} score. The ledger and score make the cleaning process transparent: a reviewer can see not only what the data became, but how much of it had to be corrected.
+
+\subsection{Reliability and Pipeline Interaction}
+Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the Amazon Sales Dataset, Agent~3 parsed the price and discount fields into numeric values, imputed the missing ratings, and derived discount-percentage and margin columns, producing a cleaned table with a high data-quality score. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
+
+\section{Agent 4: Statistical Analysis}
+
+\subsection{Overview and Purpose}
+Agent~4 (\texttt{agent4\_analysis}) turns the cleaned dataset into descriptive statistics and chart artifacts. It is the stage that produces measurable evidence about the data: summary statistics, correlations, trends, rankings, seasonality, anomalies, and regression fits, each accompanied by a saved figure. Before running, it clears previous PNGs with \texttt{\_clear\_chart\_dir} and writes every figure through \texttt{\_save} into \texttt{outputs/charts}, so each run starts from a clean, reproducible set of outputs.
+
+\subsection{Inputs and Outputs}
+\begin{itemize}
+	\item \textbf{Inputs:} the \texttt{cleaned\_df} and \texttt{scaling\_params} from Agent~3 and the \texttt{schema\_blueprint}; it errors out if no cleaned frame exists.
+	\item \textbf{Outputs:} a \texttt{stats} dictionary holding all numerical results, a \texttt{chart\_paths} list of saved figures, updated \texttt{errors}, and reliability metadata.
+\end{itemize}
+
+\subsection{Processing Workflow}
+The agent runs a fixed battery of analyses over the selected columns, illustrated in Figure~\ref{fig:agent4}:
+\begin{enumerate}
+	\item \textbf{Column selection} restricts analysis to meaningful fields.
+	\item \textbf{Descriptive statistics} and a \textbf{correlation} matrix summarise each column and the relationships between them.
+	\item \textbf{Growth rates}, \textbf{rankings}, and \textbf{seasonality} describe how key measures change over time and across categories.
+	\item \textbf{Anomaly detection} and \textbf{regression trends} highlight unusual values and directional change.
+	\item \textbf{Distribution and derived-metric charts} visualise spread and the business fields created in Agent~3.
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{agent4pic.png}
 \caption{Workflow of Agent~4: Statistical Analysis}
 \label{fig:agent4}
 \end{figure}
 
-\textbf{Analyses.} \texttt{\_descriptive\_stats} computes count, mean, median, standard deviation, variance, extremes, quartiles, skewness, and kurtosis. \texttt{\_correlation} computes Pearson and Spearman matrices, lists strong pairs with $|r| \geq 0.5$ (strong when $\geq 0.7$), and renders a heatmap. \texttt{\_growth\_rates} uses a revenue column with \texttt{\_month}/\texttt{\_year} features for month- and quarter-over-quarter charts, \texttt{\_top\_bottom\_rankings} ranks revenue across up to three categories, and \texttt{\_seasonality} plots monthly averages with best/worst months.
+\subsection{Key Functions}
 
-\texttt{\_detect\_anomalies} flags values whose absolute $z$-score exceeds 3.5:
+\textbf{Column selection.} \texttt{\_numeric\_cols} and \texttt{\_categorical\_cols} decide which columns are worth analysing, excluding validation columns (\texttt{\_parse\_failed}, \texttt{\_range\_failed}), scaling backups (\texttt{\_raw}, \texttt{\_scaled}), identifiers, datetime columns, and any column marked \texttt{analysis\_allowed = false}. They run at the start of almost every other function, preventing meaningless output such as correlating an ID column.
+
+\textbf{Summarisation.} \texttt{\_descriptive\_stats} computes count, mean, median, standard deviation, variance, quartiles, skewness, and kurtosis for each numeric column, while \texttt{\_correlation} computes Pearson and Spearman matrices, renders a heatmap, and records the ``strong'' pairs ($|r| \geq 0.5$, labelled strong when $|r| \geq 0.7$), which points the reporting stage at the relationships most worth explaining.
+
+\textbf{\texttt{\_detect\_anomalies} --- statistical outlier flagging.} This function flags values whose absolute $z$-score exceeds a threshold of 3.5, using the standard score
 \begin{equation}
 z = \frac{x - \mu}{\sigma}
+\label{eq:zscore}
 \end{equation}
-where $x$ is a value and $\mu$, $\sigma$ the column mean and standard deviation. \texttt{\_category\_distributions} charts categories with at most 15 levels, and \texttt{\_regression\_trends} fits an OLS line on the \texttt{\_month} axis with \texttt{scipy.stats.linregress}, recording slope, intercept, $R^2$, $p$-value, and significance ($p < 0.05$). \texttt{\_distribution\_charts} draws a box plot and revenue histogram, and \texttt{\_derived\_metrics\_charts} plots profit margin over time and a derived-metrics summary.
+where $x$ is a value and $\mu$, $\sigma$ are the column mean and standard deviation. It reports both the per-column anomalies and the count of unique affected rows, which lets the pipeline judge how ``noisy'' a dataset is. Columns with too few points or zero variance are skipped so the score stays well defined. The core loop is shown in Figure~\ref{fig:code-agent4-anom}.
 
-\textbf{Output and interaction.} The agent writes the \texttt{stats} dictionary and \texttt{chart\_paths}, updates \texttt{errors}, and records reliability (0.9 when statistics were produced, otherwise 0.4). These statistics and charts form the evidence base consumed by the validation and reporting stages.
+\begin{figure}[H]
+\centering
+\begin{lstlisting}[style=pystyle]
+for col in _numeric_cols(df, schema_blueprint):
+    s = df[col].dropna()
+    if len(s) < 4:
+        continue
+    mean, std = s.mean(), s.std()
+    if std == 0:
+        continue
+    z_scores = (df[col] - mean) / std
+    anomaly_mask = z_scores.abs() > z_threshold
+    anomaly_indices = df.index[anomaly_mask].tolist()
+    if anomaly_indices:
+        all_anomaly_indices.update(anomaly_indices)
+\end{lstlisting}
+\caption{$z$-score anomaly detection in \texttt{\_detect\_anomalies} (Agent~4)}
+\label{fig:code-agent4-anom}
+\end{figure}
+
+\textbf{Trend and regression analysis.} \texttt{\_growth\_rates} uses a revenue column together with the \texttt{\_month}/\texttt{\_year} features from Agent~3 to plot month- and quarter-over-quarter change, \texttt{\_top\_bottom\_rankings} ranks revenue across up to three categories, and \texttt{\_seasonality} plots monthly averages with the best and worst months. \texttt{\_regression\_trends} fits an ordinary least-squares line on the \texttt{\_month} axis with \texttt{scipy.stats.linregress}, recording slope, intercept, $R^2$, $p$-value, and whether the trend is significant ($p < 0.05$). Together these functions convert the cleaned table into the directional insights a human analyst would look for.
+
+\subsection{Reliability and Pipeline Interaction}
+The agent writes the \texttt{stats} dictionary and \texttt{chart\_paths}, updates \texttt{errors}, and records reliability (0.9 when statistics were produced, otherwise 0.4) using the same \texttt{update\_reliability} mechanism described for Agent~1. On the Amazon Sales Dataset, Agent~4 produced descriptive statistics for the price and rating columns, a correlation heatmap that showed a strong positive relationship between the actual and discounted price, and category-distribution and derived-metric charts. These statistics and charts form the evidence base that the planned validation and reporting stages (Agents~5 and~6) will consume.
 
 \section{Current Implementation Snapshot}
 \begin{table}[H]
@@ -605,7 +732,7 @@ Test expansion & In progress & More edge cases are being added \\
 \chapter{RESULTS AND ANALYSIS}
 
 \section{Observed Progress}
-The current codebase already demonstrates an end-to-end pipeline from raw data ingestion through statistical analysis and chart generation. In the sample execution log, Agent 4 generates multiple chart types after profiling, semantic tagging, and preprocessing complete. That means the system is no longer just a design proposal; it is now a working backend prototype up to Agent 4.
+The current codebase already demonstrates an end-to-end pipeline from raw data ingestion through statistical analysis and chart generation. Running the pipeline on the Amazon Sales Dataset, Agent 4 generates multiple chart types after profiling, semantic tagging, and preprocessing complete. That means the system is no longer just a design proposal; it is now a working backend prototype up to Agent 4.
 
 That progress is important because it confirms the proposal is executable rather than purely conceptual. The pipeline is already performing the core work the proposal promised: profiling, semantic tagging, preprocessing, and statistical analysis. The remaining validation and reporting stages are still to be built, which is appropriate for a mid-term checkpoint.
 

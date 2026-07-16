@@ -2,16 +2,21 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {4.1}{\ignorespaces Decoder-only Transformer architecture used by modern LLMs}}{13}{figure.caption.11}%
-\contentsline {figure}{\numberline {4.2}{\ignorespaces Local Transformer inference pipeline executed by Ollama}}{15}{figure.caption.12}%
+\contentsline {figure}{\numberline {4.1}{\ignorespaces Decoder-only Transformer architecture used by modern LLMs}}{11}{figure.caption.11}%
+\contentsline {figure}{\numberline {4.2}{\ignorespaces Local Transformer inference pipeline executed by Ollama}}{13}{figure.caption.12}%
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {5.1}{\ignorespaces System architecture and agent flow}}{16}{figure.caption.13}%
-\contentsline {figure}{\numberline {5.2}{\ignorespaces Agent workflow}}{17}{figure.caption.14}%
+\contentsline {figure}{\numberline {5.1}{\ignorespaces System architecture and agent flow}}{15}{figure.caption.13}%
+\contentsline {figure}{\numberline {5.2}{\ignorespaces Agent workflow}}{16}{figure.caption.14}%
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {6.1}{\ignorespaces Workflow of Agent~1: Structural Profiling}}{19}{figure.caption.15}%
-\contentsline {figure}{\numberline {6.2}{\ignorespaces Workflow of Agent~2: Semantic Tagging}}{20}{figure.caption.16}%
-\contentsline {figure}{\numberline {6.3}{\ignorespaces Workflow of Agent~3: Preprocessing Pipeline}}{21}{figure.caption.17}%
-\contentsline {figure}{\numberline {6.4}{\ignorespaces Workflow of Agent~4: Statistical Analysis}}{22}{figure.caption.18}%
+\contentsline {figure}{\numberline {6.1}{\ignorespaces Workflow of Agent~1: Structural Profiling}}{18}{figure.caption.15}%
+\contentsline {figure}{\numberline {6.2}{\ignorespaces Per-line delimiter detection and fallback in \texttt {\_read\_mixed\_delimiter\_csv} (Agent~1)}}{19}{figure.caption.16}%
+\contentsline {figure}{\numberline {6.3}{\ignorespaces Agent~2 workflow (stage 1): local type inference and prompt construction}}{21}{figure.caption.17}%
+\contentsline {figure}{\numberline {6.4}{\ignorespaces Agent~2 workflow (stage 2): batched LLM inference and schema parsing}}{21}{figure.caption.18}%
+\contentsline {figure}{\numberline {6.5}{\ignorespaces Agent~2 workflow (stage 3): enrichment, confidence scoring, and fallback}}{22}{figure.caption.19}%
+\contentsline {figure}{\numberline {6.6}{\ignorespaces Workflow of Agent~3: Preprocessing Pipeline}}{24}{figure.caption.20}%
+\contentsline {figure}{\numberline {6.7}{\ignorespaces Decimal/thousands-separator resolution in \texttt {\_normalize\_currency\_text} (Agent~3)}}{25}{figure.caption.21}%
+\contentsline {figure}{\numberline {6.8}{\ignorespaces Workflow of Agent~4: Statistical Analysis}}{27}{figure.caption.22}%
+\contentsline {figure}{\numberline {6.9}{\ignorespaces $z$-score anomaly detection in \texttt {\_detect\_anomalies} (Agent~4)}}{28}{figure.caption.23}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }

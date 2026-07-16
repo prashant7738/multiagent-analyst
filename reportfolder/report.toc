@@ -1,8 +1,8 @@
 \contentsline {chapter}{ACKNOWLEDGEMENT}{i}{chapter*.1}%
 \contentsline {chapter}{ABSTRACT}{ii}{chapter*.3}%
-\contentsline {chapter}{LIST OF FIGURES}{v}{section*.5}%
-\contentsline {chapter}{LIST OF TABLES}{vi}{section*.6}%
-\contentsline {chapter}{LIST OF ABBREVIATIONS}{vii}{chapter*.7}%
+\contentsline {chapter}{LIST OF FIGURES}{vi}{section*.5}%
+\contentsline {chapter}{LIST OF TABLES}{vii}{section*.6}%
+\contentsline {chapter}{LIST OF ABBREVIATIONS}{viii}{chapter*.7}%
 \contentsline {chapter}{\numberline {1}INTRODUCTION}{1}{chapter.1}%
 \contentsline {section}{\numberline {1.1}Background}{1}{section.1.1}%
 \contentsline {section}{\numberline {1.2}Motivation}{1}{section.1.2}%
@@ -22,36 +22,53 @@
 \contentsline {section}{\numberline {3.3}Requirement Status}{8}{section.3.3}%
 \contentsline {chapter}{\numberline {4}THEORETICAL APPROACH}{9}{chapter.4}%
 \contentsline {section}{\numberline {4.1}Large Language Model Theory}{9}{section.4.1}%
-\contentsline {subsection}{\numberline {4.1.1}From Transformers to Modern LLMs}{9}{subsection.4.1.1}%
-\contentsline {subsection}{\numberline {4.1.2}Decoder-Only Transformer Architecture}{9}{subsection.4.1.2}%
-\contentsline {subsection}{\numberline {4.1.3}Tokenization and Vocabulary}{10}{subsection.4.1.3}%
-\contentsline {subsection}{\numberline {4.1.4}Embedding Layer}{10}{subsection.4.1.4}%
-\contentsline {subsection}{\numberline {4.1.5}Positional Encoding}{10}{subsection.4.1.5}%
-\contentsline {subsection}{\numberline {4.1.6}Self-Attention and Multi-Head Attention}{10}{subsection.4.1.6}%
-\contentsline {subsection}{\numberline {4.1.7}Feed-Forward Network}{11}{subsection.4.1.7}%
-\contentsline {subsection}{\numberline {4.1.8}Residual Connections and Layer Normalization}{11}{subsection.4.1.8}%
-\contentsline {subsection}{\numberline {4.1.9}Logits, Softmax, and Next-Token Prediction}{12}{subsection.4.1.9}%
-\contentsline {section}{\numberline {4.2}Ollama Model and Inference Architecture}{13}{section.4.2}%
-\contentsline {subsection}{\numberline {4.2.1}Why Ollama Is Used}{14}{subsection.4.2.1}%
-\contentsline {subsection}{\numberline {4.2.2}Local Model Loading and REST API}{14}{subsection.4.2.2}%
-\contentsline {subsection}{\numberline {4.2.3}Prompt Processing Pipeline}{14}{subsection.4.2.3}%
-\contentsline {chapter}{\numberline {5}SYSTEM ARCHITECTURE AND METHODOLOGY}{16}{chapter.5}%
-\contentsline {section}{\numberline {5.1}Overall Pipeline}{16}{section.5.1}%
-\contentsline {section}{\numberline {5.2}Shared State Design}{18}{section.5.2}%
-\contentsline {section}{\numberline {5.3}Methodology}{18}{section.5.3}%
-\contentsline {chapter}{\numberline {6}IMPLEMENTATION DETAILS}{19}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Agent 1: Structural Profiler}{19}{section.6.1}%
+\contentsline {subsection}{\numberline {4.1.1}Decoder-Only Transformer Architecture}{9}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Tokenization and Embedding}{9}{subsection.4.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}Self-Attention}{10}{subsection.4.1.3}%
+\contentsline {subsection}{\numberline {4.1.4}Next-Token Prediction}{10}{subsection.4.1.4}%
+\contentsline {section}{\numberline {4.2}Ollama Model and Inference Architecture}{11}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Why Ollama Is Used}{12}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Local Model Loading and REST API}{12}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Prompt Processing Pipeline}{12}{subsection.4.2.3}%
+\contentsline {chapter}{\numberline {5}SYSTEM ARCHITECTURE AND METHODOLOGY}{14}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Overall Pipeline}{14}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Shared State Design}{16}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Methodology}{17}{section.5.3}%
+\contentsline {chapter}{\numberline {6}IMPLEMENTATION DETAILS}{18}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Agent 1: Structural Profiler}{18}{section.6.1}%
+\contentsline {subsection}{\numberline {6.1.1}Overview and Purpose}{18}{subsection.6.1.1}%
+\contentsline {subsection}{\numberline {6.1.2}Inputs and Outputs}{18}{subsection.6.1.2}%
+\contentsline {subsection}{\numberline {6.1.3}Processing Workflow}{18}{subsection.6.1.3}%
+\contentsline {subsection}{\numberline {6.1.4}Key Functions}{18}{subsection.6.1.4}%
+\contentsline {subsection}{\numberline {6.1.5}Reliability and Pipeline Interaction}{19}{subsection.6.1.5}%
 \contentsline {section}{\numberline {6.2}Agent 2: Semantic Tagger}{20}{section.6.2}%
-\contentsline {section}{\numberline {6.3}Agent 3: Preprocessor}{21}{section.6.3}%
-\contentsline {section}{\numberline {6.4}Agent 4: Statistical Analysis}{22}{section.6.4}%
-\contentsline {section}{\numberline {6.5}Current Implementation Snapshot}{23}{section.6.5}%
-\contentsline {chapter}{\numberline {7}RESULTS AND ANALYSIS}{24}{chapter.7}%
-\contentsline {section}{\numberline {7.1}Observed Progress}{24}{section.7.1}%
-\contentsline {section}{\numberline {7.2}Practical Output}{24}{section.7.2}%
-\contentsline {section}{\numberline {7.3}Analysis}{24}{section.7.3}%
-\contentsline {section}{\numberline {7.4}Current Challenges}{25}{section.7.4}%
-\contentsline {chapter}{\numberline {8}REMAINING TASKS}{26}{chapter.8}%
-\contentsline {chapter}{\numberline {9}CONCLUSION}{27}{chapter.9}%
-\contentsline {chapter}{APPENDICES}{28}{chapter.9}%
-\contentsline {chapter}{\numberline {A}COST ESTIMATE}{28}{appendix.A}%
-\contentsline {chapter}{\numberline {B}PROJECT TIMELINE}{29}{appendix.B}%
+\contentsline {subsection}{\numberline {6.2.1}Overview and Purpose}{20}{subsection.6.2.1}%
+\contentsline {subsection}{\numberline {6.2.2}Inputs and Outputs}{20}{subsection.6.2.2}%
+\contentsline {subsection}{\numberline {6.2.3}Processing Workflow}{20}{subsection.6.2.3}%
+\contentsline {subsection}{\numberline {6.2.4}Key Functions}{22}{subsection.6.2.4}%
+\contentsline {subsection}{\numberline {6.2.5}Reliability and Pipeline Interaction}{22}{subsection.6.2.5}%
+\contentsline {section}{\numberline {6.3}Agent 3: Preprocessor}{23}{section.6.3}%
+\contentsline {subsection}{\numberline {6.3.1}Overview and Purpose}{23}{subsection.6.3.1}%
+\contentsline {subsection}{\numberline {6.3.2}Inputs and Outputs}{23}{subsection.6.3.2}%
+\contentsline {subsection}{\numberline {6.3.3}Profile Selection}{23}{subsection.6.3.3}%
+\contentsline {subsection}{\numberline {6.3.4}Processing Workflow}{23}{subsection.6.3.4}%
+\contentsline {subsection}{\numberline {6.3.5}Key Functions}{24}{subsection.6.3.5}%
+\contentsline {subsection}{\numberline {6.3.6}Validation and Data Quality}{25}{subsection.6.3.6}%
+\contentsline {subsection}{\numberline {6.3.7}Reliability and Pipeline Interaction}{26}{subsection.6.3.7}%
+\contentsline {section}{\numberline {6.4}Agent 4: Statistical Analysis}{26}{section.6.4}%
+\contentsline {subsection}{\numberline {6.4.1}Overview and Purpose}{26}{subsection.6.4.1}%
+\contentsline {subsection}{\numberline {6.4.2}Inputs and Outputs}{26}{subsection.6.4.2}%
+\contentsline {subsection}{\numberline {6.4.3}Processing Workflow}{26}{subsection.6.4.3}%
+\contentsline {subsection}{\numberline {6.4.4}Key Functions}{27}{subsection.6.4.4}%
+\contentsline {subsection}{\numberline {6.4.5}Reliability and Pipeline Interaction}{28}{subsection.6.4.5}%
+\contentsline {section}{\numberline {6.5}Current Implementation Snapshot}{29}{section.6.5}%
+\contentsline {chapter}{\numberline {7}RESULTS AND ANALYSIS}{30}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Observed Progress}{30}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Practical Output}{30}{section.7.2}%
+\contentsline {section}{\numberline {7.3}Analysis}{30}{section.7.3}%
+\contentsline {section}{\numberline {7.4}Current Challenges}{31}{section.7.4}%
+\contentsline {chapter}{\numberline {8}REMAINING TASKS}{32}{chapter.8}%
+\contentsline {chapter}{\numberline {9}CONCLUSION}{33}{chapter.9}%
+\contentsline {chapter}{APPENDICES}{34}{chapter.9}%
+\contentsline {chapter}{\numberline {A}COST ESTIMATE}{34}{appendix.A}%
+\contentsline {chapter}{\numberline {B}PROJECT TIMELINE}{35}{appendix.B}%

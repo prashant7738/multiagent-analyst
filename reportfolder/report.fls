@@ -1,0 +1,359 @@
+PWD e:\multiagent-analyst\reportfolder
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\miktex\data\le\pdftex\pdflatex.fmt
+INPUT e:\multiagent-analyst\reportfolder\report.tex
+OUTPUT report.log
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\report.cls
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\report.cls
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\size12.clo
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\size12.clo
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\size12.clo
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmr12.tfm
+INPUT D:\New folder\tex\latex\geometry\geometry.sty
+INPUT D:\New folder\tex\latex\geometry\geometry.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\keyval.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\keyval.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\iftex\ifvtex.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\iftex\ifvtex.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\iftex\iftex.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\iftex\iftex.sty
+INPUT D:\New folder\tex\latex\geometry\geometry.cfg
+INPUT D:\New folder\tex\latex\geometry\geometry.cfg
+INPUT D:\New folder\tex\latex\geometry\geometry.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\fontenc.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\base\fontenc.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\jknappen\ec\ecrm1200.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsmath.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsmath.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsopn.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amstext.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amstext.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsgen.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsgen.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsbsy.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsbsy.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsmath\amsopn.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsfonts\amssymb.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsfonts\amssymb.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsfonts\amsfonts.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\amsfonts\amsfonts.sty
+INPUT D:\New folder\tex\latex\psnfss\mathptmx.sty
+INPUT D:\New folder\tex\latex\psnfss\mathptmx.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\graphicx.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\graphicx.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\graphics.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\graphics.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\trig.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\trig.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\graphics.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\graphics.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\graphics.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-def\pdftex.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-def\pdftex.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-def\pdftex.def
+INPUT D:\New folder\tex\latex\fancyhdr\fancyhdr.sty
+INPUT D:\New folder\tex\latex\fancyhdr\fancyhdr.sty
+INPUT D:\New folder\tex\latex\setspace\setspace.sty
+INPUT D:\New folder\tex\latex\setspace\setspace.sty
+INPUT D:\New folder\tex\latex\titlesec\titlesec.sty
+INPUT D:\New folder\tex\latex\titlesec\titlesec.sty
+INPUT D:\New folder\tex\latex\tocloft\tocloft.sty
+INPUT D:\New folder\tex\latex\tocloft\tocloft.sty
+INPUT D:\New folder\tex\latex\float\float.sty
+INPUT D:\New folder\tex\latex\float\float.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\tools\array.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\tools\array.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\xcolor\xcolor.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\xcolor\xcolor.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\color.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\color.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics-cfg\color.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\mathcolor.ltx
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\mathcolor.ltx
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\graphics\mathcolor.ltx
+INPUT D:\New folder\tex\latex\caption\caption.sty
+INPUT D:\New folder\tex\latex\caption\caption.sty
+INPUT D:\New folder\tex\latex\caption\caption3.sty
+INPUT D:\New folder\tex\latex\caption\caption3.sty
+INPUT D:\New folder\tex\latex\microtype\microtype.sty
+INPUT D:\New folder\tex\latex\microtype\microtype.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\etoolbox\etoolbox.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\etoolbox\etoolbox.sty
+INPUT D:\New folder\tex\latex\microtype\microtype-pdftex.def
+INPUT D:\New folder\tex\latex\microtype\microtype-pdftex.def
+INPUT D:\New folder\tex\latex\microtype\microtype-pdftex.def
+INPUT D:\New folder\tex\latex\microtype\microtype.cfg
+INPUT D:\New folder\tex\latex\microtype\microtype.cfg
+INPUT D:\New folder\tex\latex\microtype\microtype.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\hyperref.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\hyperref.sty
+INPUT D:\New folder\tex\latex\kvsetkeys\kvsetkeys.sty
+INPUT D:\New folder\tex\latex\kvsetkeys\kvsetkeys.sty
+INPUT D:\New folder\tex\generic\kvdefinekeys\kvdefinekeys.sty
+INPUT D:\New folder\tex\generic\kvdefinekeys\kvdefinekeys.sty
+INPUT D:\New folder\tex\generic\pdfescape\pdfescape.sty
+INPUT D:\New folder\tex\generic\pdfescape\pdfescape.sty
+INPUT D:\New folder\tex\generic\ltxcmds\ltxcmds.sty
+INPUT D:\New folder\tex\generic\ltxcmds\ltxcmds.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\pdftexcmds\pdftexcmds.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\generic\pdftexcmds\pdftexcmds.sty
+INPUT D:\New folder\tex\generic\infwarerr\infwarerr.sty
+INPUT D:\New folder\tex\generic\infwarerr\infwarerr.sty
+INPUT D:\New folder\tex\latex\hycolor\hycolor.sty
+INPUT D:\New folder\tex\latex\hycolor\hycolor.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\nameref.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\nameref.sty
+INPUT D:\New folder\tex\latex\refcount\refcount.sty
+INPUT D:\New folder\tex\latex\refcount\refcount.sty
+INPUT D:\New folder\tex\generic\gettitlestring\gettitlestring.sty
+INPUT D:\New folder\tex\generic\gettitlestring\gettitlestring.sty
+INPUT D:\New folder\tex\latex\kvoptions\kvoptions.sty
+INPUT D:\New folder\tex\latex\kvoptions\kvoptions.sty
+INPUT D:\New folder\tex\generic\stringenc\stringenc.sty
+INPUT D:\New folder\tex\generic\stringenc\stringenc.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\pd1enc.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\pd1enc.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\pd1enc.def
+INPUT D:\New folder\tex\generic\intcalc\intcalc.sty
+INPUT D:\New folder\tex\generic\intcalc\intcalc.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\puenc.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\puenc.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\puenc.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\url\url.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\url\url.sty
+INPUT D:\New folder\tex\generic\bitset\bitset.sty
+INPUT D:\New folder\tex\generic\bitset\bitset.sty
+INPUT D:\New folder\tex\generic\bigintcalc\bigintcalc.sty
+INPUT D:\New folder\tex\generic\bigintcalc\bigintcalc.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\hpdftex.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\hpdftex.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\hyperref\hpdftex.def
+INPUT D:\New folder\tex\latex\rerunfilecheck\rerunfilecheck.sty
+INPUT D:\New folder\tex\latex\rerunfilecheck\rerunfilecheck.sty
+INPUT D:\New folder\tex\generic\uniquecounter\uniquecounter.sty
+INPUT D:\New folder\tex\generic\uniquecounter\uniquecounter.sty
+INPUT D:\New folder\tex\latex\psnfss\t1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\t1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\t1ptm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\l3backend\l3backend-pdftex.def
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\l3backend\l3backend-pdftex.def
+INPUT .\report.aux
+INPUT .\report.aux
+INPUT report.aux
+OUTPUT report.aux
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\context\base\mkii\supp-pdf.mkii
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\context\base\mkii\supp-pdf.mkii
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\context\base\mkii\supp-pdf.mkii
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\epstopdf-pkg\epstopdf-base.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\epstopdf-pkg\epstopdf-base.sty
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\00miktex\epstopdf-sys.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\00miktex\epstopdf-sys.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\tex\latex\00miktex\epstopdf-sys.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-ptm.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-ptm.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-ptm.cfg
+INPUT .\report.out
+INPUT .\report.out
+INPUT report.out
+INPUT report.out
+OUTPUT report.pdf
+INPUT .\report.out
+INPUT .\report.out
+OUTPUT report.out
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT .\tulogo.png
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmb8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8r.tfm
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\fonts\map\pdftex\pdftex.map
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\enc\dvips\base\8r.enc
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmr8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8r.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmr8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8r.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmb8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8r.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8t.tfm
+INPUT .\report.toc
+INPUT .\report.toc
+INPUT report.toc
+INPUT D:\New folder\tex\latex\psnfss\ot1ztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\ot1ztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\ot1ztmcm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7t.tfm
+INPUT D:\New folder\tex\latex\psnfss\omlztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omlztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omlztmcm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7m.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7m.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7m.tfm
+INPUT D:\New folder\tex\latex\psnfss\omsztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omsztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omsztmcm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7y.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7y.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7y.tfm
+INPUT D:\New folder\tex\latex\psnfss\omxztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omxztmcm.fd
+INPUT D:\New folder\tex\latex\psnfss\omxztmcm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7v.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7v.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\zptmcm7v.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msam10.tfm
+INPUT D:\New folder\tex\latex\microtype\mt-msa.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-msa.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-msa.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msam10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msam10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msbm10.tfm
+INPUT D:\New folder\tex\latex\microtype\mt-msb.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-msb.cfg
+INPUT D:\New folder\tex\latex\microtype\mt-msb.cfg
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msbm10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\amsfonts\symbols\msbm10.tfm
+INPUT D:\New folder\tex\latex\psnfss\ot1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\ot1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\ot1ptm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri7t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmb8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmb8r.tfm
+OUTPUT report.toc
+INPUT .\report.lof
+INPUT .\report.lof
+INPUT report.lof
+OUTPUT report.lof
+INPUT .\report.lot
+INPUT .\report.lot
+INPUT report.lot
+OUTPUT report.lot
+INPUT D:\New folder\tex\latex\psnfss\ts1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\ts1ptm.fd
+INPUT D:\New folder\tex\latex\psnfss\ts1ptm.fd
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8c.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmr8c.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\ptmri8t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri8r.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7m.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\psyro.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\symbol\psyr.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmr10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8t.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7y.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmsy10.tfm
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\fonts\tfm\public\rsfs\rsfs10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7m.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\psyro.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmmi10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmri8r.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7y.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmsy10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\symbol\psyr.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\times\ptmr8r.tfm
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\fonts\tfm\public\rsfs\rsfs10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7t.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmr10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\vf\adobe\times\zptmcm7v.vf
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmex10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\public\cm\cmex10.tfm
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\adobe\symbol\psyr.tfm
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\transformer_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT .\ollama_architecture.png
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\tfm\jknappen\ec\ectt1200.tfm
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\last.jpg
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\second2.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent1pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent2pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent3pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT .\agent4pic.png
+INPUT report.aux
+INPUT .\report.out
+INPUT .\report.out
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\fonts\pk\ljfour\jknappen\ec\dpi600\ectt1200.pk
+INPUT C:\Users\sushi\AppData\Local\MiKTeX\fonts\pk\ljfour\jknappen\ec\dpi600\ectt1200.pk
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmex10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmex10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmmi10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmr10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmr10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\cm\cmsy10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\symbols\msbm10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\public\amsfonts\symbols\msbm10.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\symbol\usyr.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\symbol\usyr.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\symbol\usyr.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\symbol\usyr.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmb8a.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmb8a.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmr8a.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmr8a.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmri8a.pfb
+INPUT C:\Users\sushi\AppData\Local\Programs\MiKTeX\fonts\type1\urw\times\utmri8a.pfb

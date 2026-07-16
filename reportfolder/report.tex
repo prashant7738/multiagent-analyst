@@ -19,6 +19,7 @@
 \usepackage{listings}
 \usepackage{hyperref}
 \hypersetup{hidelinks}
+\emergencystretch=2em
 
 % -------------------- CODE LISTING STYLE --------------------
 \definecolor{codebg}{gray}{0.96}
@@ -96,6 +97,7 @@
 
 % -------------------- DOCUMENT --------------------
 \begin{document}
+\sloppy
 
 \pagenumbering{gobble}
 
@@ -381,7 +383,7 @@ x = E(\text{token})
 Because self-attention is order-agnostic, a positional encoding is added to each embedding so the model can distinguish tokens by position as well as identity. In this project, the prompt containing column names, inferred types, and sample values is tokenized and embedded in exactly this way before inference.
 
 \subsection{Self-Attention}
-Self-attention lets each token gather information from other tokens. Three projections are formed from the input --- queries $Q$, keys $K$, and values $V$ --- and combined using scaled dot-product attention:
+Self-attention lets each token gather information from other tokens. Three projections are formed from the input: queries $Q$, keys $K$, and values $V$, and they are combined using scaled dot-product attention:
 \begin{equation}
 \text{Attention}(Q,K,V) = \text{Softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
 \label{eq:attention}
@@ -430,7 +432,7 @@ The backend pipeline is built as a directed sequence of agents. Each agent consu
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{last.jpg}
+\includegraphics[width=0.82\textwidth,height=0.62\textheight,keepaspectratio]{last.jpg}
 \caption{System architecture and agent flow}
 \label{fig:system-architecture}
 \end{figure}
@@ -484,7 +486,7 @@ The agent proceeds in four ordered stages, summarised in Figure~\ref{fig:agent1}
 \end{figure}
 
 \subsection{Key Functions}
-\textbf{\texttt{\_read\_mixed\_delimiter\_csv} --- resilient CSV ingestion.} Business exports are often inconsistent, mixing comma- and semicolon-separated rows under non-UTF encodings. This function first reads the text through \texttt{\_read\_csv\_lines} (trying \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1}), then detects the delimiter \emph{per line} and, when the field count does not match the header, retries with the alternate delimiter before raising an error (Figure~\ref{fig:code-agent1-csv}). It matters because a wrong delimiter would silently merge columns and corrupt every later stage. The column profiling that follows records each column's dtype, missing count and rate, unique count, and first three sample values, which Agent~2 later uses instead of the full dataset.
+\textbf{\texttt{\_read\_mixed\_delimiter\_csv}: resilient CSV ingestion.} Business exports are often inconsistent, mixing comma- and semicolon-separated rows under non-UTF encodings. This function first reads the text through \texttt{\_read\_csv\_lines} (trying \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1}), then detects the delimiter \emph{per line} and, when the field count does not match the header, retries with the alternate delimiter before raising an error (Figure~\ref{fig:code-agent1-csv}). It matters because a wrong delimiter would silently merge columns and corrupt every later stage. The column profiling that follows records each column's dtype, missing count and rate, unique count, and first three sample values, which Agent~2 later uses instead of the full dataset.
 
 \begin{figure}[H]
 \centering
@@ -533,7 +535,7 @@ Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a 
 \end{itemize}
 
 \subsection{Processing Workflow}
-The agent combines cheap local heuristics with a controlled model call. The workflow is illustrated in three stages in Figures~\ref{fig:agent2-1}--\ref{fig:agent2-3}.
+The agent combines cheap local heuristics with a controlled model call. The workflow is illustrated in three stages in Figures~\ref{fig:agent2-1} to~\ref{fig:agent2-3}.
 
 First, local type sniffing (\texttt{\_infer\_intended\_types}) assigns a provisional type to every column, and a minimal prompt containing only column metadata and three sample values is built (Figure~\ref{fig:agent2-1}).
 
@@ -544,7 +546,7 @@ First, local type sniffing (\texttt{\_infer\_intended\_types}) assigns a provisi
 \label{fig:agent2-1}
 \end{figure}
 
-Next, the model is called --- once for small schemas or in retry-safe batches for wide datasets --- and its JSON response is parsed defensively into the schema blueprint (Figure~\ref{fig:agent2-2}).
+Next, the model is called once for small schemas or in retry-safe batches for wide datasets and its JSON response is parsed defensively into the schema blueprint (Figure~\ref{fig:agent2-2}).
 
 \begin{figure}[H]
 \centering
@@ -566,7 +568,7 @@ Finally, the blueprint is enriched: missing tags are filled, a missingness polic
 \textbf{\texttt{\_infer\_intended\_types}} performs local type sniffing without the model, using the Pandas dtype and an 80\% parseability threshold for object columns; its result seeds both the prompt and the fallback, so every column has a defensible type even when the LLM is unavailable. \textbf{\texttt{\_build\_llm\_prompt}} sends only column metadata and three samples rather than the full table, and a fixed system prompt requires strictly valid JSON at a low temperature (0.1). For wide schemas, \textbf{\texttt{\_call\_llm\_for\_schema\_blueprint\_with\_retry}} splits columns into batches and, if a truncated response fails to parse, recursively halves the batch and merges the results, which lets the agent tag very wide datasets reliably. \textbf{\texttt{\_parse\_schema\_blueprint\_response}} accepts raw or fenced JSON and, as a last resort, extracts the outermost \texttt{\{...\}} span, so a single formatting quirk does not discard a valid schema.
 
 \subsection{Reliability and Pipeline Interaction}
-After tagging, missing \texttt{semantic\_tag} values are filled and each column receives a \texttt{null\_policy} and \texttt{encoding\_strategy}; columns whose missing rate exceeds 20\% are marked \texttt{analysis\_allowed = false} so later analysis ignores unreliable fields, and \texttt{\_calculate\_semantic\_confidence} scores each tag from 0--100. If the model output is invalid, \texttt{\_fallback\_blueprint} assigns conservative policies from the sniffed types. On the Amazon Sales Dataset, Agent~2 tagged the price and discount columns as currency and the rating and quantity columns as numeric, while flagging high-missingness columns for exclusion from analysis. The resulting \texttt{schema\_blueprint} is the contract that drives every decision in Agent~3.
+After tagging, missing \texttt{semantic\_tag} values are filled and each column receives a \texttt{null\_policy} and \texttt{encoding\_strategy}; columns whose missing rate exceeds 20\% are marked \texttt{analysis\_allowed = false} so later analysis ignores unreliable fields, and \texttt{\_calculate\_semantic\_confidence} scores each tag from 0 to 100. If the model output is invalid, \texttt{\_fallback\_blueprint} assigns conservative policies from the sniffed types. On the Amazon Sales Dataset, Agent~2 tagged the price and discount columns as currency and the rating and quantity columns as numeric, while flagging high-missingness columns for exclusion from analysis. The resulting \texttt{schema\_blueprint} is the contract that drives every decision in Agent~3.
 
 \section{Agent 3: Preprocessor}
 
@@ -585,16 +587,16 @@ Before any cleaning, \texttt{\_build\_preprocessing\_config} chooses a \texttt{s
 \subsection{Processing Workflow}
 Cleaning runs as an ordered, fully logged sequence of steps; each step records its per-column null differences so the effect of every action is visible. The stages, shown in Figure~\ref{fig:agent3}, are:
 \begin{enumerate}
-	\item \textbf{Step 0 --- Deduplication:} \texttt{dedup\_exact\_rows} removes exact duplicate rows, asserts the count matches Agent~1's profile, and aborts through \texttt{\_assert\_row\_survival\_or\_abort} if fewer than half the rows survive (a safeguard against accidental data loss).
-	\item \textbf{Step 1 --- Currency cleaning:} \texttt{\_clean\_currency\_values} normalises monetary text and writes a \texttt{\_parse\_failed} flag for values it cannot parse.
-	\item \textbf{Step 2 --- Type coercion:} \texttt{\_coerce\_types} casts each column to its intended type while tracking any new NaNs created by the cast.
-	\item \textbf{Step 3 / 3b --- Text standardisation and re-dedup:} text columns are canonicalised, then duplicates are removed again in case canonicalisation merged rows.
-	\item \textbf{Step 4 --- Imputation:} \texttt{\_impute} fills or drops missing values according to each column's policy.
-	\item \textbf{Step 5 --- Encoding:} categorical columns are encoded for later analysis.
-	\item \textbf{Step 6 --- Outlier clipping:} \texttt{\_clip\_outliers} caps extreme values using percentile bounds for skewed columns and the IQR $1.5\times$ rule otherwise.
-	\item \textbf{Step 7 --- Scaling:} \texttt{\_scale\_columns} applies Min--Max scaling while preserving raw copies.
-	\item \textbf{Step 8 --- Date features:} \texttt{\_extract\_date\_features} derives calendar features from datetime columns.
-	\item \textbf{Step 9 --- Business metrics:} \texttt{\_derive\_business\_metrics} constructs profit, margin, and related fields where the necessary columns exist.
+	\item \textbf{Step 0: Deduplication} \texttt{dedup\_exact\_rows} removes exact duplicate rows, asserts the count matches Agent~1's profile, and aborts through \texttt{\_assert\_row\_survival\_or\_abort} if fewer than half the rows survive (a safeguard against accidental data loss).
+	\item \textbf{Step 1: Currency cleaning} \texttt{\_clean\_currency\_values} normalises monetary text and writes a \texttt{\_parse\_failed} flag for values it cannot parse.
+	\item \textbf{Step 2: Type coercion} \texttt{\_coerce\_types} casts each column to its intended type while tracking any new NaNs created by the cast.
+	\item \textbf{Step 3/3b: Text standardisation and re-dedup} text columns are canonicalised, then duplicates are removed again in case canonicalisation merged rows.
+	\item \textbf{Step 4: Imputation} \texttt{\_impute} fills or drops missing values according to each column's policy.
+	\item \textbf{Step 5: Encoding} categorical columns are encoded for later analysis.
+	\item \textbf{Step 6: Outlier clipping} \texttt{\_clip\_outliers} caps extreme values using percentile bounds for skewed columns and the IQR $1.5\times$ rule otherwise.
+	\item \textbf{Step 7: Scaling} \texttt{\_scale\_columns} applies Min-Max scaling while preserving raw copies.
+	\item \textbf{Step 8: Date features} \texttt{\_extract\_date\_features} derives calendar features from datetime columns.
+	\item \textbf{Step 9: Business metrics} \texttt{\_derive\_business\_metrics} constructs profit, margin, and related fields where the necessary columns exist.
 \end{enumerate}
 
 \begin{figure}[H]
@@ -606,7 +608,7 @@ Cleaning runs as an ordered, fully logged sequence of steps; each step records i
 
 \subsection{Key Functions}
 
-\textbf{\texttt{\_normalize\_currency\_text} --- monetary parsing.} Financial exports mix symbols, currency codes, parenthetical negatives such as \texttt{(123)}, and locale-specific separators (for example the European \texttt{1.234,56} versus the US \texttt{1,234.56}). This function converts all of these to a plain numeric string so the values can be cast to \texttt{float}. Its most important part, shown in Figure~\ref{fig:code-agent3-currency}, decides which separator is the decimal point by comparing the positions of the last comma and last dot, then strips the thousands separator. Without this step, monetary columns would be read as text and every downstream financial metric would be impossible.
+\textbf{\texttt{\_normalize\_currency\_text}: monetary parsing.} Financial exports mix symbols, currency codes, parenthetical negatives such as \texttt{(123)}, and locale-specific separators (for example the European \texttt{1.234,56} versus the US \texttt{1,234.56}). This function converts all of these to a plain numeric string so the values can be cast to \texttt{float}. Its most important part, shown in Figure~\ref{fig:code-agent3-currency}, decides which separator is the decimal point by comparing the positions of the last comma and last dot, then strips the thousands separator. Without this step, monetary columns would be read as text and every downstream financial metric would be impossible.
 
 \begin{figure}[H]
 \centering
@@ -630,7 +632,7 @@ elif last_comma != -1:
 \label{fig:code-agent3-currency}
 \end{figure}
 
-\textbf{Other key functions.} \texttt{\_impute} fills or drops missing values according to each column's \texttt{null\_policy} (mean, median, mode, unknown-label, flag-only, or identifier row-drop), recording the exact value used for each column. \texttt{\_scale\_columns} applies Min--Max normalisation,
+\textbf{Other key functions.} \texttt{\_impute} fills or drops missing values according to each column's \texttt{null\_policy} (mean, median, mode, unknown-label, flag-only, or identifier row-drop), recording the exact value used for each column. \texttt{\_scale\_columns} applies Min-Max normalisation,
 \begin{equation}
 x' = \frac{x - x_{\min}}{x_{\max} - x_{\min}}
 \label{eq:minmax}
@@ -638,7 +640,7 @@ x' = \frac{x - x_{\min}}{x_{\max} - x_{\min}}
 while keeping \texttt{\_raw} and \texttt{\_scaled} copies and storing $x_{\min}$ and $x_{\max}$ in \texttt{scaling\_params}, so the transform can be inverted later. \texttt{\_derive\_business\_metrics} uses whole-word matching (\texttt{\_find\_col}, which avoids false hits such as ``count'' matching ``Country'') to locate revenue, cost, unit, price, discount, and budget columns, then derives profit, margin, revenue per unit, discount percentage, and budget variance wherever the required columns exist, giving Agent~4 richer fields to summarise.
 
 \subsection{Validation and Data Quality}
-After the transformation steps, \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} flag invalid counts and implausible tax rates into a \texttt{ColumnLedger}, and \texttt{\_compute\_enhanced\_quality\_score} combines the remaining null rate, the validation-failure rate, and the duplication rate into a single 0--100 \texttt{data\_quality} score. The ledger and score make the cleaning process transparent: a reviewer can see not only what the data became, but how much of it had to be corrected.
+After the transformation steps, \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} flag invalid counts and implausible tax rates into a \texttt{ColumnLedger}, and \texttt{\_compute\_enhanced\_quality\_score} combines the remaining null rate, the validation-failure rate, and the duplication rate into a single 0 to 100 \texttt{data\_quality} score. The ledger and score make the cleaning process transparent: a reviewer can see not only what the data became, but how much of it had to be corrected.
 
 \subsection{Reliability and Pipeline Interaction}
 Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the Amazon Sales Dataset, Agent~3 parsed the price and discount fields into numeric values, imputed the missing ratings, and derived discount-percentage and margin columns, producing a cleaned table with a high data-quality score. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
@@ -677,7 +679,7 @@ The agent runs a fixed battery of analyses over the selected columns, illustrate
 
 \textbf{Summarisation.} \texttt{\_descriptive\_stats} computes count, mean, median, standard deviation, variance, quartiles, skewness, and kurtosis for each numeric column, while \texttt{\_correlation} computes Pearson and Spearman matrices, renders a heatmap, and records the ``strong'' pairs ($|r| \geq 0.5$, labelled strong when $|r| \geq 0.7$), which points the reporting stage at the relationships most worth explaining.
 
-\textbf{\texttt{\_detect\_anomalies} --- statistical outlier flagging.} This function flags values whose absolute $z$-score exceeds a threshold of 3.5, using the standard score
+\textbf{\texttt{\_detect\_anomalies}: statistical outlier flagging.} This function flags values whose absolute $z$-score exceeds a threshold of 3.5, using the standard score
 \begin{equation}
 z = \frac{x - \mu}{\sigma}
 \label{eq:zscore}
@@ -849,11 +851,13 @@ This timeline reflects the actual progression of the work. The first phase focus
 
 \bibitem{li2023camel} G. Li, et al., ``CAMEL: Communicative Agents for ``Mind'' Exploration of Large Language Model Society,'' arXiv:2303.17760, 2023.
 
-\bibitem{shinn2023reflexion} N. Shinn, et al., ``Reflexion: Language Agents with Verbal Reinforcement Learning,'' arXiv:2303.11366, 2023.
+\bibitem{shinn2023reflexion} N. Shinn, et al.\newblock ``Reflexion: Language Agents with Verbal Reinforcement Learning,'' arXiv:2303.11366, 2023.
 
 \bibitem{kingma2014} D. P. Kingma and J. Ba, ``Adam: A Method for Stochastic Optimization,'' \textit{ICLR}, 2015.
 
 \bibitem{hu2021} E. J. Hu et al., ``LoRA: Low-Rank Adaptation of Large Language Models,'' \textit{ICLR}, 2022.
+
+\bibitem{vaswani2017} A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polosukhin, ``Attention Is All You Need,'' \textit{Advances in Neural Information Processing Systems}, vol. 30, pp. 5998--6008, 2017.
 
 \end{thebibliography}
 

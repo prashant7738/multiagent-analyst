@@ -1,0 +1,88 @@
+% ============================================
+% METHODOLOGY
+% ============================================
+
+\begin{frame}{Methodology -- [1] (6-Agent Orchestration Pipeline)}
+    \begin{center}
+        \includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{src/images/fiximag.png}
+    \end{center}
+\end{frame}
+
+% ============================================
+% AGENT 1
+% ============================================
+\begin{frame}{Agent 1 -- Raw Structural Profiler}
+    \begin{itemize}
+        \item Reads CSV file without modifying any data
+        \item Records total number of rows and columns
+        \item Identifies data type of each column
+        \item Detects missing values and duplicate records
+        \item Validates file format, date format, and currency format
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 2
+% ============================================
+\begin{frame}{Agent 2 -- Technical Inference \& Semantic Tagging}
+    \begin{itemize}
+        \item Analyzes column names and sample values to understand meaning
+        \item Classifies each column into finance categories: identifier, amount, date, category, counterparty, or sensitive
+        \item Detects column dependencies (e.g., \texttt{is\_married} only applies when age $\geq$ 18)
+        \item Flags confidential columns such as salary, account number, and personal details
+        \item Creates a semantic blueprint that guides all downstream agents
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 3
+% ============================================
+\begin{frame}{Agent 3 -- Context-Aware Preprocessing}
+    \begin{itemize}
+        \item Removes duplicate records detected by Agent 1
+        \item Corrects common accounting typos and inconsistent category labels
+        \item Converts each column to its correct data type using Agent 2's classification
+        \item Fills missing dates using forward-fill when chronological order is preserved
+        \item Detects and tags outliers using IQR method without removing them
+        \item Never imputes missing financial amounts --- flags them for human review instead
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 4
+% ============================================
+\begin{frame}{Agent 4 -- Visualization \& Statistical Analysis}
+    \begin{itemize}
+        \item Calculates descriptive statistics
+        \item Performs trend analysis
+        \item Detects unusual transactions (outliers)
+        \item Measures correlations between variables
+        \item Generates charts and visualizations
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 5
+% ============================================
+\begin{frame}{Agent 5 -- Output Validation \& Quality Guardrail}
+    \begin{itemize}
+        \item Verifies statistical calculations
+        \item Cross-checks charts against source data
+        \item Validates relationships and trends
+        \item Checks whether every claim is supported by evidence
+        \item Stops the pipeline if inconsistencies are found
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 6
+% ============================================
+\begin{frame}{Agent 6 -- Report Assembly \& Insight Generation}
+    \begin{itemize}
+        \item Reads validated statistical results
+        \item Generates human-readable explanations
+        \item Summarizes key findings
+        \item Creates executive summaries
+        \item Compiles charts, insights, and statistics into PDF or HTML reports
+    \end{itemize}
+\end{frame}

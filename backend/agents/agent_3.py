@@ -51,6 +51,8 @@ PREPROCESSING_PROFILES = {
 }
 
 DEFAULT_PROFILE = "balanced"
+DEFAULT_KNN_NEIGHBORS = 5
+DEFAULT_ITERATIVE_MAX_ITER = 10
 
 
 def _verbose_logging_enabled():
@@ -182,6 +184,8 @@ def _build_preprocessing_config(state_config, requested_profile, schema_blueprin
         "max_reasonable_tax_rate": base_profile["max_reasonable_tax_rate"],
         "reconciliation_rel_tol": base_profile["reconciliation_rel_tol"],
         "reconciliation_abs_tol": base_profile["reconciliation_abs_tol"],
+        "knn_imputer_neighbors": DEFAULT_KNN_NEIGHBORS,
+        "iterative_imputer_max_iter": DEFAULT_ITERATIVE_MAX_ITER,
         "quality_weights": base_profile["quality_weights"].copy(),
     }
     if not isinstance(state_config, dict):
@@ -192,6 +196,8 @@ def _build_preprocessing_config(state_config, requested_profile, schema_blueprin
         "max_reasonable_tax_rate",
         "reconciliation_rel_tol",
         "reconciliation_abs_tol",
+        "knn_imputer_neighbors",
+        "iterative_imputer_max_iter",
     ]:
         if key in state_config:
             cfg[key] = state_config[key]
@@ -592,11 +598,80 @@ def _remove_duplicates(df, schema_blueprint):
     return df, before - len(df), key_cols
 
 
-def _impute(df, schema_blueprint):
+def _multivariate_imputation_frame(df, schema_blueprint):
+    """Build a numeric frame suitable for KNN or iterative imputation."""
+    numeric_cols = []
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns:
+            continue
+        if meta.get("semantic_tag") in {"identifier", "datetime", "currency", "financial"}:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]) and not pd.api.types.is_bool_dtype(df[col]):
+            numeric_cols.append(col)
+
+    if not numeric_cols:
+        return pd.DataFrame(index=df.index)
+
+    return df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+
+
+def _run_knn_imputer(df, schema_blueprint, config):
+    """Run a KNN imputer across eligible numeric columns."""
+    from sklearn.impute import KNNImputer
+
+    numeric_frame = _multivariate_imputation_frame(df, schema_blueprint)
+    if numeric_frame.shape[1] < 1:
+        raise ValueError("no eligible numeric columns available for KNN imputation")
+
+    neighbors = int(config.get("knn_imputer_neighbors", DEFAULT_KNN_NEIGHBORS) or DEFAULT_KNN_NEIGHBORS)
+    neighbors = max(1, min(neighbors, max(len(numeric_frame) - 1, 1)))
+    imputer = KNNImputer(n_neighbors=neighbors)
+    imputed = imputer.fit_transform(numeric_frame)
+    return pd.DataFrame(imputed, index=df.index, columns=numeric_frame.columns)
+
+
+def _run_iterative_imputer(df, schema_blueprint, config):
+    """Run an iterative multivariate imputer across eligible numeric columns."""
+    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+    from sklearn.impute import IterativeImputer
+
+    numeric_frame = _multivariate_imputation_frame(df, schema_blueprint)
+    if numeric_frame.shape[1] < 1:
+        raise ValueError("no eligible numeric columns available for iterative imputation")
+
+    max_iter = int(config.get("iterative_imputer_max_iter", DEFAULT_ITERATIVE_MAX_ITER) or DEFAULT_ITERATIVE_MAX_ITER)
+    imputer = IterativeImputer(random_state=0, max_iter=max_iter, initial_strategy="median")
+    imputed = imputer.fit_transform(numeric_frame)
+    return pd.DataFrame(imputed, index=df.index, columns=numeric_frame.columns)
+
+
+def _mark_column_dropped(schema_blueprint, col, reason):
+    """Record that a column was removed during preprocessing."""
+    meta = schema_blueprint.setdefault(col, {})
+    meta["analysis_allowed"] = False
+    meta["dropped_by_imputation"] = True
+    meta["encoding_strategy"] = {"method": "none", "reason": "column dropped during preprocessing"}
+    meta["notes"] = reason
+
+
+def _impute(df, schema_blueprint, config=None):
     notes = []
     df = df.copy()
+    config = config or {}
     rows_before = len(df)
     drop_mask = pd.Series([False] * len(df), index=df.index)
+    multivariate_cache = {}
+
+    def _get_multivariate_result(method_name):
+        if method_name in multivariate_cache:
+            return multivariate_cache[method_name]
+        if method_name == "knn":
+            multivariate_cache[method_name] = _run_knn_imputer(df, schema_blueprint, config)
+        elif method_name == "iterative":
+            multivariate_cache[method_name] = _run_iterative_imputer(df, schema_blueprint, config)
+        else:
+            raise ValueError(f"unsupported multivariate imputation method '{method_name}'")
+        return multivariate_cache[method_name]
 
     for col, meta in schema_blueprint.items():
         if col not in df.columns:
@@ -663,6 +738,32 @@ def _impute(df, schema_blueprint):
                 reason_text = f" ({null_reason})" if null_reason else ""
                 notes.append(f"{col}: imputed {missing_count} NaNs with 'Unknown'{reason_text}")
                 continue
+            if null_action == "impute_forward_fill":
+                before_fill = int(df[col].isna().sum())
+                df[col] = df[col].ffill()
+                filled_count = before_fill - int(df[col].isna().sum())
+                reason_text = f" ({null_reason})" if null_reason else ""
+                notes.append(f"{col}: forward-filled {filled_count} NaNs using prior row context{reason_text}")
+                continue
+            if null_action == "drop_column":
+                df = df.drop(columns=[col])
+                _mark_column_dropped(schema_blueprint, col, null_reason or "column dropped because missingness was too high")
+                notes.append(f"{col}: dropped column due to missingness policy ({null_reason or 'drop_column'})")
+                continue
+            if null_action in {"impute_knn", "impute_iterative"}:
+                method_name = "knn" if null_action == "impute_knn" else "iterative"
+                try:
+                    imputed_frame = _get_multivariate_result(method_name)
+                    if col not in imputed_frame.columns:
+                        raise ValueError(f"column not available in {method_name} imputer frame")
+                    before_fill = int(df[col].isna().sum())
+                    df[col] = df[col].fillna(imputed_frame[col])
+                    filled_count = before_fill - int(df[col].isna().sum())
+                    reason_text = f" ({null_reason})" if null_reason else ""
+                    notes.append(f"{col}: imputed {filled_count} NaNs with {method_name} imputation{reason_text}")
+                except Exception as e:
+                    notes.append(f"{col}: {method_name} imputation failed - {e}")
+                continue
 
             if strategy == "mean":
                 fill_value = df[col].mean()
@@ -688,6 +789,26 @@ def _impute(df, schema_blueprint):
             elif strategy == "unknown_label":
                 df[col] = df[col].fillna("Unknown")
                 notes.append(f"{col}: imputed {missing_count} NaNs with 'Unknown'")
+            elif strategy == "forward_fill":
+                before_fill = int(df[col].isna().sum())
+                df[col] = df[col].ffill()
+                filled_count = before_fill - int(df[col].isna().sum())
+                notes.append(f"{col}: forward-filled {filled_count} NaNs using prior row context")
+            elif strategy == "drop_column":
+                df = df.drop(columns=[col])
+                _mark_column_dropped(schema_blueprint, col, "column dropped during imputation")
+                notes.append(f"{col}: dropped column due to imputation strategy=drop_column")
+            elif strategy in {"knn", "iterative"}:
+                try:
+                    imputed_frame = _get_multivariate_result(strategy)
+                    if col not in imputed_frame.columns:
+                        raise ValueError(f"column not available in {strategy} imputer frame")
+                    before_fill = int(df[col].isna().sum())
+                    df[col] = df[col].fillna(imputed_frame[col])
+                    filled_count = before_fill - int(df[col].isna().sum())
+                    notes.append(f"{col}: imputed {filled_count} NaNs with {strategy} imputation")
+                except Exception as e:
+                    notes.append(f"{col}: {strategy} imputation failed - {e}")
             elif strategy == "drop":
                 drop_mask = drop_mask | df[col].isna()
                 notes.append(f"{col}: {missing_count} rows flagged for drop (identifier NaN)")

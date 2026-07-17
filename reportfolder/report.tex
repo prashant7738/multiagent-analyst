@@ -199,11 +199,15 @@ At the mid-point of development, the first four agents are implemented and the b
 \textbf{CSV} & Comma-Separated Values \\
 \textbf{DAG} & Directed Acyclic Graph \\
 \textbf{DOECE} & Department of Electronics and Computer Engineering \\
+\textbf{GQA} & Grouped-Query Attention \\
 \textbf{HTML} & HyperText Markup Language \\
 \textbf{IOE} & Institute of Engineering \\
 \textbf{JSON} & JavaScript Object Notation \\
+\textbf{KV} & Key-Value (cache) \\
 \textbf{LLM} & Large Language Model \\
+\textbf{LPU} & Language Processing Unit \\
 \textbf{PDF} & Portable Document Format \\
+\textbf{RoPE} & Rotary Position Embedding \\
 \textbf{TU} & Tribhuvan University \\
 \end{tabular}
 \end{table}
@@ -265,7 +269,7 @@ The primary objectives of this project are:
 	\item Runs as web application without requiring to download additional software
 \end{itemize}
 
-	extbf{Primary Use Cases:}
+\textbf{Primary Use Cases:}
 
 \begin{enumerate}
 	\item \textbf{Sales Performance Tracking:} Automated analysis of sales data to identify trends, top-performing products, seasonal patterns, and revenue forecasts for planning
@@ -365,14 +369,14 @@ Multi-format expansion & Planned & Future support target \\
 
 \chapter{THEORETICAL APPROACH}
 
-The semantic tagging stage of this project relies on a Transformer-based Large Language Model (LLM) served locally through Ollama. This chapter summarises only the concepts needed to understand how the model produces the JSON schema blueprint that drives preprocessing, and deliberately avoids theory that the implementation does not use.
+The semantic tagging stage of this project relies on a Transformer-based Large Language Model (LLM) accessed through the Groq API, which serves the \texttt{llama-3.3-70b-versatile} model at high inference speed via purpose-built hardware. This chapter summarises only the concepts needed to understand how the model produces the JSON schema blueprint that drives preprocessing, and deliberately avoids theory that the implementation does not use.
 
 \section{Large Language Model Theory}
 
 A Large Language Model is a neural network trained to model the probability distribution of natural language: given a sequence of previous tokens, it estimates the most likely next token. In this project the model is not used for free-form prose but as a structured reasoning component that reads column metadata and returns a strict JSON schema blueprint.
 
 \subsection{Decoder-Only Transformer Architecture}
-Earlier sequence models such as RNNs and LSTMs processed tokens one step at a time, which made training slow and long-range relationships hard to capture. The Transformer replaces recurrence with a self-attention mechanism that relates every token to every other token in parallel. Text-generation models such as the Llama family use a \emph{decoder-only} Transformer: a stack of identical blocks in which a causal mask allows the prediction at position $t$ to attend only to positions $1$ to $t$. This left-to-right constraint makes the model autoregressive, generating one token at a time.
+Earlier sequence models such as RNNs and LSTMs processed tokens one step at a time, which made training slow and long-range relationships hard to capture. The Transformer replaces recurrence with a self-attention mechanism that relates every token to every other token in parallel \cite{vaswani2017}. Text-generation models such as the Llama family use a \emph{decoder-only} Transformer: a stack of identical blocks in which a causal mask allows the prediction at position $t$ to attend only to positions $1$ to $t$. This left-to-right constraint makes the model autoregressive, generating one token at a time.
 
 \subsection{Tokenization and Embedding}
 Raw text is first split into subword tokens, each mapped to an integer index in a fixed vocabulary of size $V$. Every index is then converted into a dense vector through a learned embedding matrix $E \in \mathbb{R}^{V \times d}$, where $d$ is the model dimension:
@@ -388,7 +392,7 @@ Self-attention lets each token gather information from other tokens. Three proje
 \text{Attention}(Q,K,V) = \text{Softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
 \label{eq:attention}
 \end{equation}
-where $d_k$ is the key dimension and $\sqrt{d_k}$ scales the dot products to keep the softmax stable. The Transformer runs several attention \emph{heads} in parallel so the model can capture different relationships at once. Each block also applies a position-wise feed-forward network with residual connections and layer normalization, which add capacity and keep the deep computation numerically stable.
+where $d_k$ is the key dimension and $\sqrt{d_k}$ scales the dot products to keep the softmax stable \cite{vaswani2017}. The Transformer runs several attention \emph{heads} in parallel so the model can capture different relationships at once. Each block also applies a position-wise feed-forward network with residual connections and layer normalization, which add capacity and keep the deep computation numerically stable.
 
 \subsection{Next-Token Prediction}
 After the final block, the last token representation is projected to a vector of logits $z$ of length $V$, which a softmax converts into a probability distribution over the vocabulary:
@@ -405,25 +409,69 @@ The model predicts the next token conditioned on all previous tokens and generat
 \label{fig:transformer-architecture}
 \end{figure}
 
-\section{Ollama Model and Inference Architecture}
+\section{Groq API and LLM Inference Architecture}
 
-Ollama is the official LLM backend of this system: a lightweight runtime that loads and serves open-source Transformer models entirely on the local machine and exposes them through a local REST API.
+The LLM backend of this system is the Groq API, which exposes the \texttt{llama-3.3-70b-versatile} model through an OpenAI-compatible REST interface. Groq achieves exceptionally low inference latency by running Transformer models on Language Processing Units (LPUs), custom silicon designed specifically for autoregressive token generation. This section explains the Groq inference model and how Agent~2 uses it to generate the JSON schema blueprint.
 
-\subsection{Why Ollama Is Used}
-Local inference gives the system four practical benefits: \emph{privacy}, since dataset-derived prompts never leave the machine; \emph{offline execution} once the model is pulled; \emph{low and predictable cost}, with no per-request charges; and \emph{easy deployment}, since a single runtime manages model loading and serving. These properties make Ollama an appropriate backend for an analytics tool intended for small organizations that handle sensitive financial and sales data.
+\subsection{Why the Groq API Is Used}
+The Groq API was selected over local inference runtimes for three principal reasons.
 
-\subsection{Local Model Loading and REST API}
-When a model such as Llama~3.x is requested, Ollama loads its weights into CPU or GPU memory and keeps them resident so repeated requests avoid reload overhead. Agent~2 communicates with the running model through a local chat-completion request containing a system instruction and a user message, and receives the generated text in response. From the application's perspective this is a simple local HTTP call, while all Transformer computation happens inside the Ollama process.
+\textbf{Inference speed.} LPU hardware is architected for the sequential, memory-bound nature of autoregressive decoding. Each forward pass generates one token, and the dominant cost is reading model weights from memory on every step. LPUs use on-chip SRAM instead of off-chip DRAM, eliminating memory bandwidth as the bottleneck. In practice, \texttt{llama-3.3-70b-versatile} on Groq produces hundreds of output tokens per second---far more than a CPU or consumer GPU running the same model weights locally. For a pipeline where Agent~2 may need to tag dozens of columns in one call, short round-trip times keep the overall pipeline latency acceptable.
 
-\subsection{Prompt Processing Pipeline}
-During inference Ollama executes the stages described above in the forward direction only: the prompt is tokenized and embedded (Equation~\ref{eq:embed}), passed through the decoder stack where masked multi-head attention (Equation~\ref{eq:attention}) lets each token attend to earlier ones, and projected to a next-token distribution through the softmax (Equation~\ref{eq:softmax}). To generate efficiently, Ollama keeps the key and value tensors of previous tokens in a \emph{KV cache}, so each new token only attends to cached values instead of recomputing attention over the whole sequence. The decoded tokens are returned over the REST API to Agent~2, which parses the JSON schema blueprint from the response.
+\textbf{No local hardware requirement.} Running a 70-billion-parameter model locally demands tens of gigabytes of GPU VRAM. The Groq API allows the project to use a state-of-the-art open-weight model without imposing any GPU requirement on the developer's machine. This makes the system deployable on standard laptops and cloud VMs alike.
+
+\textbf{Simplicity and cost control.} The API follows the same chat-completion contract as the OpenAI SDK. Agent~2 constructs a system prompt and a user message, sends a single HTTP POST request, and receives a JSON response. The official Python client (\texttt{groq}) abstracts authentication and retries. Usage-based pricing means the project incurs no fixed infrastructure cost, and because Agent~2 sends only column metadata and three sample values rather than full table rows, prompt token counts remain small.
+
+\subsection{The Llama 3.3 70B Model}
+\texttt{llama-3.3-70b-versatile} is a 70-billion-parameter decoder-only Transformer released by Meta as part of the Llama~3 family \cite{dubey2024llama3}. Its architecture follows the design described in Section~4.1 with several refinements that improve efficiency and long-context handling.
+
+\textbf{Grouped-Query Attention (GQA).} Standard multi-head attention stores one key--value head per query head. Grouped-Query Attention partitions the query heads into groups that share a single key--value head. Formally, if there are $H$ query heads organized into $G$ groups ($G < H$), the attention for query head $h$ in group $g$ is:
+\begin{equation}
+\text{GQA}_h(Q_h, K_g, V_g) = \text{Softmax}\!\left(\frac{Q_h K_g^{\top}}{\sqrt{d_k}}\right) V_g
+\label{eq:gqa}
+\end{equation}
+where $K_g$ and $V_g$ are the shared key and value matrices for group $g$ \cite{ainslie2023gqa}. GQA reduces the size of the KV cache proportionally to the group ratio $H/G$, which lowers memory bandwidth pressure during autoregressive decoding and is a key reason LPU-based inference is particularly effective with this model.
+
+\textbf{RoPE positional encoding.} Instead of adding a fixed positional vector to each embedding, Llama~3 applies Rotary Position Embedding (RoPE), which encodes absolute position by rotating the query and key vectors before the dot product:
+\begin{equation}
+\tilde{q}_m = q_m \cdot e^{i m \theta}, \quad \tilde{k}_n = k_n \cdot e^{i n \theta}
+\label{eq:rope}
+\end{equation}
+After rotation the dot product $\tilde{q}_m^{\top}\tilde{k}_n$ depends only on the relative position $m-n$, giving the model a principled notion of token distance \cite{su2021rope}. Compared with learned absolute embeddings, RoPE generalizes more cleanly to prompt lengths not seen during training.
+
+\textbf{SwiGLU feed-forward blocks.} Each Transformer block contains a position-wise feed-forward network. Llama~3 replaces the standard ReLU activation with SwiGLU:
+\begin{equation}
+\text{FFN}(x) = \left(\text{Swish}(xW_1) \odot xW_2\right) W_3
+\label{eq:swiglu}
+\end{equation}
+where $\text{Swish}(x) = x \cdot \sigma(x)$ is a smooth gating function, $\odot$ is element-wise multiplication, and $W_1, W_2, W_3$ are learned weight matrices \cite{shazeer2020swiglu}. The gating mechanism allows the network to suppress irrelevant dimensions adaptively, which empirically improves output quality over ReLU at the same parameter count.
+
+\textbf{RMS Layer Normalization.} Llama~3 uses Root Mean Square Layer Normalization (RMSNorm) instead of the standard LayerNorm:
+\begin{equation}
+\text{RMSNorm}(x) = \frac{x}{\text{RMS}(x)} \cdot \gamma, \quad \text{RMS}(x) = \sqrt{\frac{1}{d}\sum_{i=1}^{d} x_i^2}
+\label{eq:rmsnorm}
+\end{equation}
+RMSNorm omits the mean-centering step of LayerNorm \cite{zhang2019rmsnorm}. Because re-centering is often redundant given downstream weight matrices, RMSNorm achieves similar training stability at lower computational cost.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{\detokenize{ollama_architecture.png}}
-\caption{Local Transformer inference pipeline executed by Ollama}
-\label{fig:ollama-architecture}
+\includegraphics[width=0.9\textwidth,height=0.82\textheight,keepaspectratio]{llm_transformer_architecture.png}
+\caption{Llama~3.3-70B architecture: decoder-only Transformer with GQA, RoPE, SwiGLU, and RMSNorm}
+\label{fig:llm-transformer-architecture}
 \end{figure}
+
+\subsection{Agent~2 API Call and Prompt Processing}
+Agent~2 calls the Groq API exactly once per tagging request (or per batch for wide schemas). The call flow is as follows.
+
+\begin{enumerate}
+  \item \textbf{Prompt construction.} \texttt{\_build\_llm\_prompt} assembles a \emph{system} message that specifies the required JSON schema format and valid tag values, and a \emph{user} message containing, for each column: the column name, the heuristically inferred type, the missing-value rate, and the first three sample values. This minimal context keeps the prompt under a few hundred tokens regardless of table size.
+  \item \textbf{API request.} The Groq Python client sends a \texttt{chat.completions.create} request with \texttt{model="llama-3.3-70b-versatile"} and \texttt{temperature=0.1}. A temperature close to zero makes the softmax distribution (Equation~\ref{eq:softmax}) sharply peaked, so the model consistently selects the highest-probability token rather than sampling freely. This near-determinism is important because the output must be strictly parseable JSON.
+  \item \textbf{Prompt processing.} On Groq's LPU cluster the prompt tokens are tokenized and embedded (Equation~\ref{eq:embed}), then passed through the 80 decoder blocks of Llama~3.3-70B. Inside each block, GQA (Equation~\ref{eq:gqa}) computes position-aware attention using RoPE (Equation~\ref{eq:rope}), and the SwiGLU FFN (Equation~\ref{eq:swiglu}) applies non-linear gating. RMSNorm (Equation~\ref{eq:rmsnorm}) stabilizes each sub-layer. The final block projects to logits over the vocabulary and applies softmax to produce the next-token distribution.
+  \item \textbf{KV cache and autoregressive generation.} After the prompt is processed, the key and value tensors for every prompt token are cached. Each subsequent output token is generated by running only the new token through the network, attending to the cached values. This KV-cache mechanism makes generation fast even for long prompts.
+  \item \textbf{Response parsing.} The generated text is returned in the API response body. \texttt{\_parse\_schema\_blueprint\_response} extracts valid JSON from raw or code-fenced output; as a last resort it locates the outermost \texttt{\{...\}} span so that a stray formatting character does not discard an otherwise correct schema. If parsing fails after retries, \texttt{\_fallback\_blueprint} constructs a conservative schema from the locally sniffed types, ensuring the pipeline always has a usable blueprint.
+\end{enumerate}
+
+This design keeps Agent~2 loosely coupled to the model provider: the entire LLM interaction is isolated inside three functions (\texttt{\_build\_llm\_prompt}, the Groq client call, and \texttt{\_parse\_schema\_blueprint\_response}), so the backend can be swapped for another OpenAI-compatible endpoint without touching the rest of the pipeline.
 
 \chapter{SYSTEM ARCHITECTURE AND METHODOLOGY}
 
@@ -450,7 +498,7 @@ The shared state contains the input path, the raw profile, the semantic blueprin
 The state also carries reliability metadata. Each stage can contribute a confidence score and evidence list, which helps the system decide whether a later stage should proceed. That is useful in the report because it shows that the project is not just generating outputs, but also measuring the reliability of those outputs.
 
 \section{Methodology}
-The methodology combines deterministic data processing with LLM-assisted semantic reasoning. Structural checks, preprocessing rules, and statistics are implemented in Python, while the validation and reporting stages remain planned work. Semantic interpretation uses a local LLM served through Ollama, and the planned final narrative generation will use the same backend; both stages are backed by fallback logic so the pipeline remains usable when the model is unavailable.
+The methodology combines deterministic data processing with LLM-assisted semantic reasoning. Structural checks, preprocessing rules, and statistics are implemented in Python, while the validation and reporting stages remain planned work. Semantic interpretation uses the Groq API with the \texttt{llama-3.3-70b-versatile} model, and the planned final narrative generation will use the same backend; both stages are backed by fallback logic so the pipeline remains usable when the API is unavailable.
 
 Methodologically, the project follows a layered analytics model. The early stages reduce raw data into a trustworthy form, the middle stages compute measurable patterns, and the later stages turn those patterns into human-readable findings. That mirrors the workflow of a human analyst while still keeping the process automated and repeatable.
 
@@ -526,7 +574,7 @@ where $m$ is the overall missing rate and $d$ the duplicate rate as percentages.
 \section{Agent 2: Semantic Tagger}
 
 \subsection{Overview and Purpose}
-Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a \texttt{schema\_blueprint}: a per-column description of the intended type, semantic role, and cleaning policy. Where Agent~1 only observed the data, Agent~2 assigns meaning to each column so that preprocessing can be driven by rules rather than guesswork. When the language model is invoked, it is served locally through Ollama; the inference mechanics are described in Chapter~4 and are not repeated here.
+Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a \texttt{schema\_blueprint}: a per-column description of the intended type, semantic role, and cleaning policy. Where Agent~1 only observed the data, Agent~2 assigns meaning to each column so that preprocessing can be driven by rules rather than guesswork. When the language model is invoked, it is called through the Groq API (\texttt{llama-3.3-70b-versatile}); the inference mechanics are described in Chapter~4 and are not repeated here.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -847,17 +895,17 @@ This timeline reflects the actual progression of the work. The first phase focus
 
 \bibitem{wu2023} Q. Wu, G. Bansal, J. Zhang, et al., ``AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework,'' 2023.
 
-\bibitem{ji2023hallucination} Z. Ji, et al., ``Survey of Hallucination in Natural Language Generation,'' \textit{ACM Computing Surveys}, 2023.
+\bibitem{vaswani2017} A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, \L. Kaiser, and I. Polosukhin, ``Attention Is All You Need,'' \textit{Advances in Neural Information Processing Systems}, vol. 30, pp. 5998--6008, 2017.
 
-\bibitem{li2023camel} G. Li, et al., ``CAMEL: Communicative Agents for ``Mind'' Exploration of Large Language Model Society,'' arXiv:2303.17760, 2023.
+\bibitem{dubey2024llama3} A. Dubey et al., ``The Llama 3 Herd of Models,'' arXiv preprint arXiv:2407.21783, 2024.
 
-\bibitem{shinn2023reflexion} N. Shinn, et al.\newblock ``Reflexion: Language Agents with Verbal Reinforcement Learning,'' arXiv:2303.11366, 2023.
+\bibitem{ainslie2023gqa} J. Ainslie, J. Lee-Thorp, M. de Jong, Y. Zemlyanskiy, F. Lebr\'{o}n, and S. Sanghai, ``GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints,'' in \textit{Proceedings of EMNLP}, 2023.
 
-\bibitem{kingma2014} D. P. Kingma and J. Ba, ``Adam: A Method for Stochastic Optimization,'' \textit{ICLR}, 2015.
+\bibitem{su2021rope} J. Su, Y. Lu, S. Pan, A. Murtadha, B. Wen, and Y. Liu, ``RoFormer: Enhanced Transformer with Rotary Position Embedding,'' arXiv preprint arXiv:2104.09864, 2021.
 
-\bibitem{hu2021} E. J. Hu et al., ``LoRA: Low-Rank Adaptation of Large Language Models,'' \textit{ICLR}, 2022.
+\bibitem{shazeer2020swiglu} N. Shazeer, ``GLU Variants Improve Transformer,'' arXiv preprint arXiv:2002.05202, 2020.
 
-\bibitem{vaswani2017} A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polosukhin, ``Attention Is All You Need,'' \textit{Advances in Neural Information Processing Systems}, vol. 30, pp. 5998--6008, 2017.
+\bibitem{zhang2019rmsnorm} B. Zhang and R. Sennrich, ``Root Mean Square Layer Normalization,'' in \textit{Advances in Neural Information Processing Systems}, 2019.
 
 \end{thebibliography}
 

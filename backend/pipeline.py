@@ -1,6 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 from langgraph.graph import StateGraph, END
 from agents.agent_1 import GraphState, agent1_structural_profiler
 from agents.agent_2 import agent2_semantic_tagger
@@ -35,6 +39,55 @@ def should_continue_after_agent3(state: GraphState) -> str:
 
 
 
+def _write_run_diagnostics(state: GraphState, output_path: str | Path | None = None) -> str:
+    """Write the tester-facing metadata from the latest pipeline run."""
+    if output_path is None:
+        output_path = Path(__file__).resolve().parent / "outputs" / "agent_run_diagnostics.json"
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    diagnostics = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "input": {
+            "csv_path": state.get("csv_path"),
+            "sheet_name": state.get("sheet_name"),
+        },
+        "agent_1": {
+            "raw_profile": state.get("raw_profile", {}),
+            "columns": state.get("raw_profile", {}).get("columns", {}),
+        },
+        "agent_2": {
+            "columns": state.get("schema_blueprint", {}),
+        },
+        "agent_3": {
+            "preprocessing_profile": state.get("preprocessing_profile", ""),
+            "dataset_domain": state.get("dataset_domain", ""),
+            "preprocessing_config": state.get("preprocessing_config", {}),
+            "scaling_params": state.get("scaling_params", {}),
+            "preprocessing_log": state.get("preprocessing_log", []),
+            "data_quality": state.get("data_quality", {}),
+            "column_ledger": state.get("column_ledger", {}),
+            "cleaned_csv_path": state.get("cleaned_csv_path", ""),
+        },
+        "agent_4": {
+            "stats": state.get("stats", {}),
+            "chart_paths": state.get("chart_paths", []),
+        },
+        "pipeline": {
+            "errors": state.get("errors", []),
+            "reliability": state.get("reliability", {}),
+        },
+    }
+
+    if output_path.exists():
+        output_path.unlink()
+    with output_path.open("w", encoding="utf-8") as handle:
+        json.dump(diagnostics, handle, indent=2, ensure_ascii=False, default=str)
+        handle.write("\n")
+
+    return str(output_path)
+
+
 def build_pipeline() -> StateGraph:
     graph = StateGraph(GraphState)
 
@@ -64,7 +117,7 @@ if __name__ == "__main__":
 
     # Use absolute path relative to this script's location
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(script_dir, "olist_products_dataset.csv")
+    csv_path = os.path.join(script_dir, "amazon_sales_dataset.csv")
 
     initial_state: GraphState = {
         "csv_path": csv_path,
@@ -87,18 +140,20 @@ if __name__ == "__main__":
     }
 
     final_state = pipeline.invoke(initial_state)
+    diagnostics_path = _write_run_diagnostics(final_state)
+    print(f"\n  Run diagnostics: {diagnostics_path}")
 
     # ── Agent 1 output ──────────────────────────────────────────────────────
     print("\n══════════════════════════════════════════")
     print("  AGENT 1 — Structural Profile")
     print("══════════════════════════════════════════")
     raw_profile = final_state.get("raw_profile", {})
-    dataset = raw_profile.get("dataset", {})
-    print(f"  Rows:            {dataset.get('rows')}")
-    print(f"  Columns:         {dataset.get('columns')}")
-    print(f"  Total cells:     {dataset.get('total_cells')}")
-    print(f"  Missing rate:    {dataset.get('missing_rate_pct')}%")
-    print(f"  Duplicate rows:  {dataset.get('duplicate_rows')} ({dataset.get('duplicate_rate_pct')}%)")
+    shape = raw_profile.get("shape", {})
+    print(f"  Rows:            {shape.get('rows')}")
+    print(f"  Columns:         {shape.get('cols')}")
+    print(f"  Total cells:     {raw_profile.get('total_cells')}")
+    print(f"  Missing rate:    {raw_profile.get('overall_missing_rate_pct')}%")
+    print(f"  Duplicate rows:  {raw_profile.get('duplicate_rows')} ({raw_profile.get('duplicate_rate_pct')}%)")
     col_profiles = raw_profile.get("columns", {})
     print(f"  Column profiles: {len(col_profiles)} columns profiled")
 

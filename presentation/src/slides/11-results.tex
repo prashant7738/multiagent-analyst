@@ -1,0 +1,32 @@
+% ============================================
+% RESULT
+% ============================================
+
+\begin{frame}{Current Progress -- Verified Run}
+    \begin{itemize}
+        \item \textbf{Input tested:} Amazon sales CSV with 10,000 rows and 21 columns.
+        \item \textbf{Agent 1:} 210,000 cells profiled; 0 missing cells and 0 duplicate rows in the run.
+        \item \textbf{Agent 2:} All 21 columns received a semantic schema blueprint and processing policy.
+        \item \textbf{Agent 3:} Cleaned CSV, scaling parameters, column ledger, preprocessing log, and quality metrics generated.
+        \item \textbf{Agent 4:} Statistics and chart infrastructure executed through the LangGraph pipeline.
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Generated Outputs}
+    \begin{itemize}
+        \item Cleaned dataset exported to \texttt{backend/outputs/cleaned\_data.csv}
+        \item Run metadata exported to \texttt{agent\_run\_diagnostics.json}
+        \item Correlation heatmap and numeric distribution charts generated as PNG files
+        \item Category and payment-method distribution charts generated from the processed data
+        \item Reliability metadata records stage confidence, evidence, and decision readiness
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Testing and Engineering Progress}
+    \begin{itemize}
+        \item Focused tests cover semantic-tagging chunking, currency parsing, duplicate consistency, chart overwrite behavior, and pipeline diagnostics.
+        \item Chart generation clears stale PNG files before each run to avoid reporting outdated results.
+        \item Pipeline errors are accumulated in shared state and conditional routing stops downstream stages when a critical stage fails.
+        \item The current backend is reproducible from a defined input path and writes structured diagnostics for inspection.
+    \end{itemize}
+\end{frame}

@@ -46,7 +46,7 @@ def _save(fig, name):
 
 # ── filter out internal validation columns ──
 _VALIDATION_SUFFIXES = ("_parse_failed", "_range_failed")
-_BACKUP_SUFFIXES = ("_raw", "_scaled")
+_BACKUP_SUFFIXES = ("_raw", "_scaled", "_was_clipped")
 ANOMALY_Z_THRESHOLD = 3.5
 
 def _numeric_cols(df, schema_blueprint):
@@ -70,6 +70,26 @@ def _numeric_cols(df, schema_blueprint):
             cols.append(col)
     return cols
 
+# Date-derived column suffixes that are mechanically correlated and add noise to
+# correlation heatmaps and regression trend outputs.
+_DATE_DERIVED_SUFFIXES = (
+    "_year", "_month", "_quarter", "_day",
+    "_day_of_week", "_is_weekend", "_week_of_year",
+)
+
+_BUSINESS_METRIC_NAMES = {
+    "quantity", "unit_price", "total_sales", "unit_cost",
+    "total_cost", "profit", "discount_pct",
+}
+
+def _is_date_derived(col: str) -> bool:
+    return any(col.endswith(s) for s in _DATE_DERIVED_SUFFIXES)
+
+
+def _is_business_metric(col: str) -> bool:
+    return col in _BUSINESS_METRIC_NAMES or col.removeprefix("derived_") in _BUSINESS_METRIC_NAMES
+
+
 def _categorical_cols(df, schema_blueprint):
     """Return categorical columns, excluding validation suffixes and identifiers/datetimes."""
     cols = []
@@ -83,7 +103,13 @@ def _categorical_cols(df, schema_blueprint):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
             continue
-        if df[col].dtype == object or meta.get("semantic_tag") == "categorical_label":
+        # pandas 3.x uses StringDtype (dtype=string) instead of object for text columns.
+        is_string_col = (
+            df[col].dtype == object
+            or str(df[col].dtype) == "string"
+            or hasattr(df[col].dtype, "name") and df[col].dtype.name == "string"
+        )
+        if is_string_col or meta.get("semantic_tag") == "categorical_label":
             cols.append(col)
     return cols
 
@@ -95,6 +121,12 @@ def _find_col(df, keywords, schema_blueprint):
             if re.search(rf'\b{re.escape(kw)}\b', col.lower()):
                 return col
     return None
+
+def _find_revenue_col(df, schema_blueprint):
+    """Locate the primary revenue/sales column, including names that include underscores."""
+    # These keywords match whole-word OR common compound column names.
+    keywords = ["total_sales", "revenue", "net_sales", "total_amount", "income", "sales"]
+    return _find_col(df, keywords, schema_blueprint)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1 — DESCRIPTIVE STATISTICS
@@ -127,7 +159,12 @@ def _descriptive_stats(df, schema_blueprint):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _correlation(df, schema_blueprint):
-    cols = _numeric_cols(df, schema_blueprint)
+    # Exclude date-derived columns — they are mechanically correlated with each
+    # other and with the base date column, adding noise rather than insight.
+    cols = [
+        c for c in _numeric_cols(df, schema_blueprint)
+        if not _is_date_derived(c) and _is_business_metric(c)
+    ]
     if len(cols) < 2:
         return {}, None
 
@@ -181,7 +218,7 @@ def _growth_rates(df, schema_blueprint):
     result = {}
     chart_paths = []
 
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+    rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
 
@@ -261,7 +298,7 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
     result = {}
     chart_paths = []
 
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+    rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
 
@@ -316,7 +353,7 @@ def _seasonality(df, schema_blueprint):
     result = {}
     chart_paths = []
 
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+    rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
 
@@ -438,9 +475,12 @@ def _category_distributions(df, schema_blueprint):
         result[col] = dist.to_dict(orient="records")
 
         if len(counts) <= 15:
+            # Use explicit Python str() to avoid pandas 3.x StringDtype / pd.NA
+            # values reaching matplotlib's category converter as floats.
+            x_labels = [str(v) for v in counts.index]
             fig, ax = plt.subplots(figsize=(max(6, len(counts)), 4))
             bars = ax.bar(
-                counts.index.astype(str), counts.values,
+                x_labels, counts.values,
                 color=COLORS["bars"][:len(counts)], alpha=0.88
             )
             for bar, p in zip(bars, pct.values):
@@ -456,96 +496,98 @@ def _category_distributions(df, schema_blueprint):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8 — LINEAR REGRESSION (time-series trend) — FINAL FIX
+# 8 — LINEAR REGRESSION (time-series trend)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _regression_trends(df, schema_blueprint):
     result = {}
     chart_paths = []
 
-    time_col = next((c for c in df.columns if c.endswith("_month")), None)
-    if not time_col:
+    # Build a monotonic time index from year+month (if available) so that the
+    # regression x-axis increases across years rather than cycling 1-12.
+    year_col  = next((c for c in df.columns if c.endswith("_year")),  None)
+    month_col = next((c for c in df.columns if c.endswith("_month")), None)
+
+    if year_col and month_col:
+        time_index = (
+            pd.to_numeric(df[year_col],  errors="coerce") * 12
+            + pd.to_numeric(df[month_col], errors="coerce")
+        )
+        time_label = f"{year_col[:-5]}_year_month_index"  # e.g. order_date_year_month_index
+    elif month_col:
+        time_index = pd.Series(range(len(df)), index=df.index, dtype="float64")
+        time_label = "row_index"
+    else:
+        # Fall back to row position (original ingestion order)
+        time_index = pd.Series(range(len(df)), index=df.index, dtype="float64")
+        time_label = "row_index"
+
+    if time_index is None or time_index.dropna().empty:
         return result, chart_paths
 
-    # Work on a copy to avoid modifying the original
-    df_work = df.copy()
-    # Ensure time column is numeric (convert if possible)
-    if not pd.api.types.is_numeric_dtype(df_work[time_col]):
-        df_work[time_col] = pd.to_numeric(df_work[time_col], errors='coerce')
+    # Columns eligible for regression: exclude date-derived columns entirely
+    # (they are trivially correlated with the time axis itself), and exclude
+    # the time index columns to prevent self-regression (r²=1.0).
+    _date_col_names = {year_col, month_col} if year_col else {month_col}
+    _date_col_names = {c for c in _date_col_names if c}  # drop None
 
-    for col in _numeric_cols(df, schema_blueprint):
-        if not pd.api.types.is_numeric_dtype(df_work[col]):
+    eligible_cols = [
+        col for col in _numeric_cols(df, schema_blueprint)
+        if not _is_date_derived(col)
+        and col not in _date_col_names
+        and _is_business_metric(col)
+    ]
+
+    for col in eligible_cols:
+        if not pd.api.types.is_numeric_dtype(df[col]):
             continue
-        pair = df_work[[time_col, col]].dropna()
+        pair = pd.DataFrame({"_x": time_index, "_y": pd.to_numeric(df[col], errors="coerce")}).dropna()
         if len(pair) < 3:
             continue
-        # Convert to float64 directly to handle nullable dtypes
-        x = pair[time_col].to_numpy(dtype='float64', na_value=np.nan).ravel()
-        y = pair[col].to_numpy(dtype='float64', na_value=np.nan).ravel()
-        if x.size < 3 or y.size < 3:
-            continue
-        # Drop remaining NaNs
+        x = pair["_x"].to_numpy(dtype="float64")
+        y = pair["_y"].to_numpy(dtype="float64")
         mask = ~(np.isnan(x) | np.isnan(y))
-        x = x[mask]
-        y = y[mask]
+        x, y = x[mask], y[mask]
         if len(x) < 3:
             continue
         try:
             slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(x, y)
+            slope     = float(np.atleast_1d(slope)[0])
+            intercept = float(np.atleast_1d(intercept)[0])
+            r_value   = float(np.atleast_1d(r_value)[0])
+            p_value   = float(np.atleast_1d(p_value)[0])
+            std_err   = float(np.atleast_1d(std_err)[0])
         except Exception:
             continue
-        # Ensure scalar values (in case linregress returns arrays)
-        if not np.isscalar(slope):
-            if np.array(slope).size == 1:
-                slope = float(slope)
-            else:
-                continue
-        if not np.isscalar(intercept):
-            if np.array(intercept).size == 1:
-                intercept = float(intercept)
-            else:
-                continue
-        if not np.isscalar(r_value):
-            if np.array(r_value).size == 1:
-                r_value = float(r_value)
-            else:
-                continue
-        if not np.isscalar(p_value):
-            if np.array(p_value).size == 1:
-                p_value = float(p_value)
-            else:
-                continue
-        if not np.isscalar(std_err):
-            if np.array(std_err).size == 1:
-                std_err = float(std_err)
-            else:
-                continue
+
         result[col] = {
-            "slope":     round(float(slope), 6),
-            "intercept": round(float(intercept), 4),
-            "r_squared": round(float(r_value**2), 4),
-            "p_value":   round(float(p_value), 4),
-            "std_err":   round(float(std_err), 6),
-            "trend":     "upward" if slope > 0 else "downward",
+            "slope":       round(slope, 6),
+            "intercept":   round(intercept, 4),
+            "r_squared":   round(r_value ** 2, 4),
+            "p_value":     round(p_value, 4),
+            "std_err":     round(std_err, 6),
+            "trend":       "upward" if slope > 0 else "downward",
             "significant": p_value < 0.05,
+            "x_axis":      time_label,
         }
 
     # Revenue trend line chart
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+    rev_col = _find_revenue_col(df, schema_blueprint)
     if rev_col and rev_col in result and pd.api.types.is_numeric_dtype(df[rev_col]):
-        pair = df[[time_col, rev_col]].dropna().sort_values(time_col)
-        x = pair[time_col].values.ravel()
-        y = pair[rev_col].values.ravel()
+        pair = pd.DataFrame({"_x": time_index, "_y": pd.to_numeric(df[rev_col], errors="coerce")}).dropna()
+        pair = pair.sort_values("_x")
+        x = pair["_x"].to_numpy(dtype="float64")
+        y = pair["_y"].to_numpy(dtype="float64")
         if len(x) >= 3:
-            slope = result[rev_col]["slope"]
+            slope     = result[rev_col]["slope"]
             intercept = result[rev_col]["intercept"]
-            y_pred = slope * x + intercept
+            y_pred    = slope * x + intercept
 
             fig, ax = plt.subplots(figsize=(8, 4))
             ax.scatter(x, y, color=COLORS["primary"], s=60, zorder=5, label="Actual")
             ax.plot(x, y_pred, color=COLORS["accent"], linewidth=2,
                     linestyle="--", label=f"Trend (R²={result[rev_col]['r_squared']:.3f})")
-            ax.set_xlabel(time_col, fontsize=10)
+            ax.set_xlabel(time_label, fontsize=10)
             ax.set_ylabel(rev_col, fontsize=10)
             ax.set_title(f"{rev_col} Linear Trend", fontsize=13, fontweight="bold")
             ax.legend(fontsize=9)
@@ -580,7 +622,7 @@ def _distribution_charts(df, schema_blueprint):
     fig.tight_layout()
     chart_paths.append(_save(fig, "boxplot_numeric_cols"))
 
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount"], schema_blueprint)
+    rev_col = _find_revenue_col(df, schema_blueprint)
     if rev_col and pd.api.types.is_numeric_dtype(df[rev_col]):
         s = df[rev_col].dropna()
         fig, ax = plt.subplots(figsize=(7, 4))

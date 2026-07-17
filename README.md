@@ -90,12 +90,12 @@ Comprehensive 10-step data cleaning and transformation pipeline:
 
 ## 🚧 In Progress / Planned Features
 
-### Agent 4: Statistical Analysis (60% Remaining)
-- [ ] Descriptive statistics (mean, median, std, quantiles)
-- [ ] Correlation analysis (Pearson, identify strong pairs)
-- [ ] Anomaly detection (statistical outliers)
-- [ ] Regression modeling
-- [ ] Advanced chart generation
+### Agent 4: Statistical Analysis (Complete)
+- [x] Descriptive statistics (mean, median, std, quantiles)
+- [x] Correlation analysis (Pearson + Spearman, strong-pair detection)
+- [x] Anomaly detection (z-score, configurable threshold)
+- [x] Regression modeling (linear trend per numeric column)
+- [x] Advanced chart generation (heatmap, box plots, histograms, bar charts, trend lines)
 
 ### Future Agents
 - **Agent 5**: Data validation & constraint checking
@@ -103,11 +103,11 @@ Comprehensive 10-step data cleaning and transformation pipeline:
 
 ### Additional Features
 - [ ] Frontend/UI for pipeline visualization
-- [ ] Support for multiple file formats (Excel, JSON, Parquet)
+- [x] Support for multiple file formats — CSV, Excel (.xlsx/.xlsm/.xls), JSON, JSON Lines, Parquet
 - [ ] Configuration file for customizable processing rules
 - [ ] Structured logging framework
-- [ ] Unit tests for each agent
-- [ ] Performance optimization for large datasets
+- [x] Unit tests for Agent 1, Agent 2, Agent 3, Agent 4, and pipeline diagnostics
+- [ ] Performance optimization for very large datasets (chunked ingestion)
 
 ---
 
@@ -200,13 +200,13 @@ python pipeline.py
 | Agent 1 - Structural Profiler | ✅ Complete | 100% |
 | Agent 2 - Semantic Tagger | ✅ Complete | 100% |
 | Agent 3 - Preprocessor | ✅ Complete | 100% |
-| Agent 4 - Statistical Analysis | 🚧 In Progress | 40% |
+| Agent 4 - Statistical Analysis | ✅ Complete | 100% |
 | Pipeline Orchestration | ✅ Complete | 100% |
 | Error Handling | ✅ Complete | 100% |
 | Agents 5-6 | 📋 Planned | 0% |
 | Frontend/UI | 📋 Planned | 0% |
-| Multi-format Support | 📋 Planned | 0% |
-| Testing Suite | 📋 Planned | 0% |
+| Multi-format Support (CSV/Excel/JSON/Parquet) | ✅ Complete | 100% |
+| Testing Suite | 🚧 In Progress | 70% |
 
 ---
 

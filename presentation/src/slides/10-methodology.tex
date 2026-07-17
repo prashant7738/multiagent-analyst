@@ -1,0 +1,83 @@
+% ============================================
+% METHODOLOGY
+% ============================================
+
+\begin{frame}{Methodology -- Current 4-Stage Pipeline}
+    \begin{center}
+        \includegraphics[width=\textwidth,height=0.74\textheight,keepaspectratio]{src/images/fiximag.png}
+    \end{center}
+\end{frame}
+
+% ============================================
+% AGENT 1
+% ============================================
+\begin{frame}{Agent 1 -- Raw Structural Profiler}
+    \begin{itemize}
+        \item Reads the input CSV and records shape, dtypes, missingness, uniqueness, and duplicates.
+        \item Produces a raw structural profile without changing the source data.
+        \item Caches the DataFrame for the downstream stages.
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 2
+% ============================================
+\begin{frame}{Agent 2 -- Technical Inference \& Semantic Tagging}
+    \begin{itemize}
+        \item Sniffs numeric, datetime, boolean, and string types using local heuristics.
+        \item Uses Groq-based semantic tagging when available and falls back to deterministic rules when it is not.
+        \item Creates a per-column blueprint containing type, semantic tag, scaling, imputation, and analysis policies.
+        \item Passes the blueprint to preprocessing instead of hard-coding one rule for every column.
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 3
+% ============================================
+\begin{frame}{Agent 3 -- Context-Aware Preprocessing}
+    \begin{itemize}
+        \item Coerces columns according to the semantic blueprint and cleans international currency formats.
+        \item Standardizes text and null variants while preserving identifiers.
+        \item Removes duplicates, applies configured imputation, and clips permitted outliers with IQR bounds.
+        \item Extracts date features and derives metrics such as profit, margin, and revenue per unit.
+        \item Records scaling parameters, an audit log, and a 0--100 data quality score.
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 4
+% ============================================
+\begin{frame}{Agent 4 -- Visualization \& Statistical Analysis}
+    \begin{itemize}
+        \item Calculates descriptive statistics, correlations, distributions, growth, and seasonality.
+        \item Detects anomalies using a configurable z-score threshold.
+        \item Computes regression trends and category rankings when the dataset supports them.
+        \item Saves reproducible PNG charts and structured statistics to the pipeline state.
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 5
+% ============================================
+\begin{frame}{Planned Extension -- Validation Guardrail}
+    \begin{itemize}
+        \item Cross-check statistical outputs against the cleaned dataset.
+        \item Verify that generated charts match the corresponding statistics.
+        \item Check whether every future insight is supported by measurable evidence.
+        \item Stop or flag the pipeline when validation rules fail.
+        \item This stage is planned and is not included in the current four-stage run.
+    \end{itemize}
+\end{frame}
+
+% ============================================
+% AGENT 6
+% ============================================
+\begin{frame}{Planned Extension -- Report Assembly}
+    \begin{itemize}
+        \item Read validated statistical results from the pipeline state.
+        \item Generate human-readable explanations with traceable evidence.
+        \item Compile charts, quality metrics, and findings into the final report.
+        \item Add an interface for dataset upload and progress monitoring.
+        \item This stage remains part of the next implementation phase.
+    \end{itemize}
+\end{frame}

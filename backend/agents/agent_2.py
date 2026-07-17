@@ -784,24 +784,23 @@ def _apply_missingness_policy(
 
 
 def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
-    """Print a compact human-readable summary of the generated blueprint."""
+    """Print a vertical human-readable summary of the generated blueprint."""
     print("[Agent 2] Semantic tags by column:")
     for col in df.columns:
         meta = schema_blueprint.get(col, {})
         null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
         assessment = meta.get("column_assessment", {}) if isinstance(meta.get("column_assessment"), dict) else {}
-        print(
-            f"  - {col}: semantic_tag={meta.get('semantic_tag', 'unknown')}, "
-            f"intended_type={meta.get('intended_type', 'unknown')}, "
-            f"imputation={meta.get('imputation_strategy', 'unknown')}, "
-            f"encoding={meta.get('encoding_strategy', {}).get('method', 'none')}, "
-            f"identifier={meta.get('is_identifier', False)}, "
-            f"analysis_allowed={meta.get('analysis_allowed', True)}, "
-            f"confidence={meta.get('confidence', {}).get('confidence_score', 'n/a')}, "
-            f"null_action={null_policy.get('action', 'none')}, "
-            f"suitable={assessment.get('is_suitable', True)}, "
-            f"reason={assessment.get('reason_category', 'n/a')}"
-        )
+        print(f"\n  ┌─ {col}")
+        print(f"  │  semantic_tag     : {meta.get('semantic_tag', 'unknown')}")
+        print(f"  │  intended_type    : {meta.get('intended_type', 'unknown')}")
+        print(f"  │  imputation       : {meta.get('imputation_strategy', 'unknown')}")
+        print(f"  │  encoding         : {meta.get('encoding_strategy', {}).get('method', 'none')}")
+        print(f"  │  identifier       : {meta.get('is_identifier', False)}")
+        print(f"  │  analysis_allowed : {meta.get('analysis_allowed', True)}")
+        print(f"  │  confidence       : {meta.get('confidence', {}).get('confidence_score', 'n/a')}")
+        print(f"  │  null_action      : {null_policy.get('action', 'none')}")
+        print(f"  │  suitable         : {assessment.get('is_suitable', True)}")
+        print(f"  └─ reason           : {assessment.get('reason_category', 'n/a')}")
 
 
 def agent2_semantic_tagger(state: dict) -> dict:

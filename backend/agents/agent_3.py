@@ -464,17 +464,8 @@ def _dedup_after_canonicalization(df):
     return deduped, removed_count, samples
 
 
-ONE_HOT_MAX_CARDINALITY = 50  # above this, one-hot would create too many columns; fall back instead
-
-
-def _frequency_encode_column(df, col):
-    """Map each category to its relative frequency (0-1). Cheap, fixed-width (1 col),
-    safe for any cardinality — used as a fallback when one-hot would explode."""
-    series = df[col].astype("string")
-    freq_map = series.value_counts(normalize=True, dropna=True)
-    encoded_col = f"{col}__freq"
-    encoded_series = series.map(freq_map).astype(float)
-    return encoded_col, encoded_series
+ONE_HOT_LOW_CARDINALITY = 10  # <= this: standard full one-hot encoding
+ONE_HOT_TOP_N = 8             # for cardinality > ONE_HOT_LOW_CARDINALITY: top-N categories + a single "Other" bucket
 
 
 def _encode_categorical_columns(df, schema_blueprint):
@@ -527,42 +518,58 @@ def _encode_categorical_columns(df, schema_blueprint):
 
         if method == "one_hot":
             cardinality = int(df[col].nunique(dropna=True))
-            if cardinality > ONE_HOT_MAX_CARDINALITY:
-                encoded_col, encoded_series = _frequency_encode_column(df, col)
-                df[encoded_col] = encoded_series
-                encoded_schema_entries[encoded_col] = {
-                    "intended_type": "float",
-                    "semantic_tag": "encoded_category",
-                    "is_identifier": False,
-                    "scaling_allowed": False,
-                    "imputation_strategy": "none",
-                    "encoding_strategy": {"method": "none", "reason": f"derived frequency encoding from {col}"},
-                    "analysis_allowed": True,
-                    "notes": f"frequency encoding derived from {col} (cardinality={cardinality} exceeded one_hot cap of {ONE_HOT_MAX_CARDINALITY})",
-                    "source_column": col,
-                }
+            if cardinality <= ONE_HOT_LOW_CARDINALITY:
+                # Low cardinality → standard full one-hot encoding
+                encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)
+                encoded = encoded.astype(int)
+                df = pd.concat([df, encoded], axis=1)
+                for encoded_col in encoded.columns:
+                    encoded_schema_entries[encoded_col] = {
+                        "intended_type": "int",
+                        "semantic_tag": "encoded_category",
+                        "is_identifier": False,
+                        "scaling_allowed": False,
+                        "imputation_strategy": "none",
+                        "encoding_strategy": {"method": "none", "reason": f"derived one-hot encoding from {col}"},
+                        "analysis_allowed": False,
+                        "notes": f"one-hot encoded from {col}",
+                        "source_column": col,
+                    }
                 notes.append(
-                    f"{col}: one-hot skipped (cardinality={cardinality} > {ONE_HOT_MAX_CARDINALITY}); "
-                    f"frequency-encoded into [{encoded_col}] instead"
+                    f"{col}: one-hot encoded into {len(encoded.columns)} columns "
+                    f"(cardinality={cardinality} <= {ONE_HOT_LOW_CARDINALITY} threshold)"
                 )
-                continue
-
-            encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)
-            encoded = encoded.astype(int)
-            df = pd.concat([df, encoded], axis=1)
-            for encoded_col in encoded.columns:
-                encoded_schema_entries[encoded_col] = {
-                    "intended_type": "int",
-                    "semantic_tag": "encoded_category",
-                    "is_identifier": False,
-                    "scaling_allowed": False,
-                    "imputation_strategy": "none",
-                    "encoding_strategy": {"method": "none", "reason": f"derived one-hot encoding from {col}"},
-                    "analysis_allowed": False,
-                    "notes": f"one-hot encoded from {col}",
-                    "source_column": col,
-                }
-            notes.append(f"{col}: one-hot encoded into {len(encoded.columns)} columns")
+            else:
+                # High cardinality → top-N + single "Other" bucket
+                top_cats = (
+                    df[col].astype("string")
+                    .value_counts(dropna=True)
+                    .nlargest(ONE_HOT_TOP_N)
+                    .index.tolist()
+                )
+                bucketed = df[col].astype("string").apply(
+                    lambda v: v if (pd.notna(v) and v != "<NA>" and v in top_cats) else "Other"
+                )
+                encoded = pd.get_dummies(bucketed, prefix=col, prefix_sep="__", dummy_na=False)
+                encoded = encoded.astype(int)
+                df = pd.concat([df, encoded], axis=1)
+                for encoded_col in encoded.columns:
+                    encoded_schema_entries[encoded_col] = {
+                        "intended_type": "int",
+                        "semantic_tag": "encoded_category",
+                        "is_identifier": False,
+                        "scaling_allowed": False,
+                        "imputation_strategy": "none",
+                        "encoding_strategy": {"method": "none", "reason": f"derived top-{ONE_HOT_TOP_N}+Other encoding from {col}"},
+                        "analysis_allowed": False,
+                        "notes": f"top-{ONE_HOT_TOP_N}+Other encoded from {col} (cardinality={cardinality})",
+                        "source_column": col,
+                    }
+                notes.append(
+                    f"{col}: top-{ONE_HOT_TOP_N}+Other one-hot encoded into {len(encoded.columns)} columns "
+                    f"(cardinality={cardinality} > {ONE_HOT_LOW_CARDINALITY} threshold; "
+                    f"top categories: {top_cats[:3]}...)"
+                )
             continue
 
         notes.append(f"{col}: encoding skipped (unsupported strategy={method})")
@@ -601,6 +608,17 @@ def _impute(df, schema_blueprint):
         null_reason = null_policy.get("reason", "")
         missing_count = int(df[col].isna().sum())
         if missing_count == 0:
+            continue
+
+        # Defence-in-depth: financial figures must never be estimated regardless
+        # of what arrived in the blueprint.  If Agent 2's post-processing was
+        # bypassed or the blueprint was built by the fallback path, enforce the
+        # rule here so imputation cannot corrupt currency/financial columns.
+        if meta.get("semantic_tag") in {"currency", "financial"}:
+            notes.append(
+                f"{col}: {missing_count} NaNs flagged only; no fill applied "
+                f"(currency/financial — imputation blocked in Agent 3)"
+            )
             continue
 
         try:
@@ -776,9 +794,19 @@ def _clip_outliers(df, schema_blueprint, ledger=None, raw_profile=None, data_qua
             notes.append(f"{col}: outlier clipping skipped (zero IQR)")
             continue
 
+        # Persist the pre-clip raw value and a boolean flag before overwriting
+        raw_col = f"{col}_raw"
+        if raw_col not in df.columns:
+            df[raw_col] = df[col].copy()
+        was_clipped_mask = df[col].notna() & (
+            (df[col] < bounds["lower"]) | (df[col] > bounds["upper"])
+        )
         df[col] = clipped_series
+        df[f"{col}_was_clipped"] = was_clipped_mask
+
         notes.append(
-            f"{col}: {bounds.get('method', 'adaptive')} clipping (lower={bounds['lower']:.3f}, upper={bounds['upper']:.3f}), {clipped} values clipped"
+            f"{col}: {bounds.get('method', 'adaptive')} clipping (lower={bounds['lower']:.3f}, upper={bounds['upper']:.3f}), {clipped} values clipped; "
+            f"pre-clip values saved in [{raw_col}], flag in [{col}_was_clipped]"
         )
 
         if ledger:
@@ -893,7 +921,7 @@ def _is_numeric_col(df, col):
 def _derive_business_metrics(df):
     notes = []
 
-    rev_col = _find_col(df, ["revenue", "sales", "income", "total_amount", "net_sales"])
+    rev_col = _find_col(df, ["revenue", "total_sales", "net_sales", "income", "total_amount"])
     cost_col = _find_col(df, ["cost_price", "cost", "expense", "cogs", "expenditure"])
     unit_col = _find_col(df, ["units_sold", "units", "quantity", "qty", "volume"])
     price_col = _find_col(df, ["unit_price", "price", "rate", "mrp", "selling_price"])

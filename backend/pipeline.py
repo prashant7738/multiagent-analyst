@@ -117,7 +117,7 @@ if __name__ == "__main__":
 
     # Use absolute path relative to this script's location
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(script_dir, "amazon_sales_dataset.csv")
+    csv_path = os.path.join(script_dir, "claude_data1.csv")
 
     initial_state: GraphState = {
         "csv_path": csv_path,

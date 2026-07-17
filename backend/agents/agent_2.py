@@ -690,7 +690,15 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
         )
         meta["column_assessment"] = assessment
 
-        if not isinstance(meta.get("null_policy"), dict):
+        # For currency/financial columns the business rule is unconditional:
+        # missing financial values must never be estimated — always override the
+        # LLM-returned policy so a model returning "impute_median" cannot
+        # silently corrupt financial figures.
+        _semantic_tag_now = str(meta.get("semantic_tag", "unknown"))
+        if _semantic_tag_now in {"currency", "financial"}:
+            meta["null_policy"] = _derive_null_policy(profile, meta)
+            meta["imputation_strategy"] = "none"
+        elif not isinstance(meta.get("null_policy"), dict):
             meta["null_policy"] = _derive_null_policy(profile, meta)
 
         if not isinstance(meta.get("encoding_strategy"), dict):

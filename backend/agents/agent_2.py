@@ -10,6 +10,7 @@ import re
 import os
 import pandas as pd
 import json
+import numpy as np
 
 from groq import Groq
 
@@ -259,14 +260,14 @@ For each column, return exactly this structure:
     "semantic_tag": "currency|identifier|datetime|geographic|physical_measurement|categorical_label|text|percentage|count|unknown",
     "is_identifier": true,
     "scaling_allowed": true,
-    "imputation_strategy": "mean|median|mode|unknown_label|drop|none",
+        "imputation_strategy": "mean|median|mode|unknown_label|drop|forward_fill|knn|iterative|drop_column|none",
     "encoding_strategy": {
       "method": "one_hot|ordinal|none",
       "order": [],
       "reason": "brief reason"
     },
     "null_policy": {
-      "action": "flag_only|drop_rows|impute_mean|impute_median|impute_mode|impute_unknown_label|none",
+            "action": "flag_only|drop_rows|impute_mean|impute_median|impute_mode|impute_unknown_label|impute_forward_fill|impute_knn|impute_iterative|drop_column|none",
       "threshold_pct": 0,
       "reason": "brief reason based on the observed missing_rate_pct"
     },
@@ -319,6 +320,7 @@ Classification rules:
    - semantic_tag="count"
    - intended_type="int" when values are whole-number counts; otherwise use "float".
    - Use median imputation only when missingness is limited and the field is numeric.
+    - If the field is sequential in row order and missingness is sparse, forward fill can be appropriate.
 
 8. Low-cardinality categorical fields:
    - If the field is a nominal label with fewer than 20 unique values:
@@ -332,14 +334,20 @@ Classification rules:
    - Use semantic_tag="geographic" for city, state, country, region, postal code, latitude, or longitude fields.
    - Do not scale identifiers such as postal codes.
    - Use encoding_strategy.method="none" for latitude and longitude.
+   - Prefer null_policy.action="flag_only" because geographic fills often invent location meaning.
 
 10. Free-text fields:
     - semantic_tag="text"
     - encoding_strategy.method="none"
     - Do not use one-hot encoding for descriptions, addresses, notes, messages, or other high-cardinality text.
-    - Prefer null_policy.action="flag_only" or "impute_unknown_label" only when the field is clearly categorical rather than free text.
+    - Prefer null_policy.action="flag_only"; use "impute_unknown_label" only when the field is clearly categorical rather than free text.
 
-11. Unknown or ambiguous fields:
+11. Physical measurements:
+    - Use semantic_tag="physical_measurement" for quantities like weight, distance, temperature, or size.
+    - For limited missingness, prefer null_policy.action="impute_median".
+    - For heavier missingness, prefer null_policy.action="flag_only".
+
+12. Unknown or ambiguous fields:
     - semantic_tag="unknown"
     - scaling_allowed=false
     - encoding_strategy.method="none"
@@ -350,13 +358,18 @@ Classification rules:
 Missing-value rules:
 
 - Use the observed missing_rate_pct from the input.
+- Choose null handling from the column's semantic role and business risk, not from broad type alone.
 - Choose one null_policy.action appropriate for the current column's missingness.
 - Set threshold_pct to the missingness level at which the chosen policy becomes preferable.
 - For 0% missingness, use action="none" and threshold_pct=0.
 - For sparse or ambiguous columns, use action="flag_only".
+- For columns with extremely high missingness, action="drop_column" is acceptable.
 - For identifiers, use action="drop_rows".
 - For low-cardinality categories with limited missingness, use action="impute_mode".
 - For ordinary numeric fields with limited missingness, use action="impute_median".
+- For approximately normal numeric fields with low missingness, action="impute_mean" is acceptable.
+- For sequential time-series-like numeric fields with sparse gaps, action="impute_forward_fill" is acceptable.
+- For numeric fields with strong correlated predictors and moderate missingness, action="impute_knn" or "impute_iterative" is acceptable.
 - Never use impute_mean or impute_median for currency fields.
 - The null_policy.action and imputation_strategy must be consistent:
   - flag_only       -> imputation_strategy="none"
@@ -365,6 +378,10 @@ Missing-value rules:
   - impute_median   -> imputation_strategy="median"
   - impute_mode     -> imputation_strategy="mode"
   - impute_unknown_label -> imputation_strategy="unknown_label"
+    - impute_forward_fill -> imputation_strategy="forward_fill"
+    - impute_knn      -> imputation_strategy="knn"
+    - impute_iterative -> imputation_strategy="iterative"
+    - drop_column     -> imputation_strategy="drop_column"
   - none            -> imputation_strategy="none"
 
 Encoding rules:
@@ -407,18 +424,73 @@ def _infer_intended_types(df: pd.DataFrame, raw_profile: dict) -> dict:
     return inferred
 
 
+def _json_safe_value(value):
+    """Convert pandas and numpy values into JSON-serializable primitives."""
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, pd.Timedelta):
+        return str(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    return str(value)
+
+
+def _column_correlation_summary(column_name: str, raw_profile: dict) -> dict:
+    """Return strong numeric correlation partners for a column."""
+    numeric_correlations = (
+        raw_profile.get("column_relationships", {}).get("numeric_correlations", [])
+        if isinstance(raw_profile.get("column_relationships", {}), dict)
+        else []
+    )
+    partners = []
+    max_abs_r = 0.0
+    for pair in numeric_correlations:
+        if not isinstance(pair, dict):
+            continue
+        left = pair.get("col1")
+        right = pair.get("col2")
+        if column_name not in {left, right}:
+            continue
+        partner = right if left == column_name else left
+        r = float(pair.get("r", 0.0) or 0.0)
+        max_abs_r = max(max_abs_r, abs(r))
+        partners.append({"column": partner, "r": round(r, 4)})
+
+    partners.sort(key=lambda item: abs(float(item.get("r", 0.0))), reverse=True)
+    return {
+        "max_abs_r": round(max_abs_r, 4),
+        "partners": partners[:3],
+    }
+
+
 def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict, columns: list[str] | None = None) -> str:
     """Minimal prompt — column metadata + 3 samples only. No full CSV."""
     columns = list(df.columns) if columns is None else columns
     col_info = []
     for col in columns:
         profile = raw_profile["columns"][col]
+        distribution = raw_profile.get("distribution_analysis", {}).get(col, {})
+        correlation_summary = _column_correlation_summary(col, raw_profile)
         col_info.append({
             "name": col,
             "inferred_type": inferred_types[col],
             "missing_rate_pct": profile["missing_rate_pct"],
             "unique_count": profile["unique_count"],
-            "samples": profile["sample_values"][:3],
+            "samples": [_json_safe_value(value) for value in profile.get("sample_values", [])[:3]],
+            "distribution_type": distribution.get("distribution_type"),
+            "is_normal_distribution": distribution.get("is_normal_distribution"),
+            "skewness": distribution.get("skewness"),
+            "outlier_pct": profile.get("outlier_analysis", {}).get("outlier_pct"),
+            "strong_numeric_correlations": correlation_summary["partners"],
         })
     return json.dumps(col_info, indent=2)
 
@@ -619,13 +691,107 @@ def _assess_column_suitability(
     }
 
 
-def _derive_null_policy(profile: dict, meta: dict) -> dict:
-    """Choose a conservative null-handling policy from column semantics."""
+def _imputation_strategy_from_null_policy_action(action: str) -> str:
+    """Normalize a null-policy action into the imputation contract used by Agent 3."""
+    mapping = {
+        "flag_only": "none",
+        "drop_rows": "drop",
+        "impute_mean": "mean",
+        "impute_median": "median",
+        "impute_mode": "mode",
+        "impute_unknown_label": "unknown_label",
+        "impute_forward_fill": "forward_fill",
+        "impute_knn": "knn",
+        "impute_iterative": "iterative",
+        "drop_column": "drop_column",
+        "none": "none",
+    }
+    return mapping.get(str(action or "").lower(), "none")
+
+
+def _null_policy_action_from_imputation_strategy(strategy: str) -> str | None:
+    """Map an imputation strategy back to a null-policy action when possible."""
+    mapping = {
+        "none": "none",
+        "drop": "drop_rows",
+        "mean": "impute_mean",
+        "median": "impute_median",
+        "mode": "impute_mode",
+        "unknown_label": "impute_unknown_label",
+        "forward_fill": "impute_forward_fill",
+        "knn": "impute_knn",
+        "iterative": "impute_iterative",
+        "drop_column": "drop_column",
+    }
+    return mapping.get(str(strategy or "").lower())
+
+
+def _resolve_null_policy(profile: dict, meta: dict, raw_profile: dict | None = None, column_name: str | None = None) -> tuple[dict, str]:
+    """Preserve valid model-provided policy when safe; otherwise fall back to local semantics."""
+    semantic_tag = str(meta.get("semantic_tag", "unknown")).lower()
+    explicit_strategy = str(meta.get("imputation_strategy", "")).lower()
+    explicit_null_policy = meta.get("null_policy") if isinstance(meta.get("null_policy"), dict) else None
+
+    if semantic_tag == "identifier":
+        meta["is_identifier"] = True
+
+    derived_null_policy = _derive_null_policy(profile, meta, raw_profile=raw_profile, column_name=column_name)
+    derived_strategy = _imputation_strategy_from_null_policy_action(derived_null_policy.get("action"))
+
+    guardrail_tags = {"identifier", "currency", "financial", "datetime"}
+    if bool(meta.get("is_identifier", False)) or semantic_tag in guardrail_tags:
+        return derived_null_policy, derived_strategy
+
+    if explicit_null_policy:
+        explicit_action = str(explicit_null_policy.get("action", "")).lower()
+        if explicit_action in {
+            "flag_only",
+            "drop_rows",
+            "impute_mean",
+            "impute_median",
+            "impute_mode",
+            "impute_unknown_label",
+            "impute_forward_fill",
+            "impute_knn",
+            "impute_iterative",
+            "drop_column",
+            "none",
+        }:
+            normalized_strategy = _imputation_strategy_from_null_policy_action(explicit_action)
+            if explicit_strategy in {"", normalized_strategy}:
+                normalized_null_policy = dict(explicit_null_policy)
+                normalized_null_policy.setdefault("threshold_pct", float(profile.get("missing_rate_pct", 0.0)))
+                normalized_null_policy.setdefault("reason", "model-selected null policy")
+                return normalized_null_policy, normalized_strategy
+
+    explicit_action = _null_policy_action_from_imputation_strategy(explicit_strategy)
+    if explicit_action and explicit_strategy not in {"", "none"}:
+        return {
+            "action": explicit_action,
+            "threshold_pct": float(profile.get("missing_rate_pct", 0.0)),
+            "reason": str(meta.get("notes") or "model-selected imputation strategy"),
+        }, explicit_strategy
+
+    return derived_null_policy, derived_strategy
+
+
+def _derive_null_policy(profile: dict, meta: dict, raw_profile: dict | None = None, column_name: str | None = None) -> dict:
+    """Choose a null-handling policy from semantic meaning and observed data signals."""
     missing_rate = float(profile.get("missing_rate_pct", 0.0))
     unique_count = int(profile.get("unique_count", 0) or 0)
     intended_type = str(meta.get("intended_type", "string"))
-    semantic_tag = str(meta.get("semantic_tag", "unknown"))
+    semantic_tag = str(meta.get("semantic_tag", "unknown")).lower()
     is_identifier = bool(meta.get("is_identifier", False))
+    raw_profile = raw_profile or {}
+    distribution = raw_profile.get("distribution_analysis", {}).get(column_name, {}) if column_name else {}
+    correlation_summary = _column_correlation_summary(column_name, raw_profile) if column_name else {"max_abs_r": 0.0, "partners": []}
+    outlier_analysis = profile.get("outlier_analysis", {}) if isinstance(profile.get("outlier_analysis"), dict) else {}
+    sample_values = [_json_safe_value(value) for value in profile.get("sample_values", []) if value is not None]
+    sample_diversity = len({str(value).strip().lower() for value in sample_values if str(value).strip()})
+    is_normal_distribution = bool(distribution.get("is_normal_distribution", False))
+    distribution_type = str(distribution.get("distribution_type", "")).lower()
+    has_significant_outliers = bool(outlier_analysis.get("has_significant_outliers", False))
+    max_abs_correlation = float(correlation_summary.get("max_abs_r", 0.0) or 0.0)
 
     if missing_rate <= 0:
         return {
@@ -641,6 +807,13 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
             "reason": "identifier columns should not be imputed because missing keys break row identity",
         }
 
+    if semantic_tag in {"currency", "financial"}:
+        return {
+            "action": "flag_only",
+            "threshold_pct": 0.0,
+            "reason": "currency and financial fields keep nulls for analyst review instead of synthetic fills",
+        }
+
     if semantic_tag == "datetime" or intended_type == "datetime":
         if missing_rate >= 25.0:
             return {
@@ -654,50 +827,154 @@ def _derive_null_policy(profile: dict, meta: dict) -> dict:
             "reason": "small datetime gaps are left unchanged to avoid inventing timestamps",
         }
 
-    if semantic_tag in {"currency", "financial"}:
+    if semantic_tag in {"geographic", "text"}:
+        return {
+            "action": "flag_only",
+            "threshold_pct": 20.0,
+            "reason": f"{semantic_tag} fields preserve nulls because filling them would invent domain meaning",
+        }
+
+    if semantic_tag == "unknown" and intended_type not in {"float", "int", "boolean"}:
         return {
             "action": "flag_only",
             "threshold_pct": 0.0,
-            "reason": "financial/currency columns are never imputed; missing values must be reviewed, not estimated",
+            "reason": "column semantics are unclear, so manual review is safer than automatic imputation",
         }
 
     if missing_rate >= 60.0:
         return {
-            "action": "flag_only",
+            "action": "drop_column",
             "threshold_pct": 60.0,
-            "reason": "column is too sparse to impute reliably",
+            "reason": "column is too sparse to impute reliably, so dropping it is safer than synthesizing most of its values",
         }
 
-    if semantic_tag in {"categorical_label", "text"} or intended_type == "string":
-        if unique_count and unique_count < 20:
+    if semantic_tag == "categorical_label":
+        if missing_rate >= 40.0:
+            return {
+                "action": "flag_only",
+                "threshold_pct": 40.0,
+                "reason": "categorical column is too sparse for a reliable single-label fill",
+            }
+        if unique_count and unique_count <= 5 and missing_rate <= 15.0 and sample_diversity <= 2:
             return {
                 "action": "impute_mode",
-                "threshold_pct": 20.0,
-                "reason": "low-cardinality categorical columns usually tolerate mode imputation",
+                "threshold_pct": 15.0,
+                "reason": "categorical samples show a likely dominant label, so mode is a reasonable fill",
+            }
+        if unique_count and unique_count <= 20 and missing_rate <= 25.0:
+            return {
+                "action": "impute_unknown_label",
+                "threshold_pct": 25.0,
+                "reason": "categorical labels appear diverse enough that preserving missingness as 'Unknown' is safer than forcing the mode",
+            }
+        return {
+            "action": "flag_only",
+            "threshold_pct": 30.0,
+            "reason": "categorical columns with heavier missingness are safer to review than to auto-fill",
+        }
+
+    if semantic_tag in {"percentage", "count", "physical_measurement"}:
+        if len(correlation_summary.get("partners", [])) >= 2 and max_abs_correlation >= 0.9 and 10.0 <= missing_rate <= 35.0:
+            return {
+                "action": "impute_iterative",
+                "threshold_pct": 35.0,
+                "reason": "multiple strong correlated predictors are available, so iterative multivariate imputation is justified",
+            }
+        if max_abs_correlation >= 0.85 and 10.0 <= missing_rate <= 30.0:
+            return {
+                "action": "impute_knn",
+                "threshold_pct": 30.0,
+                "reason": "a strong correlated numeric neighbor is available, so KNN imputation is preferable to a simple univariate fill",
+            }
+        if missing_rate <= 10.0 and raw_profile.get("distribution_analysis") and any(
+            str(raw_profile.get("columns", {}).get(other_col, {}).get("dtype", "")).startswith("datetime")
+            or "datetime" in str(raw_profile.get("columns", {}).get(other_col, {}).get("dtype", "")).lower()
+            for other_col in raw_profile.get("columns", {})
+        ):
+            return {
+                "action": "impute_forward_fill",
+                "threshold_pct": 10.0,
+                "reason": "a datetime context exists and the gap is sparse, so forward fill can preserve local sequence continuity",
             }
         if missing_rate >= 30.0:
             return {
                 "action": "flag_only",
                 "threshold_pct": 30.0,
-                "reason": "high missingness in free text or high-cardinality labels is better flagged than imputed",
+                "reason": f"{semantic_tag} fields with heavier missingness should be reviewed before synthetic numeric fills",
+            }
+        if is_normal_distribution and not has_significant_outliers and missing_rate <= 20.0:
+            return {
+                "action": "impute_mean",
+                "threshold_pct": 20.0,
+                "reason": f"{semantic_tag} values look approximately normal, so mean imputation preserves the center better than median",
             }
         return {
-            "action": "impute_mode",
-            "threshold_pct": 20.0,
-            "reason": "categorical/text columns with modest missingness can use mode as a conservative fill",
+            "action": "impute_median",
+            "threshold_pct": 30.0,
+            "reason": f"{semantic_tag} values are skewed, sparse, or outlier-prone enough that median is safer than mean",
         }
 
-    if semantic_tag in {"currency", "percentage", "count"} or intended_type in {"float", "int"}:
+    if intended_type == "boolean":
+        if missing_rate <= 10.0:
+            return {
+                "action": "impute_mode",
+                "threshold_pct": 10.0,
+                "reason": "boolean fields with sparse gaps can use the dominant state conservatively",
+            }
+        return {
+            "action": "flag_only",
+            "threshold_pct": 10.0,
+            "reason": "boolean fields with non-trivial missingness are better flagged than defaulted",
+        }
+
+    if intended_type == "string":
+        if unique_count and unique_count <= 20 and missing_rate <= 20.0:
+            return {
+                "action": "impute_mode",
+                "threshold_pct": 20.0,
+                "reason": "string fields that behave like compact labels can use mode as a conservative fill",
+            }
+        return {
+            "action": "flag_only",
+            "threshold_pct": 20.0,
+            "reason": "high-cardinality string fields are safer to review than to auto-impute",
+        }
+
+    if intended_type in {"float", "int"}:
+        if len(correlation_summary.get("partners", [])) >= 2 and max_abs_correlation >= 0.9 and 10.0 <= missing_rate <= 35.0:
+            return {
+                "action": "impute_iterative",
+                "threshold_pct": 35.0,
+                "reason": "multiple strong correlated predictors are available, so iterative multivariate imputation is justified",
+            }
+        if max_abs_correlation >= 0.85 and 10.0 <= missing_rate <= 30.0:
+            return {
+                "action": "impute_knn",
+                "threshold_pct": 30.0,
+                "reason": "a strong correlated numeric neighbor is available, so KNN imputation is preferable to a simple univariate fill",
+            }
         if missing_rate >= 35.0:
             return {
                 "action": "flag_only",
                 "threshold_pct": 35.0,
                 "reason": "numeric columns with heavy missingness should be reviewed before any synthetic fill",
             }
+        if is_normal_distribution and not has_significant_outliers and missing_rate <= 20.0:
+            return {
+                "action": "impute_mean",
+                "threshold_pct": 20.0,
+                "reason": "numeric values look approximately normal, so mean imputation preserves the center efficiently",
+            }
+        if distribution_type == "right_skewed" or has_significant_outliers:
+            return {
+                "action": "impute_median",
+                "threshold_pct": 35.0,
+                "reason": "numeric values are skewed or contain outliers, so median is safer than mean",
+            }
         return {
             "action": "impute_median",
             "threshold_pct": 35.0,
-            "reason": "median is robust for numeric fields with limited missingness",
+            "reason": "numeric values do not look strongly normal, so median is the conservative default",
         }
 
     return {
@@ -790,16 +1067,12 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
         )
         meta["column_assessment"] = assessment
 
-        # For currency/financial columns the business rule is unconditional:
-        # missing financial values must never be estimated — always override the
-        # LLM-returned policy so a model returning "impute_median" cannot
-        # silently corrupt financial figures.
-        _semantic_tag_now = str(meta.get("semantic_tag", "unknown"))
-        if _semantic_tag_now in {"currency", "financial"}:
-            meta["null_policy"] = _derive_null_policy(profile, meta)
-            meta["imputation_strategy"] = "none"
-        elif not isinstance(meta.get("null_policy"), dict):
-            meta["null_policy"] = _derive_null_policy(profile, meta)
+        meta["null_policy"], meta["imputation_strategy"] = _resolve_null_policy(
+            profile,
+            meta,
+            raw_profile=raw_profile,
+            column_name=col,
+        )
 
         if not isinstance(meta.get("encoding_strategy"), dict):
             meta["encoding_strategy"] = _derive_encoding_strategy(profile, meta)
@@ -830,9 +1103,9 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
             "semantic_tag": "unknown",
             "is_identifier": False,
             "scaling_allowed": inferred_types[col] == "numeric",
-            "imputation_strategy": "median" if inferred_types[col] == "numeric" else "mode",
+            "imputation_strategy": "none",
             "null_policy": {
-                "action": "impute_median" if inferred_types[col] == "numeric" else "flag_only",
+                "action": "flag_only",
                 "threshold_pct": 20.0,
                 "reason": "fallback policy inferred without LLM semantics",
             },
@@ -890,10 +1163,12 @@ def _print_semantic_summary(df: pd.DataFrame, schema_blueprint: dict) -> None:
         meta = schema_blueprint.get(col, {})
         null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
         assessment = meta.get("column_assessment", {}) if isinstance(meta.get("column_assessment"), dict) else {}
+        imputation_reason = null_policy.get("reason", meta.get("notes", "n/a"))
         print(f"\n  ┌─ {col}")
         print(f"  │  semantic_tag     : {meta.get('semantic_tag', 'unknown')}")
         print(f"  │  intended_type    : {meta.get('intended_type', 'unknown')}")
         print(f"  │  imputation       : {meta.get('imputation_strategy', 'unknown')}")
+        print(f"  │  imputation_reason: {imputation_reason}")
         print(f"  │  encoding         : {meta.get('encoding_strategy', {}).get('method', 'none')}")
         print(f"  │  identifier       : {meta.get('is_identifier', False)}")
         print(f"  │  analysis_allowed : {meta.get('analysis_allowed', True)}")

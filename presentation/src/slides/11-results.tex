@@ -22,11 +22,3 @@
     \end{itemize}
 \end{frame}
 
-\begin{frame}{Testing and Engineering Progress}
-    \begin{itemize}
-        \item Focused tests cover semantic-tagging chunking, currency parsing, duplicate consistency, chart overwrite behavior, and pipeline diagnostics.
-        \item Chart generation clears stale PNG files before each run to avoid reporting outdated results.
-        \item Pipeline errors are accumulated in shared state and conditional routing stops downstream stages when a critical stage fails.
-        \item The current backend is reproducible from a defined input path and writes structured diagnostics for inspection.
-    \end{itemize}
-\end{frame}

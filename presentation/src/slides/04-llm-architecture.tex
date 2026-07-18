@@ -1,0 +1,20 @@
+% ============================================
+% LLM ARCHITECTURE
+% ============================================
+
+\begin{frame}{LLM Architecture -- Llama Transformer}
+    \begin{columns}[T,onlytextwidth]
+        \begin{column}{0.52\textwidth}
+            \begin{itemize}
+                \item The model used in the pipeline is Llama, a decoder-only transformer language model.
+                \item It processes the input context through repeated self-attention and feed-forward blocks.
+                \item The attention layers help the model relate each token to earlier tokens in the prompt.
+                \item This architecture makes it suitable for semantic tagging, schema inference, and structured reasoning.
+            \end{itemize}
+        \end{column}
+        \begin{column}{0.44\textwidth}
+            \centering
+            \includegraphics[width=\linewidth,height=0.72\textheight,keepaspectratio]{src/images/llm_transformer_architecture.png}
+        \end{column}
+    \end{columns}
+\end{frame}

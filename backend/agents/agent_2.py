@@ -260,7 +260,7 @@ For each column, return exactly this structure:
     "semantic_tag": "currency|identifier|datetime|geographic|physical_measurement|categorical_label|text|percentage|count|unknown",
     "is_identifier": true,
     "scaling_allowed": true,
-        "imputation_strategy": "mean|median|mode|unknown_label|drop|forward_fill|knn|iterative|drop_column|none",
+    "imputation_strategy": "mean|median|mode|unknown_label|drop|forward_fill|knn|iterative|drop_column|none",
     "encoding_strategy": {
       "method": "one_hot|ordinal|none",
       "order": [],

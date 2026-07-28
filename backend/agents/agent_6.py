@@ -187,10 +187,31 @@ statistic that is not present in the input.
 - If a section of the facts is empty or missing, do not mention it.
 - Be concise and business-readable, not academic.
 
+You must also write a "plain_language_insights" section aimed at a completely non-technical \
+reader (e.g. a small business owner or manager with no statistics background). This is the \
+most important section of the report for that audience, so it must surface things they would \
+genuinely struggle to notice just by glancing at a spreadsheet - e.g. which category quietly \
+drives most of the revenue, which month/quarter is unexpectedly strong or weak, which two \
+things move together in a way that has a real business consequence, or which rows look wrong \
+and are worth double-checking.
+Strict rules for "plain_language_insights" and "bottom_line":
+- NEVER use statistical jargon or symbols: no "r=", "p-value", "r-squared", "z-score", \
+"standard deviation", "correlation coefficient", "regression", "outlier" (say "unusual entries" \
+instead), etc.
+- Every bullet must be a real-world, actionable observation phrased the way you'd explain it to \
+a colleague over coffee, e.g. "Your top 3 regions bring in 68% of all revenue - the rest barely \
+move the needle" or "Sales quietly dip every February - worth planning a promotion around then".
+- Still ground every bullet in the actual numbers/columns from the facts JSON - just express \
+them in plain English instead of statistical language.
+- Do not repeat the same point already phrased differently; each bullet should be a distinct, \
+useful takeaway.
+
 Return ONLY a JSON object with exactly these keys:
 {
   "executive_summary": "2-4 sentence overview of the dataset and its most important signal",
   "key_findings": ["4-6 bullet strings, each citing a concrete number from the facts"],
+  "plain_language_insights": ["4-6 bullet strings for non-technical readers, following the rules above"],
+  "bottom_line": "1 sentence, plain English, the single most useful takeaway for a non-technical reader",
   "risks_and_caveats": ["1-3 bullet strings about data quality/validation concerns, if any"],
   "recommendations": ["3-5 concrete, actionable bullet strings grounded in the findings"]
 }
@@ -234,6 +255,97 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         return narrative
     except Exception as gemini_error:
         raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
+
+
+def _plain_language_fallback(insight_facts: dict):
+    """Deterministic, jargon-free bullets for non-technical readers, plus a single
+    "bottom line" sentence. Built straight from the facts JSON - no LLM involved."""
+    bullets = []
+
+    for cat_col, data in (insight_facts.get("rankings") or {}).items():
+        top = (data.get("top") or [None])[0]
+        if top:
+            name = top.get(cat_col)
+            share = top.get("revenue_share_pct")
+            if name is not None and share is not None:
+                bullets.append(
+                    f"'{name}' is your best performer in {cat_col}, bringing in "
+                    f"{share}% of total revenue on its own."
+                )
+        bottom = (data.get("bottom") or [None])[0]
+        if bottom:
+            name = bottom.get(cat_col)
+            share = bottom.get("revenue_share_pct")
+            if name is not None and share is not None:
+                bullets.append(
+                    f"'{name}' is your weakest performer in {cat_col}, contributing only "
+                    f"{share}% of total revenue - worth a closer look."
+                )
+
+    growth = insight_facts.get("growth") or {}
+    best_month = growth.get("best_month")
+    worst_month = growth.get("worst_month")
+    if best_month and worst_month:
+        bullets.append(
+            f"Business is consistently strongest in {best_month.get('month')} and weakest in "
+            f"{worst_month.get('month')} - good months to plan stock and staffing around."
+        )
+    latest_month = growth.get("latest_month")
+    if latest_month and latest_month.get("mom_growth_pct") is not None:
+        direction = "up" if latest_month["mom_growth_pct"] >= 0 else "down"
+        bullets.append(
+            f"The most recent month ({latest_month.get('label')}) is {direction} "
+            f"{abs(latest_month['mom_growth_pct'])}% compared to the month before."
+        )
+
+    for pair in insight_facts.get("top_correlations", [])[:3]:
+        verb = "tend to rise together" if pair.get("direction") == "positive" else "tend to move in opposite directions"
+        bullets.append(
+            f"{pair['col1']} and {pair['col2']} {verb} - a change in one is a good early "
+            f"warning sign for the other."
+        )
+
+    anomalies = insight_facts.get("anomalies") or {}
+    if anomalies.get("unique_flagged_rows"):
+        bullets.append(
+            f"About {anomalies.get('unique_flagged_row_pct')}% of your records "
+            f"({anomalies.get('unique_flagged_rows')} rows) look unusual compared to the rest - "
+            f"these are worth a manual check for data-entry mistakes or one-off events."
+        )
+
+    quality = insight_facts.get("data_quality") or {}
+    score = quality.get("overall_quality_score")
+    if score is not None:
+        if score >= 80:
+            bullets.append(f"Your data is in good shape (quality score {score}/100) - safe to act on these numbers.")
+        else:
+            bullets.append(
+                f"Your data quality score is {score}/100 - treat these findings as a rough "
+                f"guide rather than an exact picture until the underlying data is cleaned up."
+            )
+
+    if not bullets:
+        bullets.append("Nothing unusual stood out in this dataset - no red flags, no standout winners or losers.")
+
+    if anomalies.get("unique_flagged_rows"):
+        bottom_line = (
+            f"Focus first on the {anomalies.get('unique_flagged_rows')} unusual records - "
+            f"fixing or explaining those will make every other number in this report more trustworthy."
+        )
+    elif insight_facts.get("rankings"):
+        first_col = next(iter(insight_facts["rankings"]))
+        top_row = (insight_facts["rankings"][first_col].get("top") or [None])[0]
+        if top_row:
+            bottom_line = (
+                f"'{top_row.get(first_col)}' is carrying a disproportionate share of your results in "
+                f"{first_col} - protecting that relationship matters more than any single new initiative."
+            )
+        else:
+            bottom_line = bullets[0]
+    else:
+        bottom_line = bullets[0]
+
+    return bullets[:6], bottom_line
 
 
 def _fallback_narrative(insight_facts: dict) -> dict:
@@ -286,9 +398,13 @@ def _fallback_narrative(insight_facts: dict) -> dict:
         "Re-run this pipeline as new data arrives to track whether trends persist.",
     ]
 
+    plain_language_insights, bottom_line = _plain_language_fallback(insight_facts)
+
     return {
         "executive_summary": executive_summary,
         "key_findings": key_findings,
+        "plain_language_insights": plain_language_insights,
+        "bottom_line": bottom_line,
         "risks_and_caveats": risks_and_caveats,
         "recommendations": recommendations,
         "source": "fallback",

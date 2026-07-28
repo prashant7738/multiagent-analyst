@@ -36,6 +36,16 @@
   .chart-caption { text-align: center; font-size: 9pt; color: #6b7280; margin-top: 0.2em; }
   .footer { margin-top: 2em; padding-top: 0.8em; border-top: 1px solid #e5e7eb; font-size: 9pt; color: #6b7280; }
   .empty-note { color: #9ca3af; font-style: italic; }
+  .plain-language-box {
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+    padding: 1em 1.2em; margin: 1em 0 1.4em; page-break-inside: avoid;
+  }
+  .plain-language-box h2 { margin-top: 0; border-bottom: none; padding-bottom: 0; }
+  .bottom-line {
+    font-size: 12pt; font-weight: bold; color: #1e3a8a; margin: 0 0 0.8em;
+    padding-bottom: 0.6em; border-bottom: 1px dashed #bfdbfe;
+  }
+  .plain-language-box ul { margin: 0.3em 0 0.2em; }
 </style>
 </head>
 <body>
@@ -59,8 +69,26 @@
   {% endif %}
 </p>
 
+{% if narrative.plain_language_insights or narrative.bottom_line %}
+<div class="plain-language-box">
+  <h2>In Plain English</h2>
+  <p class="subtitle" style="margin-bottom: 0.6em;">No statistics background needed - here's what this data actually means for you.</p>
+  {% if narrative.bottom_line %}
+  <p class="bottom-line">{{ narrative.bottom_line }}</p>
+  {% endif %}
+  {% if narrative.plain_language_insights %}
+  <ul>
+    {% for insight in narrative.plain_language_insights %}
+    <li>{{ insight }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+
 <h2>Executive Summary</h2>
 <p>{{ narrative.executive_summary }}</p>
+
 
 <h2>Key Findings</h2>
 {% if narrative.key_findings %}

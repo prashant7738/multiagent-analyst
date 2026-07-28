@@ -30,6 +30,11 @@ class GraphState(TypedDict):
     # ── Agent 5 outputs ───────────────────────────────────────────────────────
     validation_report: dict   # Tier 1 contract checks + Cohen's kappa tagging agreement
 
+    # ── Agent 6 outputs ───────────────────────────────────────────────────────
+    insight_facts: dict       # deterministic facts extracted from Agents 1-5 for grounding
+    insight_narrative: dict   # LLM (or fallback) executive summary / findings / recommendations
+    report_path: str          # path to the generated insight report (PDF, or HTML fallback)
+
     # ── shared ────────────────────────────────────────────────────────────────
     errors: list
     reliability: dict  # stage confidence, decision readiness, and evidence trail

@@ -11,6 +11,7 @@ from agents.agent_2 import agent2_semantic_tagger
 from agents.agent_3 import agent3_preprocessor
 from agents.agent_4 import agent4_analysis
 from agents.agent_5 import agent5_output_validator
+from agents.agent_6 import agent6_insight_report_generator
 
 
 def should_continue_after_agent1(state: GraphState) -> str:
@@ -41,6 +42,14 @@ def should_continue_after_agent4(state: GraphState) -> str:
     if state.get("errors") and any("Agent4" in e for e in state["errors"]):
         return "end"
     return "agent5"
+
+
+def should_continue_after_agent5(state: GraphState) -> str:
+    if state.get("errors") and any("Agent5" in e for e in state["errors"]):
+        return "end"
+    if not state.get("validation_report", {}).get("passed"):
+        return "end"
+    return "agent6"
 
 
 
@@ -81,6 +90,11 @@ def _write_run_diagnostics(state: GraphState, output_path: str | Path | None = N
         "agent_5": {
             "validation_report": state.get("validation_report", {}),
         },
+        "agent_6": {
+            "insight_facts": state.get("insight_facts", {}),
+            "insight_narrative": state.get("insight_narrative", {}),
+            "report_path": state.get("report_path", ""),
+        },
         "pipeline": {
             "errors": state.get("errors", []),
             "reliability": state.get("reliability", {}),
@@ -104,6 +118,7 @@ def build_pipeline() -> StateGraph:
     graph.add_node("agent3", agent3_preprocessor)
     graph.add_node("agent4", agent4_analysis)
     graph.add_node("agent5", agent5_output_validator)
+    graph.add_node("agent6", agent6_insight_report_generator)
 
     graph.set_entry_point("agent1")
 
@@ -115,7 +130,9 @@ def build_pipeline() -> StateGraph:
                                 {"agent4": "agent4", "end": END})
     graph.add_conditional_edges("agent4", should_continue_after_agent4,
                                 {"agent5": "agent5", "end": END})
-    graph.add_edge("agent5", END)
+    graph.add_conditional_edges("agent5", should_continue_after_agent5,
+                                {"agent6": "agent6", "end": END})
+    graph.add_edge("agent6", END)
 
     return graph.compile()
 
@@ -147,6 +164,9 @@ if __name__ == "__main__":
         "stats":                 {},
         "chart_paths":           [],
         "validation_report":     {},
+        "insight_facts":         {},
+        "insight_narrative":     {},
+        "report_path":           "",
         "errors":                [],
         "reliability":           {},
     }
@@ -236,6 +256,20 @@ if __name__ == "__main__":
         print(f"  Flagged issues:  {len(flagged_issues)}")
         for issue in flagged_issues[:5]:
             print(f"    [{issue['severity']}] {issue['check']}: {issue['detail']}")
+
+    # ── Agent 6 output ──────────────────────────────────────────────────────
+    print("\n══════════════════════════════════════════")
+    print("  AGENT 6 — Insight Report")
+    print("══════════════════════════════════════════")
+    report_path = final_state.get("report_path", "")
+    if report_path:
+        narrative = final_state.get("insight_narrative", {})
+        print(f"  Report:          {report_path}")
+        print(f"  Narrative source: {narrative.get('source')}")
+        print(f"  Executive summary: {narrative.get('executive_summary', '')[:160]}")
+        print(f"  Key findings:    {len(narrative.get('key_findings', []))}")
+    else:
+        print("  Skipped (Agent 5 validation failed or upstream data missing)")
 
     # ── Reliability ─────────────────────────────────────────────────────────
     print("\n══════════════════════════════════════════")

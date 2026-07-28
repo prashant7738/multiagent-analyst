@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Insight Report — {{ dataset_name }}</title>
+<style>
+  @page { size: A4; margin: 2cm 1.6cm; }
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    color: #1f2933;
+    font-size: 11pt;
+    line-height: 1.45;
+  }
+  h1 { font-size: 22pt; margin-bottom: 0.1em; color: #1e3a8a; }
+  h2 {
+    font-size: 14pt; margin-top: 1.6em; margin-bottom: 0.5em;
+    color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.2em;
+  }
+  h3 { font-size: 11.5pt; margin-bottom: 0.3em; color: #374151; }
+  .subtitle { color: #6b7280; font-size: 10pt; margin-top: 0; }
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 12px;
+    font-size: 9.5pt; font-weight: bold; color: white; margin-right: 6px;
+  }
+  .badge.good { background: #16a34a; }
+  .badge.warn { background: #d97706; }
+  .badge.bad  { background: #dc2626; }
+  table { width: 100%; border-collapse: collapse; margin: 0.6em 0 1.2em; font-size: 9.5pt; }
+  th, td { border: 1px solid #e5e7eb; padding: 5px 8px; text-align: left; }
+  th { background: #f3f4f6; }
+  ul { margin: 0.3em 0 1em; padding-left: 1.4em; }
+  li { margin-bottom: 0.35em; }
+  .chart-gallery { display: block; }
+  .chart-item { margin-bottom: 1.2em; page-break-inside: avoid; }
+  .chart-item img { width: 100%; max-width: 620px; display: block; margin: 0 auto; }
+  .chart-caption { text-align: center; font-size: 9pt; color: #6b7280; margin-top: 0.2em; }
+  .footer { margin-top: 2em; padding-top: 0.8em; border-top: 1px solid #e5e7eb; font-size: 9pt; color: #6b7280; }
+  .empty-note { color: #9ca3af; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Data Insight Report</h1>
+<p class="subtitle">{{ dataset_name }} &middot; generated {{ generated_at }}</p>
+
+{% set quality = facts.data_quality.overall_quality_score %}
+<p>
+  {% if quality is not none and quality >= 80 %}
+    <span class="badge good">Data Quality: {{ quality }}</span>
+  {% elif quality is not none and quality >= 50 %}
+    <span class="badge warn">Data Quality: {{ quality }}</span>
+  {% elif quality is not none %}
+    <span class="badge bad">Data Quality: {{ quality }}</span>
+  {% endif %}
+  {% if facts.validation.passed %}
+    <span class="badge good">Validation: Passed ({{ facts.validation.overall_validation_score }}/100)</span>
+  {% else %}
+    <span class="badge bad">Validation: Failed</span>
+  {% endif %}
+</p>
+
+<h2>Executive Summary</h2>
+<p>{{ narrative.executive_summary }}</p>
+
+<h2>Key Findings</h2>
+{% if narrative.key_findings %}
+<ul>
+  {% for finding in narrative.key_findings %}
+  <li>{{ finding }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty-note">No key findings available.</p>
+{% endif %}
+
+{% if facts.top_correlations %}
+<h2>Top Correlations</h2>
+<table>
+  <tr><th>Column 1</th><th>Column 2</th><th>Pearson r</th><th>Strength</th><th>Direction</th></tr>
+  {% for pair in facts.top_correlations %}
+  <tr>
+    <td>{{ pair.col1 }}</td><td>{{ pair.col2 }}</td>
+    <td>{{ pair.pearson_r }}</td><td>{{ pair.strength }}</td><td>{{ pair.direction }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if facts.significant_trends %}
+<h2>Significant Trends</h2>
+<table>
+  <tr><th>Column</th><th>Trend</th><th>r²</th><th>p-value</th></tr>
+  {% for trend in facts.significant_trends %}
+  <tr>
+    <td>{{ trend.column }}</td><td>{{ trend.trend }}</td>
+    <td>{{ trend.r_squared }}</td><td>{{ trend.p_value }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if facts.rankings %}
+<h2>Top / Bottom Rankings</h2>
+{% for cat_col, data in facts.rankings.items() %}
+<h3>{{ cat_col }} ({{ data.total_categories }} categories)</h3>
+<table>
+  <tr><th>Rank</th><th>{{ cat_col }}</th><th>Total Revenue</th><th>Share %</th></tr>
+  {% for row in data.top %}
+  <tr><td>Top</td><td>{{ row[cat_col] }}</td><td>{{ row.total_revenue }}</td><td>{{ row.revenue_share_pct }}</td></tr>
+  {% endfor %}
+  {% for row in data.bottom %}
+  <tr><td>Bottom</td><td>{{ row[cat_col] }}</td><td>{{ row.total_revenue }}</td><td>{{ row.revenue_share_pct }}</td></tr>
+  {% endfor %}
+</table>
+{% endfor %}
+{% endif %}
+
+{% if facts.anomalies and facts.anomalies.unique_flagged_rows %}
+<h2>Anomalies</h2>
+<p>
+  {{ facts.anomalies.unique_flagged_rows }} rows ({{ facts.anomalies.unique_flagged_row_pct }}%) flagged across
+  {{ facts.anomalies.flagged_columns }} column(s), using a z-score threshold of {{ facts.anomalies.z_threshold }}.
+</p>
+{% endif %}
+
+{% if narrative.risks_and_caveats %}
+<h2>Risks &amp; Caveats</h2>
+<ul>
+  {% for risk in narrative.risks_and_caveats %}
+  <li>{{ risk }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if narrative.recommendations %}
+<h2>Recommendations</h2>
+<ul>
+  {% for rec in narrative.recommendations %}
+  <li>{{ rec }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if chart_paths %}
+<h2>Visualizations</h2>
+<div class="chart-gallery">
+  {% for path in chart_paths %}
+  <div class="chart-item">
+    <img src="file://{{ path }}" alt="{{ path }}">
+    <p class="chart-caption">{{ path.split('/')[-1].rsplit('.', 1)[0].replace('_', ' ').title() }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="footer">
+  Validation score: {{ facts.validation.overall_validation_score }}/100
+  &middot; Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}
+  &middot; Pipeline confidence: {{ facts.reliability.overall_confidence }}
+  ({{ facts.reliability.decision_readiness }})
+  &middot; Narrative source: {{ narrative.source }}
+</div>
+
+</body>
+</html>

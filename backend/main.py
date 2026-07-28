@@ -27,6 +27,9 @@ class GraphState(TypedDict):
     stats: dict
     chart_paths: list
 
+    # ── Agent 5 outputs ───────────────────────────────────────────────────────
+    validation_report: dict   # Tier 1 contract checks + Cohen's kappa tagging agreement
+
     # ── shared ────────────────────────────────────────────────────────────────
     errors: list
     reliability: dict  # stage confidence, decision readiness, and evidence trail

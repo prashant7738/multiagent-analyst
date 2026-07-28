@@ -10,6 +10,7 @@ from agents.agent_1 import GraphState, agent1_structural_profiler
 from agents.agent_2 import agent2_semantic_tagger
 from agents.agent_3 import agent3_preprocessor
 from agents.agent_4 import agent4_analysis
+from agents.agent_5 import agent5_output_validator
 
 
 def should_continue_after_agent1(state: GraphState) -> str:
@@ -36,6 +37,10 @@ def should_continue_after_agent3(state: GraphState) -> str:
     return "agent4"
 
 
+def should_continue_after_agent4(state: GraphState) -> str:
+    if state.get("errors") and any("Agent4" in e for e in state["errors"]):
+        return "end"
+    return "agent5"
 
 
 
@@ -73,6 +78,9 @@ def _write_run_diagnostics(state: GraphState, output_path: str | Path | None = N
             "stats": state.get("stats", {}),
             "chart_paths": state.get("chart_paths", []),
         },
+        "agent_5": {
+            "validation_report": state.get("validation_report", {}),
+        },
         "pipeline": {
             "errors": state.get("errors", []),
             "reliability": state.get("reliability", {}),
@@ -95,6 +103,7 @@ def build_pipeline() -> StateGraph:
     graph.add_node("agent2", agent2_semantic_tagger)
     graph.add_node("agent3", agent3_preprocessor)
     graph.add_node("agent4", agent4_analysis)
+    graph.add_node("agent5", agent5_output_validator)
 
     graph.set_entry_point("agent1")
 
@@ -104,7 +113,9 @@ def build_pipeline() -> StateGraph:
                                 {"agent3": "agent3", "end": END})
     graph.add_conditional_edges("agent3", should_continue_after_agent3,
                                 {"agent4": "agent4", "end": END})
-    graph.add_edge("agent4", END)
+    graph.add_conditional_edges("agent4", should_continue_after_agent4,
+                                {"agent5": "agent5", "end": END})
+    graph.add_edge("agent5", END)
 
     return graph.compile()
 
@@ -135,6 +146,7 @@ if __name__ == "__main__":
         "column_ledger":         {},
         "stats":                 {},
         "chart_paths":           [],
+        "validation_report":     {},
         "errors":                [],
         "reliability":           {},
     }
@@ -205,6 +217,25 @@ if __name__ == "__main__":
     print(f"  Charts saved:    {len(chart_paths)}")
     for p in chart_paths:
         print(f"    {p}")
+
+    # ── Agent 5 output ──────────────────────────────────────────────────────
+    print("\n══════════════════════════════════════════")
+    print("  AGENT 5 — Output Validation")
+    print("══════════════════════════════════════════")
+    validation_report = final_state.get("validation_report", {})
+    print(f"  Validation score:  {validation_report.get('overall_validation_score')}/100")
+    print(f"  Passed:            {validation_report.get('passed')}")
+    tier1_checks = validation_report.get("tier1_checks", {})
+    for name, result in tier1_checks.items():
+        print(f"    [{result.get('status')}] {name}")
+    kappa_info = validation_report.get("semantic_tagging_agreement", {})
+    print(f"  Semantic tagging agreement (Cohen's kappa): {kappa_info.get('cohen_kappa')} "
+          f"({kappa_info.get('n_columns')} columns)")
+    flagged_issues = validation_report.get("flagged_issues", [])
+    if flagged_issues:
+        print(f"  Flagged issues:  {len(flagged_issues)}")
+        for issue in flagged_issues[:5]:
+            print(f"    [{issue['severity']}] {issue['check']}: {issue['detail']}")
 
     # ── Reliability ─────────────────────────────────────────────────────────
     print("\n══════════════════════════════════════════")

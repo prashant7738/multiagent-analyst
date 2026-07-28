@@ -405,7 +405,9 @@ def _infer_intended_types(df: pd.DataFrame, raw_profile: dict) -> dict:
             inferred[col] = "numeric"
         elif raw_dtype == "bool":
             inferred[col] = "boolean"
-        elif raw_dtype == "object":
+        elif raw_dtype in ("object", "string", "str"):
+            # pandas 3.x defaults text columns to a "str" (or nullable "string")
+            # dtype rather than "object"; all must be treated as raw text for sniffing.
             parseability = profile.get("parseability", {}) if isinstance(profile.get("parseability"), dict) else {}
             numeric_parseability_pct = float(parseability.get("numeric_pct", 0.0) or 0.0)
             datetime_parseability_pct = float(parseability.get("datetime_pct", 0.0) or 0.0)

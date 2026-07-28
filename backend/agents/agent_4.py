@@ -77,17 +77,22 @@ _DATE_DERIVED_SUFFIXES = (
     "_day_of_week", "_is_weekend", "_week_of_year",
 )
 
-_BUSINESS_METRIC_NAMES = {
-    "quantity", "unit_price", "total_sales", "unit_cost",
-    "total_cost", "profit", "discount_pct",
-}
-
 def _is_date_derived(col: str) -> bool:
     return any(col.endswith(s) for s in _DATE_DERIVED_SUFFIXES)
 
 
-def _is_business_metric(col: str) -> bool:
-    return col in _BUSINESS_METRIC_NAMES or col.removeprefix("derived_") in _BUSINESS_METRIC_NAMES
+def _has_meaningful_variation(values, min_cv: float = 0.03) -> bool:
+    """Guard against drawing a time-series chart for data that is essentially flat.
+    A flat line/bar chart with no real movement isn't a meaningful insight - it's
+    just noise. Uses coefficient of variation (std / mean) as a cheap, scale-free
+    signal-strength check."""
+    s = pd.Series(values).dropna()
+    if len(s) < 2:
+        return False
+    mean = s.mean()
+    if mean == 0:
+        return bool(s.std() > 0)
+    return bool((s.std() / abs(mean)) >= min_cv)
 
 
 def _categorical_cols(df, schema_blueprint):
@@ -159,11 +164,14 @@ def _descriptive_stats(df, schema_blueprint):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _correlation(df, schema_blueprint):
-    # Exclude date-derived columns — they are mechanically correlated with each
-    # other and with the base date column, adding noise rather than insight.
+    # Use every analysis-eligible numeric column (per Agent 2's schema tags),
+    # not a fixed name whitelist - that way this works on any dataset, not just
+    # ones shaped like a sales CSV. Date-derived columns are excluded because
+    # they're mechanically correlated with each other and the base date column,
+    # adding noise rather than insight.
     cols = [
         c for c in _numeric_cols(df, schema_blueprint)
-        if not _is_date_derived(c) and _is_business_metric(c)
+        if not _is_date_derived(c)
     ]
     if len(cols) < 2:
         return {}, None
@@ -239,7 +247,7 @@ def _growth_rates(df, schema_blueprint):
         )
         result["monthly"] = monthly.dropna().to_dict(orient="records")
 
-        if len(monthly) >= 2:
+        if len(monthly) >= 2 and _has_meaningful_variation(monthly[rev_col]):
             fig, ax = plt.subplots(figsize=(max(8, len(monthly)), 4))
             ax.bar(monthly["label"], monthly[rev_col],
                    color=COLORS["primary"], alpha=0.85, label="Revenue")
@@ -274,7 +282,7 @@ def _growth_rates(df, schema_blueprint):
         )
         result["quarterly"] = quarterly.dropna().to_dict(orient="records")
 
-        if len(quarterly) >= 2:
+        if len(quarterly) >= 2 and _has_meaningful_variation(quarterly[rev_col]):
             fig, ax = plt.subplots(figsize=(max(6, len(quarterly)+2), 4))
             bars = ax.bar(quarterly["label"], quarterly[rev_col],
                           color=COLORS["secondary"], alpha=0.85)
@@ -304,7 +312,28 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
 
     cat_cols = _categorical_cols(df, schema_blueprint)
 
-    for cat_col in cat_cols[:3]:
+    # Score each categorical column by how differentiated its group revenue is,
+    # restricted to a sensible number of groups. A column with <2 unique values
+    # can't be ranked; one with >20 groups makes "bottom N" meaningless single-row
+    # noise rather than a real underperformer. Picking the most differentiated
+    # columns (instead of blindly using the first 3 in dataframe order) ensures
+    # the charts drawn actually tell a "who's winning / who's losing" story.
+    candidates = []
+    for cat_col in cat_cols:
+        nunique = df[cat_col].nunique(dropna=True)
+        if nunique < 2 or nunique > 20:
+            continue
+        totals = df.groupby(cat_col)[rev_col].sum()
+        grand_total = totals.sum()
+        if grand_total == 0:
+            continue
+        shares = totals / grand_total * 100
+        candidates.append((cat_col, float(shares.max() - shares.min())))
+
+    candidates.sort(key=lambda c: c[1], reverse=True)
+    selected_cat_cols = [c for c, _ in candidates[:3]]
+
+    for cat_col in selected_cat_cols:
         grouped = (
             df.groupby(cat_col)[rev_col]
             .agg(["sum", "mean", "count"])
@@ -373,19 +402,20 @@ def _seasonality(df, schema_blueprint):
             "worst_month":  {"month": worst_month["month_name"], "avg_revenue": round(float(worst_month[rev_col]), 2)},
         }
 
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(monthly_avg["month_name"], monthly_avg[rev_col],
-                marker="o", color=COLORS["primary"], linewidth=2.5, markersize=7)
-        ax.fill_between(range(len(monthly_avg)), monthly_avg[rev_col],
-                        alpha=0.1, color=COLORS["primary"])
-        ax.set_xticks(range(len(monthly_avg)))
-        ax.set_xticklabels(monthly_avg["month_name"])
-        ax.set_title("Monthly Revenue Seasonality", fontsize=13, fontweight="bold")
-        ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
-        ax.grid(axis="y", linestyle="--", alpha=0.5)
-        fig.tight_layout()
-        chart_paths.append(_save(fig, "monthly_seasonality"))
+        if _has_meaningful_variation(monthly_avg[rev_col]):
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(monthly_avg["month_name"], monthly_avg[rev_col],
+                    marker="o", color=COLORS["primary"], linewidth=2.5, markersize=7)
+            ax.fill_between(range(len(monthly_avg)), monthly_avg[rev_col],
+                            alpha=0.1, color=COLORS["primary"])
+            ax.set_xticks(range(len(monthly_avg)))
+            ax.set_xticklabels(monthly_avg["month_name"])
+            ax.set_title("Monthly Revenue Seasonality", fontsize=13, fontweight="bold")
+            ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
+            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
+            ax.grid(axis="y", linestyle="--", alpha=0.5)
+            fig.tight_layout()
+            chart_paths.append(_save(fig, "monthly_seasonality"))
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
     if quarter_col:
@@ -400,17 +430,18 @@ def _seasonality(df, schema_blueprint):
             "worst_quarter":  {"quarter": worst_q["quarter_name"], "avg_revenue": round(float(worst_q[rev_col]), 2)},
         }
 
-        fig, ax = plt.subplots(figsize=(6, 4))
-        bars = ax.bar(quarterly_avg["quarter_name"], quarterly_avg[rev_col],
-                      color=COLORS["bars"][:4], alpha=0.88, width=0.5)
-        for bar, val in zip(bars, quarterly_avg[rev_col]):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                    f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
-        ax.set_title("Quarterly Revenue Seasonality", fontsize=13, fontweight="bold")
-        ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
-        fig.tight_layout()
-        chart_paths.append(_save(fig, "quarterly_seasonality"))
+        if _has_meaningful_variation(quarterly_avg[rev_col]):
+            fig, ax = plt.subplots(figsize=(6, 4))
+            bars = ax.bar(quarterly_avg["quarter_name"], quarterly_avg[rev_col],
+                          color=COLORS["bars"][:4], alpha=0.88, width=0.5)
+            for bar, val in zip(bars, quarterly_avg[rev_col]):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                        f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
+            ax.set_title("Quarterly Revenue Seasonality", fontsize=13, fontweight="bold")
+            ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
+            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
+            fig.tight_layout()
+            chart_paths.append(_save(fig, "quarterly_seasonality"))
 
     dow_col = next((c for c in df.columns if c.endswith("_day_of_week")), None)
     if dow_col:
@@ -535,7 +566,6 @@ def _regression_trends(df, schema_blueprint):
         col for col in _numeric_cols(df, schema_blueprint)
         if not _is_date_derived(col)
         and col not in _date_col_names
-        and _is_business_metric(col)
     ]
 
     for col in eligible_cols:
@@ -571,9 +601,16 @@ def _regression_trends(df, schema_blueprint):
             "x_axis":      time_label,
         }
 
-    # Revenue trend line chart
+    # Revenue trend line chart — only draw it when the trend is statistically
+    # significant. A regression line fit to noise (p >= 0.05) isn't a meaningful
+    # insight and misleads readers into seeing a trend that isn't really there.
     rev_col = _find_revenue_col(df, schema_blueprint)
-    if rev_col and rev_col in result and pd.api.types.is_numeric_dtype(df[rev_col]):
+    if (
+        rev_col
+        and rev_col in result
+        and result[rev_col]["significant"]
+        and pd.api.types.is_numeric_dtype(df[rev_col])
+    ):
         pair = pd.DataFrame({"_x": time_index, "_y": pd.to_numeric(df[rev_col], errors="coerce")}).dropna()
         pair = pair.sort_values("_x")
         x = pair["_x"].to_numpy(dtype="float64")
@@ -609,15 +646,28 @@ def _distribution_charts(df, schema_blueprint):
     if not num_cols:
         return chart_paths
 
-    data = [df[col].dropna().values for col in num_cols]
+    # Standardize each column (z-score) before combining them on one boxplot.
+    # Numeric columns are rarely on the same scale (e.g. price in currency vs.
+    # a percentage vs. a raw count) - plotting raw values together lets the
+    # largest-magnitude column dominate the axis and flattens the rest into
+    # invisible lines. Standardizing puts every column's spread/skew on a
+    # comparable footing so the chart is actually readable.
+    data = []
+    for col in num_cols:
+        s = df[col].dropna()
+        std = s.std()
+        data.append(((s - s.mean()) / std).values if std else (s - s.mean()).values)
+
     fig, ax = plt.subplots(figsize=(max(8, len(num_cols)*1.5), 5))
     bp = ax.boxplot(data, patch_artist=True, notch=False)
     for patch, color in zip(bp["boxes"], COLORS["bars"]):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
+    ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
     ax.set_xticks(range(1, len(num_cols)+1))
     ax.set_xticklabels(num_cols, rotation=30, ha="right", fontsize=9)
-    ax.set_title("Numeric Columns — Box Plot", fontsize=13, fontweight="bold")
+    ax.set_ylabel("Standardized value (z-score)", fontsize=10)
+    ax.set_title("Numeric Columns — Distribution Comparison (standardized)", fontsize=13, fontweight="bold")
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     fig.tight_layout()
     chart_paths.append(_save(fig, "boxplot_numeric_cols"))
@@ -673,19 +723,24 @@ def _derived_metrics_charts(df):
             chart_paths.append(_save(fig, "profit_margin_trend"))
 
     if len(derived_cols) >= 2:
-        avgs = {col: df[col].mean() for col in derived_cols[:6]}
-        fig, ax = plt.subplots(figsize=(max(7, len(avgs)), 4))
-        bars = ax.bar(
-            [c.replace("derived_", "").replace("_", " ").title() for c in avgs],
-            avgs.values(),
-            color=COLORS["bars"][:len(avgs)], alpha=0.88
-        )
-        for bar, val in zip(bars, avgs.values()):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                    f"{val:,.1f}", ha="center", va="bottom", fontsize=9)
-        ax.set_title("Derived Business Metrics — Averages", fontsize=13, fontweight="bold")
-        ax.set_ylabel("Average Value")
-        plt.xticks(rotation=20, ha="right")
+        # Each derived metric can be on a wildly different unit (currency profit
+        # vs. a percentage margin vs. a raw quantity), so a single shared y-axis
+        # bar chart is misleading - one metric's scale swamps the others. Give
+        # each metric its own small subplot instead; actual values stay visible
+        # and comparable within their own scale.
+        cols_to_plot = derived_cols[:6]
+        fig, axes = plt.subplots(1, len(cols_to_plot),
+                                  figsize=(max(7, len(cols_to_plot) * 2.2), 4))
+        if len(cols_to_plot) == 1:
+            axes = [axes]
+        for ax, col, color in zip(axes, cols_to_plot, COLORS["bars"]):
+            val = df[col].mean()
+            label = col.replace("derived_", "").replace("_", " ").title()
+            ax.bar([label], [val], color=color, alpha=0.88, width=0.5)
+            ax.text(0, val, f"{val:,.1f}", ha="center", va="bottom", fontsize=9)
+            ax.set_title(label, fontsize=10)
+            ax.tick_params(axis="x", labelsize=8)
+        fig.suptitle("Derived Business Metrics — Averages", fontsize=13, fontweight="bold")
         fig.tight_layout()
         chart_paths.append(_save(fig, "derived_metrics_summary"))
 

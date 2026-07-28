@@ -7,7 +7,10 @@ from agents import agent_4
 
 
 class TestAgent4TrendSelection(unittest.TestCase):
-    def test_correlation_keeps_business_metrics_and_excludes_date_parts(self):
+    def test_correlation_includes_all_numeric_cols_and_excludes_date_parts(self):
+        # Correlation should be schema-driven (any analysis-eligible numeric
+        # column), not restricted to a fixed business-metric name whitelist -
+        # otherwise datasets that aren't shaped like a sales CSV lose out.
         frame = pd.DataFrame({
             "order_date_year": [2022, 2022, 2023, 2023],
             "order_date_month": [1, 2, 1, 2],
@@ -22,7 +25,7 @@ class TestAgent4TrendSelection(unittest.TestCase):
 
         self.assertEqual(
             set(correlation["pearson"]),
-            {"quantity", "unit_price", "total_sales"},
+            {"quantity", "unit_price", "total_sales", "unrelated_numeric_field"},
         )
 
     def test_regression_does_not_emit_date_parts_as_targets(self):

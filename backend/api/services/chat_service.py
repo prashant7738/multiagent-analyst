@@ -48,7 +48,10 @@ COLORS = {
 
 MAX_HISTORY_TURNS = 6  # recent user/assistant turns replayed to the model for context
 ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
-REVENUE_QUERY_TERMS = ("revenue", "sales", "profit", "amount", "turnover", "income")
+# "income" is intentionally excluded: a customer/personal income column is not
+# company revenue (see agent_2.py's financial_role tagging), so treating it as
+# a revenue synonym here would resurrect the same category error in chat answers.
+REVENUE_QUERY_TERMS = ("revenue", "sales", "profit", "amount", "turnover")
 RANKING_QUERY_TERMS = ("top", "best", "highest", "most", "max", "largest", "leader")
 ACTION_QUERY_TERMS = ("what do i do", "what should i do", "recommend", "next step", "how do i improve", "action")
 

@@ -1034,6 +1034,29 @@ def _find_col(df, keywords):
     return None
 
 
+def _find_financial_role_col(df, schema_blueprint, role, require_variation=False):
+    """Find a numeric column whose Agent 2 financial_role tag matches `role`.
+
+    Preferred over name-keyword guessing because it uses Agent 2's explicit
+    classification (see agent_2._derive_financial_role) instead of treating
+    e.g. "income" as a synonym for "revenue". When `require_variation` is
+    set, constant/near-constant columns are skipped - a flat "revenue"
+    column (a known quirk in some public datasets, e.g. a placeholder
+    column) is not a usable business metric even if the tag matches.
+    """
+    schema_blueprint = schema_blueprint or {}
+    for col in df.columns:
+        meta = schema_blueprint.get(col, {})
+        if not (isinstance(meta, dict) and meta.get("financial_role") == role and _is_numeric_col(df, col)):
+            continue
+        if require_variation:
+            values = pd.to_numeric(df[col], errors="coerce").dropna()
+            if len(values) < 2 or values.nunique() <= 1:
+                continue
+        return col
+    return None
+
+
 def _is_numeric_col(df, col):
     """Returns True only if 80%+ of column values are numeric."""
     if col is None or col not in df.columns:
@@ -1042,16 +1065,40 @@ def _is_numeric_col(df, col):
     return numeric_check.notna().sum() / max(len(df), 1) >= 0.8
 
 
-def _derive_business_metrics(df):
+def _derive_business_metrics(df, schema_blueprint=None):
     notes = []
+    schema_blueprint = schema_blueprint or {}
 
-    rev_col = _find_col(df, ["revenue", "total_sales", "net_sales", "income", "total_amount"])
-    cost_col = _find_col(df, ["cost_price", "cost", "expense", "cogs", "expenditure"])
+    # Prefer Agent 2's explicit financial_role tag over name-keyword guessing
+    # so a customer/personal attribute like "Income" is never conflated with
+    # company revenue. "income" is intentionally NOT a revenue keyword below.
+    # require_variation=True skips a constant "revenue" column (e.g. a
+    # placeholder field) in favor of the spend-proxy fallback below.
+    rev_col = (
+        _find_financial_role_col(df, schema_blueprint, "revenue", require_variation=True)
+        or _find_col(df, ["revenue", "total_sales", "net_sales", "total_amount"])
+    )
+    cost_col = (
+        _find_financial_role_col(df, schema_blueprint, "cost")
+        or _find_col(df, ["cost_price", "cost", "expense", "cogs", "expenditure"])
+    )
     unit_col = _find_col(df, ["units_sold", "units", "quantity", "qty", "volume"])
-    price_col = _find_col(df, ["unit_price", "price", "rate", "mrp", "selling_price"])
-    discount_col = _find_col(df, ["discount_amount", "discount", "rebate", "deduction"])
-    budget_col = _find_col(df, ["budget", "target", "planned", "projected"])
-    tax_col = _find_col(df, ["tax_amount", "tax", "vat", "gst", "duty"])
+    price_col = (
+        _find_financial_role_col(df, schema_blueprint, "price")
+        or _find_col(df, ["unit_price", "price", "rate", "mrp", "selling_price"])
+    )
+    discount_col = (
+        _find_financial_role_col(df, schema_blueprint, "discount")
+        or _find_col(df, ["discount_amount", "discount", "rebate", "deduction"])
+    )
+    budget_col = (
+        _find_financial_role_col(df, schema_blueprint, "budget")
+        or _find_col(df, ["budget", "target", "planned", "projected"])
+    )
+    tax_col = (
+        _find_financial_role_col(df, schema_blueprint, "tax")
+        or _find_col(df, ["tax_amount", "tax", "vat", "gst", "duty"])
+    )
     ship_col = _find_col(df, ["shipping", "freight", "delivery_cost", "logistics"])
 
     rev_col = rev_col if _is_numeric_col(df, rev_col) else None
@@ -1097,10 +1144,32 @@ def _derive_business_metrics(df):
         df["derived_total_cost_with_tax"] = df[cost_col] + df[tax_col]
         notes.append(f"Derived: total_cost_with_tax from [{cost_col}] + [{tax_col}]")
 
+    # No explicit company revenue column exists (e.g. a customer/marketing
+    # dataset with only per-category spend columns, like MntWines/MntFruits).
+    # Rather than silently reusing a customer attribute (like Income) as if
+    # it were revenue, derive an honest proxy from actual spend columns.
+    if not rev_col:
+        spend_cols = [
+            col for col, meta in schema_blueprint.items()
+            if isinstance(meta, dict)
+            and meta.get("financial_role") == "spend"
+            and _is_numeric_col(df, col)
+        ]
+        if len(spend_cols) >= 2:
+            for col in spend_cols:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df["derived_total_spend"] = df[spend_cols].sum(axis=1, skipna=True)
+            notes.append(
+                f"Derived: total_spend = sum({', '.join(spend_cols)}) "
+                "(no company revenue column found; using per-category spend as an "
+                "honest proxy rather than treating a customer attribute like income as revenue)"
+            )
+
     if not notes:
         notes.append("Derived metrics: no matching column pairs found")
 
     return df, notes
+
 
 
 def _validate_count_ranges(df, schema_blueprint, ledger=None):
@@ -1454,7 +1523,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
-    df, notes = _derive_business_metrics(df)
+    df, notes = _derive_business_metrics(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
     if verbose:

@@ -76,6 +76,55 @@ def _name_tokens(column_name: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", column_name.lower()))
 
 
+# Tokens that classify *whose* money a currency-like column represents.
+# Company revenue and personal/customer income are both "just numbers" to a
+# naive keyword match, but they mean very different things for analysis:
+# revenue is what the business earned, income is a customer/individual
+# attribute. Order matters - more specific roles are checked first so a
+# column like "net_sales_income_bracket" (rare, but possible) resolves to
+# the more specific tag rather than the first alphabetical match.
+_FINANCIAL_ROLE_TOKENS = [
+    ("customer_income", {"income", "salary", "wage", "wages", "earnings"}),
+    ("revenue", {"revenue", "turnover", "sales"}),
+    ("cost", {"cost", "cogs", "expense", "expenditure"}),
+    ("tax", {"tax", "vat", "gst", "duty"}),
+    ("discount", {"discount", "rebate", "deduction"}),
+    ("budget", {"budget", "target", "planned", "projected"}),
+    ("price", {"price", "rate", "mrp"}),
+    ("spend", {"spend", "spent", "purchase", "purchases"}),
+]
+
+
+def _derive_financial_role(column_name: str, semantic_tag: str, raw_inferred_type: str) -> str | None:
+    """Classify *whose* money a currency-like column represents.
+
+    This is deliberately independent of the LLM: it runs for both the LLM
+    path and the metadata-only fallback path so the distinction between
+    company revenue and personal/customer income always exists, even when
+    the model is unavailable. Downstream agents (preprocessing, statistics,
+    chat) should prefer this field over guessing from the column name.
+    """
+    if semantic_tag == "identifier":
+        return None
+    if raw_inferred_type != "numeric" and semantic_tag != "currency":
+        return None
+
+    tokens = _name_tokens(column_name)
+    for role, keywords in _FINANCIAL_ROLE_TOKENS:
+        if tokens & keywords:
+            return role
+
+    # Compound category-spend names like "MntWines"/"MntFruits" (common in
+    # customer/marketing datasets) don't tokenize into separate words, so
+    # match the "Mnt" prefix convention explicitly.
+    if column_name.lower().startswith("mnt"):
+        return "spend"
+
+    if semantic_tag == "currency":
+        return "unknown_financial"
+    return None
+
+
 def _confidence_level_from_score(score: float) -> str:
     """Convert a 0-100 confidence score into a coarse label."""
     if score >= 80:
@@ -291,6 +340,11 @@ Classification rules:
    - null_policy.action="flag_only"
    - Never use median, mean, mode, or unknown_label imputation for currency.
    - Preserve missing financial values for review.
+   - In "notes", explicitly state whose money the field represents (e.g. "company
+     revenue from sales", "customer's personal income", "cost paid by the business",
+     "per-category customer spend"). Never describe a personal/customer income field
+     as revenue, and never describe company revenue as a customer attribute - they
+     are different concepts even though both are currency values.
 
 4. Identifier fields:
    - is_identifier=true
@@ -1059,6 +1113,12 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
                 meta["intended_type"] = "float"
             else:
                 meta["intended_type"] = inferred_type
+
+        # Deterministic - runs regardless of LLM success so the distinction
+        # between company revenue and personal/customer income always exists.
+        financial_role = _derive_financial_role(col, str(meta.get("semantic_tag", "unknown")), inferred_type)
+        if financial_role:
+            meta["financial_role"] = financial_role
 
         assessment = _assess_column_suitability(
             column_name=col,

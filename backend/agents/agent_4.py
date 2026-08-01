@@ -128,10 +128,59 @@ def _find_col(df, keywords, schema_blueprint):
     return None
 
 def _find_revenue_col(df, schema_blueprint):
-    """Locate the primary revenue/sales column, including names that include underscores."""
-    # These keywords match whole-word OR common compound column names.
-    keywords = ["total_sales", "revenue", "net_sales", "total_amount", "income", "sales"]
-    return _find_col(df, keywords, schema_blueprint)
+    """Locate the primary revenue/sales metric column.
+
+    Preference order:
+    1. A column Agent 2 explicitly tagged financial_role="revenue" - this
+       avoids conflating a customer/personal attribute (like "Income") with
+       company revenue, which naive keyword matching cannot distinguish.
+    2. A derived total-spend proxy (sum of per-category spend columns, e.g.
+       MntWines/MntFruits) computed by Agent 3 when the dataset has no real
+       revenue column at all.
+    3. Whole-word keyword match on common revenue/sales column names.
+       "income" is intentionally NOT included here - see agent_2.py's
+       financial_role tagging for why customer income != company revenue.
+    Candidates with no real variation (e.g. a constant placeholder column)
+    are skipped in favor of the next tier - a flat "revenue" column is not
+    a usable business metric even if the name/tag matches.
+    """
+    numeric_cols = _numeric_cols(df, schema_blueprint)
+
+    for col in numeric_cols:
+        if (
+            schema_blueprint.get(col, {}).get("financial_role") == "revenue"
+            and _has_meaningful_variation(df[col])
+        ):
+            return col
+
+    if "derived_total_spend" in numeric_cols and _has_meaningful_variation(df["derived_total_spend"]):
+        return "derived_total_spend"
+
+    keywords = ["total_sales", "revenue", "net_sales", "total_amount", "sales"]
+    keyword_col = _find_col(df, keywords, schema_blueprint)
+    if keyword_col and _has_meaningful_variation(df[keyword_col]):
+        return keyword_col
+    return None
+
+
+def _revenue_label(rev_col):
+    """Human-friendly label for whatever metric _find_revenue_col resolved to.
+
+    Chart titles/axes must describe what the column actually is (e.g.
+    "Total Spend" or "Income") rather than always saying "Revenue" - that
+    mismatch is what caused honest column titles to sit under dishonest
+    "Revenue ..." captions/narrative.
+    """
+    if not rev_col:
+        return rev_col
+    label = rev_col[len("derived_"):] if rev_col.startswith("derived_") else rev_col
+    return label.replace("_", " ").strip().title()
+
+
+def _slug(label):
+    """Filesystem/caption-safe slug so saved chart filenames match their titles."""
+    slug = re.sub(r"[^a-z0-9]+", "_", str(label).lower()).strip("_")
+    return slug or "value"
 
 
 def _datetime_cols(df, schema_blueprint):
@@ -289,6 +338,9 @@ def _growth_rates(df, schema_blueprint):
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
 
+    label = _revenue_label(rev_col)
+    slug = _slug(label)
+
     month_col = next((c for c in df.columns if c.endswith("_month")), None)
     year_col  = next((c for c in df.columns if c.endswith("_year")), None)
 
@@ -309,22 +361,22 @@ def _growth_rates(df, schema_blueprint):
         if len(monthly) >= 2 and _has_meaningful_variation(monthly[rev_col]):
             fig, ax = plt.subplots(figsize=(max(8, len(monthly)), 4))
             ax.bar(monthly["label"], monthly[rev_col],
-                   color=COLORS["primary"], alpha=0.85, label="Revenue")
+                   color=COLORS["primary"], alpha=0.85, label=label)
             ax2 = ax.twinx()
             valid = monthly.dropna(subset=["mom_growth_pct"])
             ax2.plot(valid["label"], valid["mom_growth_pct"],
                      color=COLORS["accent"], marker="o", linewidth=2, label="MoM Growth %")
             ax2.axhline(0, color="gray", linewidth=0.8, linestyle="--")
             ax.set_xlabel("Month", fontsize=10)
-            ax.set_ylabel(f"{rev_col}", fontsize=10)
+            ax.set_ylabel(label, fontsize=10)
             ax2.set_ylabel("MoM Growth %", fontsize=10)
-            ax.set_title("Monthly Revenue & MoM Growth", fontsize=13, fontweight="bold")
+            ax.set_title(f"Monthly {label} & MoM Growth", fontsize=13, fontweight="bold")
             plt.xticks(rotation=45, ha="right")
             lines1, labels1 = ax.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             ax.legend(lines1+lines2, labels1+labels2, loc="upper left", fontsize=9)
             fig.tight_layout()
-            chart_paths.append(_save(fig, "monthly_revenue_growth"))
+            chart_paths.append(_save(fig, f"monthly_{slug}_growth"))
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
     if quarter_col and year_col:
@@ -348,11 +400,11 @@ def _growth_rates(df, schema_blueprint):
             for bar, val in zip(bars, quarterly[rev_col]):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
                         f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
-            ax.set_title("Quarterly Revenue", fontsize=13, fontweight="bold")
-            ax.set_ylabel(rev_col)
+            ax.set_title(f"Quarterly {label}", fontsize=13, fontweight="bold")
+            ax.set_ylabel(label)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, "quarterly_revenue"))
+            chart_paths.append(_save(fig, f"quarterly_{slug}"))
 
     return result, chart_paths
 
@@ -369,6 +421,8 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
 
+    label = _revenue_label(rev_col)
+    slug = _slug(label)
     cat_cols = _categorical_cols(df, schema_blueprint)
 
     # Score each categorical column by how differentiated its group revenue is,
@@ -423,12 +477,12 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
         for bar, pct in zip(bars, top_n["revenue_share_pct"]):
             ax.text(bar.get_width(), bar.get_y() + bar.get_height()/2,
                     f"  {pct:.1f}%", va="center", fontsize=9)
-        ax.set_xlabel(f"Total {rev_col}", fontsize=10)
-        ax.set_title(f"Top {n} {cat_col} by {rev_col}", fontsize=13, fontweight="bold")
+        ax.set_xlabel(f"Total {label}", fontsize=10)
+        ax.set_title(f"Top {n} {cat_col} by {label}", fontsize=13, fontweight="bold")
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
         ax.invert_yaxis()
         fig.tight_layout()
-        chart_paths.append(_save(fig, f"top_{n}_{cat_col.lower()}_revenue"))
+        chart_paths.append(_save(fig, f"top_{n}_{cat_col.lower()}_{slug}"))
 
     return result, chart_paths
 
@@ -444,6 +498,9 @@ def _seasonality(df, schema_blueprint):
     rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
         return result, chart_paths
+
+    label = _revenue_label(rev_col)
+    slug = _slug(label)
 
     month_names = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
                    7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
@@ -469,12 +526,12 @@ def _seasonality(df, schema_blueprint):
                             alpha=0.1, color=COLORS["primary"])
             ax.set_xticks(range(len(monthly_avg)))
             ax.set_xticklabels(monthly_avg["month_name"])
-            ax.set_title("Monthly Revenue Seasonality", fontsize=13, fontweight="bold")
-            ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
+            ax.set_title(f"Monthly {label} Seasonality", fontsize=13, fontweight="bold")
+            ax.set_ylabel(f"Avg {label}", fontsize=10)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             fig.tight_layout()
-            chart_paths.append(_save(fig, "monthly_seasonality"))
+            chart_paths.append(_save(fig, f"monthly_{slug}_seasonality"))
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
     if quarter_col:
@@ -496,11 +553,11 @@ def _seasonality(df, schema_blueprint):
             for bar, val in zip(bars, quarterly_avg[rev_col]):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
                         f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
-            ax.set_title("Quarterly Revenue Seasonality", fontsize=13, fontweight="bold")
-            ax.set_ylabel(f"Avg {rev_col}", fontsize=10)
+            ax.set_title(f"Quarterly {label} Seasonality", fontsize=13, fontweight="bold")
+            ax.set_ylabel(f"Avg {label}", fontsize=10)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, "quarterly_seasonality"))
+            chart_paths.append(_save(fig, f"quarterly_{slug}_seasonality"))
 
     dow_col = next((c for c in df.columns if c.endswith("_day_of_week")), None)
     if dow_col:
@@ -678,18 +735,19 @@ def _regression_trends(df, schema_blueprint):
             slope     = result[rev_col]["slope"]
             intercept = result[rev_col]["intercept"]
             y_pred    = slope * x + intercept
+            label = _revenue_label(rev_col)
 
             fig, ax = plt.subplots(figsize=(8, 4))
             ax.scatter(x, y, color=COLORS["primary"], s=60, zorder=5, label="Actual")
             ax.plot(x, y_pred, color=COLORS["accent"], linewidth=2,
                     linestyle="--", label=f"Trend (R²={result[rev_col]['r_squared']:.3f})")
             ax.set_xlabel(time_label, fontsize=10)
-            ax.set_ylabel(rev_col, fontsize=10)
-            ax.set_title(f"{rev_col} Linear Trend", fontsize=13, fontweight="bold")
+            ax.set_ylabel(label, fontsize=10)
+            ax.set_title(f"{label} Linear Trend", fontsize=13, fontweight="bold")
             ax.legend(fontsize=9)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, "revenue_trend_regression"))
+            chart_paths.append(_save(fig, f"{_slug(label)}_trend_regression"))
 
     return result, chart_paths
 
@@ -734,17 +792,18 @@ def _distribution_charts(df, schema_blueprint):
     rev_col = _find_revenue_col(df, schema_blueprint)
     if rev_col and pd.api.types.is_numeric_dtype(df[rev_col]):
         s = df[rev_col].dropna()
+        label = _revenue_label(rev_col)
         fig, ax = plt.subplots(figsize=(7, 4))
         ax.hist(s, bins=min(20, len(s)), color=COLORS["primary"], alpha=0.8, edgecolor="white")
         ax.axvline(s.mean(),   color=COLORS["accent"],  linewidth=2, linestyle="--", label=f"Mean: {s.mean():,.0f}")
         ax.axvline(s.median(), color=COLORS["warning"], linewidth=2, linestyle="-",  label=f"Median: {s.median():,.0f}")
-        ax.set_title(f"{rev_col} Distribution", fontsize=13, fontweight="bold")
-        ax.set_xlabel(rev_col, fontsize=10)
+        ax.set_title(f"{label} Distribution", fontsize=13, fontweight="bold")
+        ax.set_xlabel(label, fontsize=10)
         ax.set_ylabel("Frequency", fontsize=10)
         ax.legend(fontsize=9)
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
         fig.tight_layout()
-        chart_paths.append(_save(fig, "revenue_histogram"))
+        chart_paths.append(_save(fig, f"{_slug(label)}_histogram"))
 
     return chart_paths
 

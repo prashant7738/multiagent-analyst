@@ -1,0 +1,29 @@
+# Shared editor / OS files
+.DS_Store
+Thumbs.db
+
+# Python artifacts
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+
+# Local environment files
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Frontend build output
+frontend/AnalyzeAI/dist/
+frontend/AnalyzeAI/.vite/
+frontend/AnalyzeAI/node_modules/
+frontend/node_modules/
+frontend/package-lock.json
+
+# Backend runtime data
+backend/.venv/
+backend/uploads/
+backend/outputs/
+backend/*.csv

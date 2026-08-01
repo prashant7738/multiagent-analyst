@@ -1,1 +1,1 @@
-"""API route modules: health, analysis, reports, jobs."""
+"""API route modules: health, auth, analysis, reports, jobs."""

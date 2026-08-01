@@ -16,6 +16,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
@@ -65,6 +66,25 @@ def _get_int(name: str, default: int) -> int:
         return default
 
 
+def _build_database_url() -> str | None:
+    raw = os.getenv("DATABASE_URL")
+    if raw:
+        return raw
+
+    host = os.getenv("POSTGRES_HOST")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    database = os.getenv("POSTGRES_DB")
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
+    if not all([host, database, user, password]):
+        return None
+
+    return (
+        f"postgresql://{quote_plus(user)}:{quote_plus(password)}"
+        f"@{host}:{port}/{database}"
+    )
+
+
 class Settings:
     """Immutable-ish view over environment-driven settings."""
 
@@ -76,6 +96,12 @@ class Settings:
         self.port: int = _get_int("API_PORT", 8000)
         self.reload: bool = _get_bool("API_RELOAD", False)
         self.log_level: str = os.getenv("API_LOG_LEVEL", "info")
+
+        # Optional PostgreSQL persistence for job history / results.
+        self.database_url: str | None = _build_database_url()
+        self.postgres_schema: str = os.getenv("POSTGRES_SCHEMA", "public")
+        self.postgres_jobs_table: str = os.getenv("POSTGRES_JOBS_TABLE", "analysis_jobs")
+        self.postgres_users_table: str = os.getenv("POSTGRES_USERS_TABLE", "app_users")
 
         # Filesystem layout (all absolute, derived from backend/).
         self.backend_dir: Path = BACKEND_DIR

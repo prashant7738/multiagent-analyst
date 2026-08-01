@@ -172,7 +172,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str) -> None:
             final_state = {**final_state, "report_generated_at": datetime.now(timezone.utc).isoformat()}
 
         result = build_result(job_id, final_state, manager.get_job(job_id).filename if manager.get_job(job_id) else None)
-        manager.set_result(job_id, final_state, final_state.get("errors", []) or [])
+        manager.set_result(job_id, final_state, final_state.get("errors", []) or [], result=result)
 
         pipeline_errors = final_state.get("errors", []) or []
         manager.append_event(job_id, {
@@ -189,6 +189,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str) -> None:
         job = manager.get_job(job_id)
         if job is not None:
             job.state = final_state  # already set; keep for clarity
+            job.result = result
         logger.info("Job %s completed (report=%s, errors=%d).",
                     job_id, bool(final_state.get("report_path")), len(pipeline_errors))
 

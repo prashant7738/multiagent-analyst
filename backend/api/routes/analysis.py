@@ -134,5 +134,5 @@ async def result(job_id: str, manager: JobManager = Depends(get_job_manager)):
             detail={"message": "Result not ready yet.", "status": job.status},
         )
 
-    payload = build_result(job_id, job.state, job.filename)
+    payload = job.result or build_result(job_id, job.state, job.filename)
     return success(payload)

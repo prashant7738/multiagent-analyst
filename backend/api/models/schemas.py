@@ -41,6 +41,32 @@ class HealthResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+class AuthSignupRequest(BaseModel):
+    name: str = Field(min_length=1)
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+
+
+class AuthLoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
+class AuthUser(BaseModel):
+    user_id: str
+    name: str
+    email: str
+    created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    message: str = "ok"
+    user: AuthUser
+
+
+# ---------------------------------------------------------------------------
 # Analyze
 # ---------------------------------------------------------------------------
 class AnalyzeResponse(BaseModel):

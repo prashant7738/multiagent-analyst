@@ -27,11 +27,15 @@ export default function HistoryPage() {
           jobs.map(async (job) => {
             let rows = null;
             let cols = null;
+            let confidence = null;
+            let quality = null;
             if (job.status === "completed") {
               try {
                 const result = await fetchJobResult(job.job_id);
                 rows = result?.summary?.rows ?? null;
                 cols = result?.summary?.columns ?? null;
+                confidence = result?.summary?.overall_confidence ?? null;
+                quality = result?.summary?.quality_score ?? null;
               } catch {
                 // Result may have expired from the in-memory store; ignore.
               }
@@ -41,6 +45,9 @@ export default function HistoryPage() {
               file: job.filename || "unknown.csv",
               rows,
               cols,
+              profile: job.analysis_config?.preprocessing_profile || "balanced",
+              quality,
+              confidence,
               date: job.created_at?.slice(0, 10) ?? "—",
               duration: durationLabel(job.created_at, job.updated_at),
               status: STATUS_LABEL[job.status] || job.status,
@@ -114,6 +121,8 @@ export default function HistoryPage() {
                 <th className="text-left px-6 py-4 text-white/30 font-medium">File</th>
                 <th className="text-left px-4 py-4 text-white/30 font-medium">Rows</th>
                 <th className="text-left px-4 py-4 text-white/30 font-medium">Cols</th>
+                <th className="text-left px-4 py-4 text-white/30 font-medium">Profile</th>
+                <th className="text-left px-4 py-4 text-white/30 font-medium">Confidence</th>
                 <th className="text-left px-4 py-4 text-white/30 font-medium">Date</th>
                 <th className="text-left px-4 py-4 text-white/30 font-medium">Time</th>
                 <th className="text-left px-4 py-4 text-white/30 font-medium">Status</th>
@@ -132,6 +141,8 @@ export default function HistoryPage() {
                   </td>
                   <td className="px-4 py-4 text-white/40">{item.rows != null ? item.rows.toLocaleString() : "—"}</td>
                   <td className="px-4 py-4 text-white/40">{item.cols ?? "—"}</td>
+                  <td className="px-4 py-4 text-white/40 capitalize">{item.profile}</td>
+                  <td className="px-4 py-4 text-white/40">{item.confidence != null ? `${Math.round(item.confidence * 100)}%` : "—"}</td>
                   <td className="px-4 py-4 text-white/40">{item.date}</td>
                   <td className="px-4 py-4 text-white/40">{item.duration}</td>
                   <td className="px-4 py-4">
@@ -151,17 +162,26 @@ export default function HistoryPage() {
                   </td>
                   <td className="px-4 py-4">
                     {item.status === "done" && (
-                      <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
-                        className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors">
-                        Download →
-                      </a>
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/analyze/${item.id}`)}
+                          className="text-cyan-400 hover:text-cyan-300 text-xs font-medium transition-colors"
+                        >
+                          Open →
+                        </button>
+                        <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
+                          className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors">
+                          Download →
+                        </a>
+                      </div>
                     )}
                   </td>
                 </tr>
               ))}
               {!loading && items.length === 0 && !error && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-10 text-center text-white/20 text-sm">
+                  <td colSpan={9} className="px-6 py-10 text-center text-white/20 text-sm">
                     No analyses yet — run one from the Analyze page.
                   </td>
                 </tr>

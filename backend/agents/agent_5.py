@@ -23,8 +23,7 @@ free-form LLM prose to validate against a reference or rank candidates of.
 import math
 import os
 from pathlib import Path
-
-from sklearn.metrics import cohen_kappa_score
+from collections import Counter
 
 from agents.agent_1 import GraphState
 from agents.agent_2 import _infer_intended_types
@@ -55,6 +54,24 @@ MAX_VALIDATION_FAIL_PCT = 15.0   # business-rule failure tolerance
 def _verbose_logging_enabled():
     val = os.getenv("PIPELINE_VERBOSE", "0").strip().lower()
     return val in {"1", "true", "yes", "on"}
+
+
+def _cohen_kappa_score(rater_a: list[str], rater_b: list[str]) -> float:
+    """Pure-Python Cohen's kappa so the validator does not depend on sklearn."""
+    if len(rater_a) != len(rater_b):
+        raise ValueError("Raters must have the same number of labels")
+    if not rater_a:
+        return 1.0
+
+    n = len(rater_a)
+    observed = sum(a == b for a, b in zip(rater_a, rater_b)) / n
+    counts_a = Counter(rater_a)
+    counts_b = Counter(rater_b)
+    expected = sum((counts_a[label] / n) * (counts_b[label] / n) for label in set(counts_a) | set(counts_b))
+
+    if expected >= 1.0:
+        return 1.0
+    return (observed - expected) / (1.0 - expected)
 
 
 class ValidationLedger:
@@ -257,7 +274,7 @@ def _validate_semantic_tagging_agreement(state, ledger):
         if len(set(rater_heuristic + rater_llm)) < 2:
             kappa = 1.0  # both raters used a single class throughout -> trivial agreement
         else:
-            kappa = float(cohen_kappa_score(rater_heuristic, rater_llm))
+            kappa = float(_cohen_kappa_score(rater_heuristic, rater_llm))
     except Exception as e:
         ledger.record("semantic_tagging_agreement", False, f"kappa computation failed: {e}", severity="warning")
         return result

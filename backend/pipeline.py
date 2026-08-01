@@ -156,6 +156,7 @@ if __name__ == "__main__":
         "cleaned_csv_path":      "",
         "scaling_params":        {},
         "preprocessing_log":     [],
+        "analysis_config":       {},
         "preprocessing_config":  {},
         "preprocessing_profile": "",
         "dataset_domain":        "",

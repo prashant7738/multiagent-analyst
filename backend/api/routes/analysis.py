@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from api.config import Settings, get_settings
@@ -29,6 +30,28 @@ def _validate_upload(file: UploadFile, settings: Settings) -> None:
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported file type '{suffix}'. Allowed: {sorted(settings.allowed_extensions)}",
         )
+
+
+def _parse_analysis_config(preprocessing_profile: str, raw_config: str | None) -> dict[str, object]:
+    runtime_config: dict[str, object] = {
+        "preprocessing_profile": preprocessing_profile.strip() or "balanced",
+        "preprocessing_config": {},
+    }
+
+    if not raw_config:
+        return runtime_config
+
+    try:
+        parsed = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="analysis_config must be valid JSON.",
+        ) from exc
+
+    if isinstance(parsed, dict):
+        runtime_config["preprocessing_config"] = parsed
+    return runtime_config
 
 
 async def _persist_upload(file: UploadFile, dest: Path, max_bytes: int) -> None:
@@ -59,6 +82,8 @@ async def _persist_upload(file: UploadFile, dest: Path, max_bytes: int) -> None:
 @router.post("", response_model=AnalyzeResponse, status_code=status.HTTP_202_ACCEPTED)
 async def analyze(
     file: UploadFile = File(...),
+    preprocessing_profile: str = Form("balanced"),
+    analysis_config: str | None = Form(None),
     settings: Settings = Depends(get_settings),
     manager: JobManager = Depends(get_job_manager),
 ) -> AnalyzeResponse:
@@ -68,8 +93,9 @@ async def analyze(
     stream to follow progress.
     """
     _validate_upload(file, settings)
+    runtime_config = _parse_analysis_config(preprocessing_profile, analysis_config)
 
-    job = manager.create_job(filename=file.filename)
+    job = manager.create_job(filename=file.filename, analysis_config=runtime_config)
     dest = settings.uploads_dir / f"{job.job_id}.csv"
 
     try:
@@ -86,7 +112,7 @@ async def analyze(
         ) from exc
 
     job.csv_path = str(dest)
-    start_pipeline_job(manager, job.job_id, str(dest))
+    start_pipeline_job(manager, job.job_id, str(dest), runtime_config)
 
     logger.info("Accepted job %s (file=%s)", job.job_id, file.filename)
     return AnalyzeResponse(

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import AppNavbar from "@/components/AppNavbar";
-import { analyzeCsv, subscribeToJobStream, fetchJobResult, reportDownloadUrl } from "@/lib/api";
+import DatasetChat from "@/components/DatasetChat";
+import { analyzeCsv, subscribeToJobStream, fetchJob, fetchJobResult, reportDownloadUrl } from "@/lib/api";
 
 // ─── Agent definitions ────────────────────────────────────────────────────────
 const AGENTS = [
@@ -55,6 +56,40 @@ const STATUS = { PENDING: "pending", RUNNING: "running", DONE: "done", ERROR: "e
 const agentIdFromLabel = (label) => Number((/\d+/.exec(label || "") || [])[0]);
 
 const DATA_TYPES = ["Sales Records", "Transaction Logs", "Expense Sheets", "Financial Statements", "Inventory Data", "Revenue Reports"];
+const PREPROCESSING_PROFILES = [
+  { value: "strict", label: "Strict", description: "Best for messy finance or sales exports." },
+  { value: "balanced", label: "Balanced", description: "Default mix of safety and flexibility." },
+  { value: "lenient", label: "Lenient", description: "Keeps more data when sources are noisy." },
+];
+
+const DEFAULT_RUN_CONFIG = {
+  preprocessingProfile: "balanced",
+  currencyMaxAbsValue: "1000000000",
+  knnImputerNeighbors: "5",
+  reconciliationAbsTol: "1.0",
+};
+
+const toNumberOrNull = (value) => {
+  if (value === "" || value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildAnalysisConfig = (config) => {
+  const preprocessingConfig = {};
+  const currencyMaxAbsValue = toNumberOrNull(config.currencyMaxAbsValue);
+  const knnImputerNeighbors = toNumberOrNull(config.knnImputerNeighbors);
+  const reconciliationAbsTol = toNumberOrNull(config.reconciliationAbsTol);
+
+  if (currencyMaxAbsValue != null) preprocessingConfig.currency_max_abs_value = currencyMaxAbsValue;
+  if (knnImputerNeighbors != null) preprocessingConfig.knn_imputer_neighbors = knnImputerNeighbors;
+  if (reconciliationAbsTol != null) preprocessingConfig.reconciliation_abs_tol = reconciliationAbsTol;
+
+  return {
+    preprocessingProfile: config.preprocessingProfile || "balanced",
+    preprocessingConfig,
+  };
+};
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 function AgentCard({ agent, index, total }) {
@@ -159,11 +194,15 @@ function AgentCard({ agent, index, total }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function AnalyzePage() {
   const navigate = useNavigate();
+  const { jobId: routeJobId } = useParams();
   const fileInputRef = useRef(null);
 
   const [file, setFile] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState("upload"); // upload | running | done | error
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [loadedJobName, setLoadedJobName] = useState(null);
+  const [runConfig, setRunConfig] = useState({ ...DEFAULT_RUN_CONFIG });
   const [agentStates, setAgentStates] = useState(
     AGENTS.map((a) => ({ ...a, status: STATUS.PENDING, duration: null, summary: null }))
   );
@@ -184,6 +223,45 @@ export default function AnalyzePage() {
   };
 
   useEffect(() => () => closeStream(), []); // cleanup on unmount
+
+  useEffect(() => {
+    if (!routeJobId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setHistoryLoading(true);
+      setErrorMessage(null);
+      setResult(null);
+      setPhase("upload");
+      setFile(null);
+      setLoadedJobName(null);
+      closeStream();
+
+      try {
+        const [job, data] = await Promise.all([fetchJob(routeJobId), fetchJobResult(routeJobId)]);
+        if (cancelled) return;
+
+        setJobId(routeJobId);
+        setLoadedJobName(job?.filename || "historical analysis");
+        setResult(data);
+        setAgentStates(AGENTS.map((a) => ({ ...a, status: STATUS.DONE, duration: null, summary: null })));
+        setElapsedTotal(0);
+        runStatusRef.current = "done";
+        setPhase("done");
+      } catch (err) {
+        if (cancelled) return;
+        setErrorMessage(err.message || "Failed to load the saved analysis.");
+        setPhase("error");
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeJobId]);
 
   const acceptFile = (f) => { if (f && f.name.endsWith(".csv")) setFile(f); };
 
@@ -270,7 +348,8 @@ export default function AnalyzePage() {
     timerRef.current = setInterval(() => setElapsedTotal(Math.floor((Date.now() - startTime) / 1000)), 1000);
 
     try {
-      const { job_id, stream_url } = await analyzeCsv(file);
+      const analysisConfig = buildAnalysisConfig(runConfig);
+      const { job_id, stream_url } = await analyzeCsv(file, analysisConfig);
       setJobId(job_id);
       eventSourceRef.current = subscribeToJobStream(stream_url, {
         onEvent: (name, data) => handleStreamEvent(job_id, name, data),
@@ -290,6 +369,9 @@ export default function AnalyzePage() {
     closeStream();
     setFile(null); setPhase("upload"); setElapsedTotal(0);
     setJobId(null); setResult(null); setErrorMessage(null);
+    setLoadedJobName(null);
+    setHistoryLoading(false);
+    navigate("/analyze");
     setAgentStates(AGENTS.map(a => ({ ...a, status: STATUS.PENDING, duration: null, summary: null })));
   };
 
@@ -307,7 +389,7 @@ export default function AnalyzePage() {
       <AppNavbar />
 
       {/* ── Upload ─────────────────────────────────────────── */}
-      {phase === "upload" && (
+      {phase === "upload" && !routeJobId && (
         <div className="relative z-10 flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] py-16">
           <div className="w-full max-w-3xl mx-auto px-6 flex flex-col items-center gap-10">
             <div className="text-center">
@@ -322,6 +404,87 @@ export default function AnalyzePage() {
               <p className="mt-4 text-white/40 text-base max-w-lg mx-auto leading-relaxed">
                 Upload a CSV file. Six specialized AI agents will profile, clean, visualize, and compile a full analytical report end-to-end.
               </p>
+            </div>
+
+            <div className="w-full rounded-3xl border border-white/8 bg-white/2 backdrop-blur-sm p-5 shadow-[0_0_40px_rgba(139,92,246,0.08)]">
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+                <div>
+                  <h2 className="text-white font-semibold text-sm uppercase tracking-[0.18em]">Run settings</h2>
+                  <p className="text-white/30 text-xs mt-1">These settings are saved with the job and passed to Agent 3.</p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full border border-cyan-500/20 bg-cyan-500/8 text-cyan-300 text-[10px] font-mono uppercase tracking-[0.18em]">
+                  configurable pipeline
+                </span>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <label className="flex flex-col gap-2">
+                  <span className="text-white/40 text-xs font-semibold uppercase tracking-widest">Preprocessing profile</span>
+                  <select
+                    value={runConfig.preprocessingProfile}
+                    onChange={(e) => setRunConfig((prev) => ({ ...prev, preprocessingProfile: e.target.value }))}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-pointer"
+                  >
+                    {PREPROCESSING_PROFILES.map((profile) => (
+                      <option key={profile.value} value={profile.value}>{profile.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-white/40 text-xs font-semibold uppercase tracking-widest">Currency max abs value</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000000"
+                    value={runConfig.currencyMaxAbsValue}
+                    onChange={(e) => setRunConfig((prev) => ({ ...prev, currencyMaxAbsValue: e.target.value }))}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-text"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-white/40 text-xs font-semibold uppercase tracking-widest">KNN imputer neighbors</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={runConfig.knnImputerNeighbors}
+                    onChange={(e) => setRunConfig((prev) => ({ ...prev, knnImputerNeighbors: e.target.value }))}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-text"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <span className="text-white/40 text-xs font-semibold uppercase tracking-widest">Reconciliation tolerance</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={runConfig.reconciliationAbsTol}
+                    onChange={(e) => setRunConfig((prev) => ({ ...prev, reconciliationAbsTol: e.target.value }))}
+                    className="bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-text"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {PREPROCESSING_PROFILES.map((profile) => (
+                  <button
+                    key={profile.value}
+                    type="button"
+                    onClick={() => setRunConfig((prev) => ({ ...prev, preprocessingProfile: profile.value }))}
+                    className={`px-3 py-2 rounded-xl border text-left transition-all cursor-pointer ${
+                      runConfig.preprocessingProfile === profile.value
+                        ? "border-violet-500/40 bg-violet-500/10 text-violet-200"
+                        : "border-white/8 bg-white/2 text-white/40 hover:text-white/70 hover:border-white/15"
+                    }`}
+                  >
+                    <div className="text-sm font-semibold">{profile.label}</div>
+                    <div className="text-[11px] mt-0.5 leading-snug max-w-[16rem]">{profile.description}</div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Drop zone */}
@@ -406,6 +569,15 @@ export default function AnalyzePage() {
         </div>
       )}
 
+      {routeJobId && historyLoading && (
+        <div className="relative z-10 flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] py-16 px-6 text-center">
+          <div className="rounded-3xl border border-white/8 bg-white/2 px-8 py-10 max-w-md">
+            <div className="text-white/80 text-lg font-semibold">Loading saved analysis…</div>
+            <p className="mt-2 text-white/35 text-sm">Restoring the stored result and chat transcript for this past run.</p>
+          </div>
+        </div>
+      )}
+
       {/* ── Running / Done / Error ────────────────────────── */}
       {(phase === "running" || phase === "done" || phase === "error") && (
         <div className="relative z-10 max-w-3xl mx-auto px-6 py-10">
@@ -429,7 +601,9 @@ export default function AnalyzePage() {
                 <h1 className="text-3xl font-black text-white tracking-tight">
                   {phase === "done" ? "Analysis Complete" : phase === "error" ? "Analysis Failed" : "Analysis in Progress"}
                 </h1>
-                <p className="text-white/35 text-sm mt-1">{file?.name} · {(file?.size / 1024).toFixed(1)} KB</p>
+                <p className="text-white/35 text-sm mt-1">
+                  {routeJobId ? (loadedJobName ? `${loadedJobName} · restored from history` : "Saved analysis") : `${file?.name} · ${(file?.size / 1024).toFixed(1)} KB`}
+                </p>
               </div>
               {phase === "error" && (
                 <div className="flex gap-2 shrink-0 mt-1">
@@ -441,9 +615,9 @@ export default function AnalyzePage() {
               )}
               {phase === "done" && (
                 <div className="flex gap-2 shrink-0 mt-1">
-                  <button onClick={reset}
+                  <button onClick={routeJobId ? () => navigate("/history") : reset}
                     className="px-4 py-2 rounded-full border border-white/10 hover:border-white/25 text-white/50 hover:text-white text-sm transition-all cursor-pointer">
-                    ← New
+                    {routeJobId ? "← Back to history" : "← New"}
                   </button>
                   {result?.report?.available && (
                     <a href={reportDownloadUrl(jobId)} target="_blank" rel="noreferrer"
@@ -497,6 +671,12 @@ export default function AnalyzePage() {
                   ))}
                 </div>
                 <div className="flex gap-2 sm:ml-auto shrink-0">
+                  {routeJobId ? (
+                    <button onClick={() => navigate("/history")}
+                      className="px-6 py-3 rounded-full border border-white/10 hover:border-white/25 text-white/50 hover:text-white font-semibold text-sm transition-all cursor-pointer">
+                      Back to history
+                    </button>
+                  ) : null}
                   {result?.report?.available ? (
                     <a href={reportDownloadUrl(jobId)} target="_blank" rel="noreferrer"
                       className="px-6 py-3 rounded-full bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-all cursor-pointer shadow-[0_0_24px_rgba(139,92,246,0.4)] hover:shadow-[0_0_32px_rgba(139,92,246,0.6)]">
@@ -509,6 +689,163 @@ export default function AnalyzePage() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {phase === "done" && result && (
+            <div className="mt-6 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-3xl border border-white/8 bg-white/2 p-6">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-white font-semibold text-lg">Run configuration</h2>
+                    <p className="text-white/30 text-sm">The exact settings used for this job.</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full border border-violet-500/20 bg-violet-500/8 text-violet-300 text-[10px] font-mono uppercase tracking-[0.18em]">
+                    persisted
+                  </span>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Profile</div>
+                    <div className="text-white mt-1 font-semibold">{result.summary?.preprocessing_profile || "balanced"}</div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Currency cap</div>
+                    <div className="text-white mt-1 font-semibold">
+                      {result.summary?.analysis_config?.preprocessing_config?.currency_max_abs_value != null
+                        ? result.summary.analysis_config.preprocessing_config.currency_max_abs_value.toLocaleString()
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">KNN neighbors</div>
+                    <div className="text-white mt-1 font-semibold">
+                      {result.summary?.analysis_config?.preprocessing_config?.knn_imputer_neighbors ?? "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Tolerance</div>
+                    <div className="text-white mt-1 font-semibold">
+                      {result.summary?.analysis_config?.preprocessing_config?.reconciliation_abs_tol ?? "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/8 bg-white/2 p-6">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-white font-semibold text-lg">Trust signals</h2>
+                    <p className="text-white/30 text-sm">Quality, validation, and readiness at a glance.</p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono uppercase tracking-[0.18em] ${
+                    result.reliability?.decision_readiness === "ready"
+                      ? "border border-emerald-500/20 bg-emerald-500/8 text-emerald-300"
+                      : "border border-amber-500/20 bg-amber-500/8 text-amber-300"
+                  }`}>
+                    {result.reliability?.decision_readiness || "unknown"}
+                  </span>
+                </div>
+                <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Quality score</div>
+                    <div className="text-violet-300 mt-1 font-black text-xl">
+                      {result.data_quality?.overall_quality_score != null ? `${Math.round(result.data_quality.overall_quality_score)}%` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Validation</div>
+                    <div className="text-cyan-300 mt-1 font-black text-xl">
+                      {result.validation?.overall_validation_score != null ? `${Math.round(result.validation.overall_validation_score)}/100` : "—"}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="text-white/30 text-xs uppercase tracking-widest">Confidence</div>
+                    <div className="text-emerald-300 mt-1 font-black text-xl">
+                      {result.reliability?.overall_confidence != null ? `${Math.round(result.reliability.overall_confidence * 100)}%` : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/8 bg-white/2 p-6 lg:col-span-2">
+                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                  <div>
+                    <h2 className="text-white font-semibold text-lg">Executive summary</h2>
+                    <p className="text-white/30 text-sm">Narrative and key findings produced by Agent 6.</p>
+                  </div>
+                  {result.report?.available && (
+                    <a href={reportDownloadUrl(jobId)} target="_blank" rel="noreferrer"
+                      className="px-4 py-2 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors cursor-pointer shadow-[0_0_16px_rgba(139,92,246,0.35)]">
+                      Open report
+                    </a>
+                  )}
+                </div>
+                <p className="text-white/75 text-sm leading-relaxed max-w-4xl">
+                  {result.insight_narrative?.executive_summary || "No executive summary was returned by the report agent."}
+                </p>
+                {Array.isArray(result.insight_narrative?.key_findings) && result.insight_narrative.key_findings.length > 0 && (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {result.insight_narrative.key_findings.slice(0, 4).map((finding, index) => (
+                      <div key={`${index}-${finding}`} className="rounded-2xl border border-white/8 bg-black/20 p-4 text-sm text-white/70">
+                        <span className="text-violet-300 font-semibold mr-2">#{index + 1}</span>
+                        {finding}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-3xl border border-white/8 bg-white/2 p-6">
+                <div className="mb-4">
+                  <h2 className="text-white font-semibold text-lg">Charts</h2>
+                  <p className="text-white/30 text-sm">Generated visual evidence for the analysis.</p>
+                </div>
+                <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                  {(result.charts || []).length > 0 ? (
+                    result.charts.map((chart, index) => (
+                      <a key={chart?.url || index} href={chart?.url || chart} target="_blank" rel="noreferrer"
+                        className="flex items-center justify-between rounded-2xl border border-white/8 bg-black/20 px-4 py-3 text-sm text-white/70 hover:border-violet-500/30 hover:text-white transition-colors">
+                        <span>Chart {index + 1}</span>
+                        <span className="text-violet-300">Open →</span>
+                      </a>
+                    ))
+                  ) : (
+                    <p className="text-white/30 text-sm">No charts were generated for this run.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/8 bg-white/2 p-6">
+                <div className="mb-4">
+                  <h2 className="text-white font-semibold text-lg">Schema snapshot</h2>
+                  <p className="text-white/30 text-sm">A quick preview of the tagged columns.</p>
+                </div>
+                <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                  {Object.entries(result.schema_blueprint || {}).slice(0, 6).map(([columnName, meta]) => (
+                    <div key={columnName} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-white text-sm font-medium truncate">{columnName}</div>
+                        <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-cyan-300">
+                          {meta?.semantic_tag || "unknown"}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-white/35 text-xs">
+                        {meta?.intended_type || "—"} · {meta?.analysis_allowed === false ? "analysis blocked" : "analysis allowed"}
+                      </div>
+                    </div>
+                  ))}
+                  {Object.keys(result.schema_blueprint || {}).length === 0 && (
+                    <p className="text-white/30 text-sm">Schema details were not returned.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === "done" && result && jobId && (
+            <div className="mt-4">
+              <DatasetChat jobId={jobId} />
             </div>
           )}
 

@@ -133,6 +133,65 @@ def _find_revenue_col(df, schema_blueprint):
     keywords = ["total_sales", "revenue", "net_sales", "total_amount", "income", "sales"]
     return _find_col(df, keywords, schema_blueprint)
 
+
+def _datetime_cols(df, schema_blueprint):
+    cols = []
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns:
+            continue
+        if meta.get("semantic_tag") == "datetime" or meta.get("intended_type") == "datetime":
+            cols.append(col)
+    return cols
+
+
+def _build_chart_plan(df, schema_blueprint):
+    numeric_cols = _numeric_cols(df, schema_blueprint)
+    categorical_cols = _categorical_cols(df, schema_blueprint)
+    datetime_cols = _datetime_cols(df, schema_blueprint)
+    revenue_col = _find_revenue_col(df, schema_blueprint)
+    derived_cols = [c for c in df.columns if c.startswith("derived_") and pd.api.types.is_numeric_dtype(df[c])]
+
+    time_axis_cols = [c for c in df.columns if c.endswith(("_year", "_month", 
+        "_quarter", "_day", "_day_of_week", "_is_weekend", "_week_of_year"))]
+    has_time_axis = bool(datetime_cols or time_axis_cols)
+
+    if revenue_col and has_time_axis and categorical_cols:
+        dataset_type = "sales_timeseries"
+    elif revenue_col and categorical_cols:
+        dataset_type = "sales_categorical"
+    elif has_time_axis and numeric_cols:
+        dataset_type = "time_series"
+    elif categorical_cols and numeric_cols:
+        dataset_type = "mixed_analytics"
+    elif numeric_cols:
+        dataset_type = "numeric_table"
+    elif categorical_cols:
+        dataset_type = "categorical_table"
+    else:
+        dataset_type = "general_table"
+
+    return {
+        "dataset_type": dataset_type,
+        "numeric_columns": numeric_cols,
+        "categorical_columns": categorical_cols,
+        "datetime_columns": datetime_cols,
+        "revenue_column": revenue_col,
+        "derived_columns": derived_cols,
+        "has_time_axis": has_time_axis,
+        "chart_families": {
+            "descriptive": True,
+            "correlation": len(numeric_cols) >= 2,
+            "growth_rates": bool(revenue_col and has_time_axis),
+            "top_bottom": bool(revenue_col and categorical_cols),
+            "seasonality": bool(revenue_col and has_time_axis),
+            "anomalies": len(numeric_cols) >= 1,
+            "distributions": len(categorical_cols) >= 1,
+            "regression": bool(revenue_col and has_time_axis),
+            "distribution_charts": len(numeric_cols) >= 1,
+            "derived_metrics": len(derived_cols) >= 1,
+        },
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1 — DESCRIPTIVE STATISTICS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -764,65 +823,117 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
 
+    chart_plan = _build_chart_plan(df, schema_blueprint)
+    print(
+        f"[Agent 4] Dataset type: {chart_plan['dataset_type']} | "
+        f"numeric={len(chart_plan['numeric_columns'])} | "
+        f"categorical={len(chart_plan['categorical_columns'])} | "
+        f"time_axis={chart_plan['has_time_axis']}"
+    )
+
     all_chart_paths = []
     stats = {}
+    stats["chart_plan"] = chart_plan
 
     stats["descriptive"] = _descriptive_stats(df, schema_blueprint)
     print(f"[Agent 4] Step 1 — Descriptive stats: {len(stats['descriptive'])} columns")
 
-    stats["correlation"], corr_path = _correlation(df, schema_blueprint)
-    if corr_path:
-        all_chart_paths.append(corr_path)
-    print(f"[Agent 4] Step 2 — Correlation done, strong pairs: {len(stats['correlation'].get('strong_pairs', []))}")
-
-    stats["growth_rates"], paths = _growth_rates(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    if stats["growth_rates"] or paths:
-        print(f"[Agent 4] Step 3 — Growth rates done ({len(paths)} charts)")
+    if chart_plan["chart_families"]["correlation"]:
+        stats["correlation"], corr_path = _correlation(df, schema_blueprint)
+        if corr_path:
+            all_chart_paths.append(corr_path)
+        print(f"[Agent 4] Step 2 — Correlation done, strong pairs: {len(stats['correlation'].get('strong_pairs', []))}")
     else:
+        stats["correlation"] = {}
+        print("[Agent 4] Step 2 — Correlation skipped (fewer than 2 numeric columns)")
+
+    if chart_plan["chart_families"]["growth_rates"]:
+        stats["growth_rates"], paths = _growth_rates(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        if stats["growth_rates"] or paths:
+            print(f"[Agent 4] Step 3 — Growth rates done ({len(paths)} charts)")
+        else:
+            print("[Agent 4] Step 3 — Growth rates skipped (no usable revenue/time axis after filtering)")
+    else:
+        stats["growth_rates"] = {}
         print("[Agent 4] Step 3 — Growth rates skipped (no revenue/time axis)")
 
-    stats["top_bottom"], paths = _top_bottom_rankings(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    if stats["top_bottom"] or paths:
-        print(f"[Agent 4] Step 4 — Rankings done ({len(paths)} charts)")
+    if chart_plan["chart_families"]["top_bottom"]:
+        stats["top_bottom"], paths = _top_bottom_rankings(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        if stats["top_bottom"] or paths:
+            print(f"[Agent 4] Step 4 — Rankings done ({len(paths)} charts)")
+        else:
+            print("[Agent 4] Step 4 — Rankings skipped (no usable categorical ranking columns)")
     else:
+        stats["top_bottom"] = {}
         print("[Agent 4] Step 4 — Rankings skipped (no revenue/category pairing)")
 
-    stats["seasonality"], paths = _seasonality(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    if stats["seasonality"] or paths:
-        print(f"[Agent 4] Step 5 — Seasonality done ({len(paths)} charts)")
+    if chart_plan["chart_families"]["seasonality"]:
+        stats["seasonality"], paths = _seasonality(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        if stats["seasonality"] or paths:
+            print(f"[Agent 4] Step 5 — Seasonality done ({len(paths)} charts)")
+        else:
+            print("[Agent 4] Step 5 — Seasonality skipped (no usable time axis after filtering)")
     else:
+        stats["seasonality"] = {}
         print("[Agent 4] Step 5 — Seasonality skipped (no time axis)")
 
-    stats["anomalies"], anomaly_summary = _detect_anomalies(df, schema_blueprint)
-    stats["anomaly_summary"] = anomaly_summary
-    print(
-        f"[Agent 4] Step 6 — Anomalies: {anomaly_summary['unique_flagged_rows']} unique rows "
-        f"({anomaly_summary['unique_flagged_row_pct']}%) across {anomaly_summary['flagged_columns']} columns"
-    )
-
-    stats["distributions"], paths = _category_distributions(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 7 — Distributions done ({len(paths)} charts)")
-
-    stats["regression"], paths = _regression_trends(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    if stats["regression"] or paths:
-        print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(paths)} charts)")
+    if chart_plan["chart_families"]["anomalies"]:
+        stats["anomalies"], anomaly_summary = _detect_anomalies(df, schema_blueprint)
+        stats["anomaly_summary"] = anomaly_summary
+        print(
+            f"[Agent 4] Step 6 — Anomalies: {anomaly_summary['unique_flagged_rows']} unique rows "
+            f"({anomaly_summary['unique_flagged_row_pct']}%) across {anomaly_summary['flagged_columns']} columns"
+        )
     else:
+        stats["anomalies"] = {}
+        stats["anomaly_summary"] = {
+            "z_threshold": ANOMALY_Z_THRESHOLD,
+            "flagged_columns": 0,
+            "total_flagged_values": 0,
+            "unique_flagged_rows": 0,
+            "unique_flagged_row_pct": 0.0,
+        }
+        print("[Agent 4] Step 6 — Anomalies skipped (no numeric columns)")
+
+    if chart_plan["chart_families"]["distributions"]:
+        stats["distributions"], paths = _category_distributions(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        print(f"[Agent 4] Step 7 — Distributions done ({len(paths)} charts)")
+    else:
+        stats["distributions"] = {}
+        print("[Agent 4] Step 7 — Distributions skipped (no categorical columns)")
+
+    if chart_plan["chart_families"]["regression"]:
+        stats["regression"], paths = _regression_trends(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        if stats["regression"] or paths:
+            print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(paths)} charts)")
+        else:
+            print("[Agent 4] Step 8 — Regression skipped (no usable time axis after filtering)")
+    else:
+        stats["regression"] = {}
         print("[Agent 4] Step 8 — Regression skipped (no time axis)")
 
-    paths = _distribution_charts(df, schema_blueprint)
-    all_chart_paths.extend(paths)
-    print(f"[Agent 4] Step 9 — Distribution charts done ({len(paths)} charts)")
-
-    paths = _derived_metrics_charts(df)
-    all_chart_paths.extend(paths)
-    if paths:
-        print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(paths)} charts)")
+    if chart_plan["chart_families"]["distribution_charts"]:
+        paths = _distribution_charts(df, schema_blueprint)
+        all_chart_paths.extend(paths)
+        print(f"[Agent 4] Step 9 — Distribution charts done ({len(paths)} charts)")
     else:
+        paths = []
+        print("[Agent 4] Step 9 — Distribution charts skipped (no numeric columns)")
+
+    if chart_plan["chart_families"]["derived_metrics"]:
+        paths = _derived_metrics_charts(df)
+        all_chart_paths.extend(paths)
+        if paths:
+            print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(paths)} charts)")
+        else:
+            print("[Agent 4] Step 10 — Derived metrics skipped (derived columns present but no useful chart pairing)")
+    else:
+        paths = []
         print("[Agent 4] Step 10 — Derived metrics skipped (no derived metrics)")
 
     print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")

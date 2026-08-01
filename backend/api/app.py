@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 # NOTE: importing api.config first performs the sys.path / cwd bootstrap.
 from api.config import Settings, get_settings
 from api.middleware.cors import configure_cors
-from api.routes import analysis, auth, health, jobs, reports
+from api.routes import analysis, auth, chat, health, jobs, reports
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis.router)
     app.include_router(reports.router)
     app.include_router(jobs.router)
+    app.include_router(chat.router)
 
     # ── Global exception handlers — never crash, always JSON ─────────────
     @app.exception_handler(RequestValidationError)

@@ -85,6 +85,7 @@ class JobSummary(BaseModel):
     job_id: str
     status: JobStatus
     filename: str | None = None
+    analysis_config: dict[str, Any] = Field(default_factory=dict)
     progress: dict[str, str] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -152,6 +153,28 @@ class AnalysisResult(BaseModel):
     insight_narrative: dict[str, Any] = Field(default_factory=dict)
 
     errors: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Dataset chat — per-job Q&A grounded in the analysis result
+# ---------------------------------------------------------------------------
+class ChatAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+    chart: dict[str, str] | None = None
+    ts: datetime | None = None
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    source: str  # "groq" | "gemini" | "fallback"
+    chart: dict[str, str] | None = None
+    chart_generated: bool = False
+    history: list[ChatMessage] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):

@@ -65,7 +65,7 @@ export default function AppNavbar() {
               </button>
               <button onClick={() => navigate("/analyze")}
                 className="px-4 py-2 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors duration-200 cursor-pointer shadow-[0_0_14px_rgba(139,92,246,0.4)] whitespace-nowrap">
-                Analyze ?
+                Analyze →
               </button>
             </>
           ) : (

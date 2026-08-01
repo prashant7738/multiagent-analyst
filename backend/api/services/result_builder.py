@@ -42,6 +42,7 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
     """Project a final GraphState into the API result contract."""
     state = state or {}
 
+    analysis_config = state.get("analysis_config", {}) or {}
     raw_profile = state.get("raw_profile", {}) or {}
     schema_blueprint = state.get("schema_blueprint", {}) or {}
     data_quality = state.get("data_quality", {}) or {}
@@ -92,6 +93,8 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
     cleaned_df = state.get("cleaned_df")
     summary = {
         "filename": filename,
+        "preprocessing_profile": state.get("preprocessing_profile") or analysis_config.get("preprocessing_profile"),
+        "analysis_config": analysis_config,
         "rows": shape.get("rows"),
         "columns": shape.get("cols"),
         "overall_missing_rate_pct": raw_profile.get("overall_missing_rate_pct"),
@@ -122,6 +125,7 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
         "reliability": reliability_out,
         "report": report,
         "insight_narrative": insight_narrative,
+        "analysis_config": analysis_config,
         "errors": errors,
     }
 

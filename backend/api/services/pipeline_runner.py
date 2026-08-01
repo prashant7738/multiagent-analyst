@@ -48,8 +48,9 @@ def _get_pipeline():
     return build_pipeline()
 
 
-def _initial_state(csv_path: str) -> dict[str, Any]:
+def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Construct the GraphState seed exactly as pipeline.py does."""
+    runtime_config = dict(runtime_config or {})
     return {
         "csv_path": csv_path,
         "raw_profile": {},
@@ -59,8 +60,9 @@ def _initial_state(csv_path: str) -> dict[str, Any]:
         "cleaned_csv_path": "",
         "scaling_params": {},
         "preprocessing_log": [],
-        "preprocessing_config": {},
-        "preprocessing_profile": "",
+        "analysis_config": runtime_config,
+        "preprocessing_config": runtime_config.get("preprocessing_config", {}) or {},
+        "preprocessing_profile": runtime_config.get("preprocessing_profile", "") or "",
         "dataset_domain": "",
         "data_quality": {},
         "column_ledger": {},
@@ -150,7 +152,7 @@ class _MilestoneEmitter:
                            detail={"report_path": state.get("report_path")})
 
 
-def _run(manager: JobManager, job_id: str, csv_path: str) -> None:
+def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[str, Any] | None = None) -> None:
     """Blocking pipeline execution — intended to run inside a daemon thread."""
     emitter = _MilestoneEmitter(manager, job_id)
     try:
@@ -162,7 +164,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str) -> None:
         pipeline = _get_pipeline()
         emitter.agent_running("agent1")
 
-        final_state: dict[str, Any] = _initial_state(csv_path)
+        final_state: dict[str, Any] = _initial_state(csv_path, runtime_config)
         for snapshot in pipeline.stream(final_state, stream_mode="values"):
             final_state = snapshot
             emitter.observe(snapshot)
@@ -207,12 +209,17 @@ def _run(manager: JobManager, job_id: str, csv_path: str) -> None:
         manager.mark_finished(job_id)
 
 
-def start_pipeline_job(manager: JobManager, job_id: str, csv_path: str) -> threading.Thread:
+def start_pipeline_job(
+    manager: JobManager,
+    job_id: str,
+    csv_path: str,
+    runtime_config: dict[str, Any] | None = None,
+) -> threading.Thread:
     """Launch the pipeline for ``job_id`` in a background daemon thread."""
     get_settings()  # ensure config/dirs are ready
     thread = threading.Thread(
         target=_run,
-        args=(manager, job_id, csv_path),
+        args=(manager, job_id, csv_path, runtime_config),
         name=f"pipeline-{job_id[:8]}",
         daemon=True,
     )

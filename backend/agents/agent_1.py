@@ -1,11 +1,11 @@
 # agents/agent_1  -- --- ----structural_profiler.py
 import csv
 import os
+import json
 from io import StringIO
 
 import numpy as np
 import pandas as pd
-import json
 from main import GraphState, update_reliability
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def _detect_implicit_missingness(df: pd.DataFrame) -> dict:
                 count = int((series == sentinel).sum())
                 if count > 0:
                     flags.append({"sentinel": float(sentinel), "count": count})
-        elif series.dtype == object or str(series.dtype) == "string":
+        elif pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
             lower_vals = series.dropna().astype(str).str.lower().str.strip()
             for pattern in _TEXT_NULL_PATTERNS:
                 count = int((lower_vals == pattern).sum())
@@ -155,6 +155,39 @@ def _detect_column_relationships(df: pd.DataFrame, profiles: dict) -> dict:
         "suspicious_duplicates": suspicious_duplicates,
         "numeric_correlations": numeric_correlations,
     }
+
+
+def _analyze_parseability(series: pd.Series) -> dict:
+    """Estimate how much text in a column can be parsed as a datetime value."""
+    if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return {"datetime_pct": 0.0}
+
+    values = series.dropna().astype(str).str.strip()
+    if values.empty:
+        return {"datetime_pct": 0.0}
+
+    parsed = pd.to_datetime(values, errors="coerce", format="mixed")
+    datetime_pct = float(parsed.notna().sum()) / max(len(values), 1) * 100
+    return {"datetime_pct": round(datetime_pct, 2)}
+
+
+def _analyze_format_hints(series: pd.Series, column_name: str) -> dict:
+    """Infer a few lightweight format hints that downstream agents can use."""
+    if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+        return {}
+
+    samples = [str(value).strip() for value in series.dropna().head(10).tolist()]
+    lowered_name = column_name.lower()
+    hints: dict[str, bool] = {}
+
+    if any(symbol in sample for sample in samples for symbol in ("$", "€", "£", "¥", "₹")):
+        hints["currency_like"] = True
+    if "date" in lowered_name or "time" in lowered_name or any("-" in sample and len(sample) >= 8 for sample in samples):
+        hints["date_like"] = True
+    if lowered_name.endswith("_id") or lowered_name == "id" or lowered_name.startswith("id_"):
+        hints["identifier_like"] = True
+
+    return hints
 
 
 def _read_csv_lines(csv_path: str) -> list[str]:
@@ -287,21 +320,37 @@ def _read_json_file(file_path: str) -> pd.DataFrame:
     """
     # 1. JSON Lines (most common for large datasets)
     try:
-        df = pd.read_json(file_path, lines=True)
+        with open(file_path, "r", encoding="utf-8") as handle:
+            first_non_empty = next((line for line in handle if line.strip()), None)
+            if first_non_empty is not None and first_non_empty.lstrip().startswith("{"):
+                handle.seek(0)
+                records = [json.loads(line) for line in handle if line.strip()]
+                if records:
+                    return pd.DataFrame.from_records(records)
+    except (ValueError, TypeError):
+        pass
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+
+        if isinstance(data, list):
+            if data and all(isinstance(item, dict) for item in data):
+                return pd.DataFrame.from_records(data)
+            return pd.DataFrame(data)
+
+        if isinstance(data, dict):
+            return pd.DataFrame(data)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    # 2. Fallback to pandas inference for any remaining edge case.
+    try:
+        df = pd.read_json(file_path)
         if not df.empty:
             return df
     except (ValueError, TypeError):
         pass
-
-    # 2. Records / columns / pandas default
-    for orient in ("records", "columns", None):
-        try:
-            kwargs: dict = {} if orient is None else {"orient": orient}
-            df = pd.read_json(file_path, **kwargs)
-            if not df.empty:
-                return df
-        except (ValueError, TypeError):
-            continue
 
     raise ValueError(
         f"Unable to parse '{file_path}' as JSON. "
@@ -410,6 +459,8 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
             "sample_values": df[col].dropna().head(3).tolist(),
             "candidate_key_hint": candidate_key_hint,
             "outlier_analysis": outlier_analysis,
+            "parseability": _analyze_parseability(df[col]),
+            "format_hints": _analyze_format_hints(df[col], col),
         }
 
     duplicate_rows = int(df.duplicated().sum())

@@ -13,6 +13,7 @@ class GraphState(TypedDict):
     schema_blueprint: dict     # per-column semantic tags and metadata
 
     # ── Agent 3 outputs ───────────────────────────────────────────────────────
+    analysis_config: dict    # runtime run settings selected by the user
     preprocessing_config: dict # runtime thresholds and scoring weights for preprocessing
     preprocessing_profile: str # strict|balanced|lenient, or auto-selected profile
     dataset_domain: str        # inferred dataset domain for profile selection

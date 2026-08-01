@@ -33,11 +33,13 @@ class Job:
     job_id: str
     filename: str | None = None
     csv_path: str | None = None
+    analysis_config: dict[str, Any] = field(default_factory=dict)
     status: str = "queued"  # queued | processing | completed | failed
     progress: dict[str, str] = field(default_factory=dict)  # agent -> status
     events: list[dict[str, Any]] = field(default_factory=list)  # append-only log
     state: dict[str, Any] | None = None  # final GraphState (post-run)
     result: dict[str, Any] | None = None  # frontend-friendly analysis result
+    chat_history: list[dict[str, Any]] = field(default_factory=list)  # dataset Q&A transcript
     errors: list[str] = field(default_factory=list)
     error: str | None = None  # fatal error message, if any
     created_at: datetime = field(default_factory=_utcnow)
@@ -52,11 +54,13 @@ class Job:
             "job_id": self.job_id,
             "filename": self.filename,
             "csv_path": self.csv_path,
+            "analysis_config": json_safe(self.analysis_config),
             "status": self.status,
             "progress": json_safe(self.progress),
             "events": json_safe(self.events),
             "state": json_safe(self.state),
             "result": json_safe(self.result),
+            "chat_history": json_safe(self.chat_history),
             "errors": json_safe(self.errors),
             "error": self.error,
             "created_at": self.created_at,
@@ -77,11 +81,13 @@ class Job:
             job_id=str(record.get("job_id")),
             filename=record.get("filename"),
             csv_path=record.get("csv_path"),
+            analysis_config=dict(record.get("analysis_config") or {}),
             status=str(record.get("status", "queued")),
             progress=dict(record.get("progress") or {}),
             events=list(record.get("events") or []),
             state=record.get("state"),
             result=record.get("result"),
+            chat_history=list(record.get("chat_history") or []),
             errors=list(record.get("errors") or []),
             error=record.get("error"),
             created_at=_parse_dt(record.get("created_at")),
@@ -110,9 +116,19 @@ class JobManager:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-    def create_job(self, filename: str | None = None, csv_path: str | None = None) -> Job:
+    def create_job(
+        self,
+        filename: str | None = None,
+        csv_path: str | None = None,
+        analysis_config: dict[str, Any] | None = None,
+    ) -> Job:
         job_id = uuid.uuid4().hex
-        job = Job(job_id=job_id, filename=filename, csv_path=csv_path)
+        job = Job(
+            job_id=job_id,
+            filename=filename,
+            csv_path=csv_path,
+            analysis_config=dict(analysis_config or {}),
+        )
         with self._lock:
             self._jobs[job_id] = job
         self._persist(job)
@@ -209,6 +225,24 @@ class JobManager:
             job.condition.notify_all()
         self._persist(job)
 
+    def add_chat_messages(self, job_id: str, messages: list[dict[str, Any]]) -> Job | None:
+        """Append one or more chat turns (user/assistant) to the job's transcript."""
+        job = self.get_job(job_id)
+        if job is None:
+            return None
+        with job.condition:
+            for message in messages:
+                job.chat_history.append({"ts": _utcnow().isoformat(), **message})
+            job.updated_at = _utcnow()
+        self._persist(job)
+        return job
+
+    def get_chat_history(self, job_id: str) -> list[dict[str, Any]]:
+        job = self.get_job(job_id)
+        if job is None:
+            return []
+        return list(job.chat_history)
+
 
 # Process-wide singleton used via dependency injection.
 _job_manager: JobManager | None = None
@@ -228,5 +262,9 @@ def get_job_manager() -> JobManager:
                 schema=settings.postgres_schema,
                 table=settings.postgres_jobs_table,
             )
+        else:
+            from api.services.file_store import FileJobStore
+
+            store = FileJobStore(settings.outputs_dir / "analysis_jobs.json")
         _job_manager = JobManager(store)
     return _job_manager

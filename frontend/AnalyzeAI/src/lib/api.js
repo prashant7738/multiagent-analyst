@@ -62,9 +62,11 @@ export async function signupUser(payload) {
  * POST /api/analyze — upload a CSV and start a pipeline run.
  * Returns { job_id, status, filename, stream_url, result_url }.
  */
-export async function analyzeCsv(file) {
+export async function analyzeCsv(file, options = {}) {
   const form = new FormData();
   form.append("file", file);
+  form.append("preprocessing_profile", options.preprocessingProfile || "balanced");
+  form.append("analysis_config", JSON.stringify(options.preprocessingConfig || {}));
   const res = await fetch(apiUrl("/api/analyze"), { method: "POST", body: form });
   return parseJsonOrThrow(res);
 }
@@ -123,4 +125,18 @@ export async function fetchJobs() {
 export async function fetchJob(jobId) {
   const res = await fetch(apiUrl(`/api/jobs/${jobId}`));
   return parseJsonOrThrow(res);
+}
+
+/** GET /api/analyze/{job_id}/chat — returns the stored Q&A transcript for a job. */
+export async function fetchChatHistory(jobId) {
+  const res = await fetch(apiUrl(`/api/analyze/${jobId}/chat`));
+  return parseJsonOrThrow(res);
+}
+
+/**
+ * POST /api/analyze/{job_id}/chat — ask a question about the analyzed dataset.
+ * Returns { answer, source, chart, chart_generated, history }.
+ */
+export async function askDatasetQuestion(jobId, question) {
+  return postJson(`/api/analyze/${jobId}/chat`, { question });
 }

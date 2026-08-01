@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GlowBorderCard } from "@/components/ui/glow-border-card";
 import { AnimatedNumber } from "@/components/ui/animated-number";
@@ -6,13 +6,7 @@ import { FlipText } from "@/components/ui/flip-text";
 import { LightLines } from "@/components/ui/light-lines";
 import AppNavbar from "@/components/AppNavbar";
 import { useAuth } from "@/contexts/AuthContext";
-import { MOCK_HISTORY } from "@/data/mockHistory";
-
-const PROFILE_STATS = [
-  { value: 14,  label: "Analyses Run",       suffix: "",  preset: "aurora" },
-  { value: 12,  label: "Reports Generated",  suffix: "",  preset: "ocean" },
-  { value: 97,  label: "Avg Quality Score",  suffix: "%", preset: "sunset" },
-];
+import { fetchJobs, fetchJobResult, reportDownloadUrl } from "@/lib/api";
 
 const AGENTS_INFO = [
   { id: 1, name: "Structural Profiler",     icon: "🔍", color: "violet" },
@@ -27,6 +21,69 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const jobs = await fetchJobs();
+        const enriched = await Promise.all(
+          jobs.map(async (job) => {
+            let rows = null;
+            let cols = null;
+            let quality = null;
+            let confidence = null;
+            let reportAvailable = false;
+            if (job.status === "completed") {
+              try {
+                const result = await fetchJobResult(job.job_id);
+                rows = result?.summary?.rows ?? null;
+                cols = result?.summary?.columns ?? null;
+                quality = result?.summary?.quality_score ?? null;
+                confidence = result?.summary?.overall_confidence ?? null;
+                reportAvailable = Boolean(result?.report?.available);
+              } catch {
+                // ignore jobs whose result is no longer available
+              }
+            }
+            return {
+              id: job.job_id,
+              file: job.filename || "unknown.csv",
+              rows,
+              cols,
+              quality,
+              confidence,
+              profile: job.analysis_config?.preprocessing_profile || "balanced",
+              date: job.created_at?.slice(0, 10) ?? "—",
+              duration: `${Math.max(0, Math.round((new Date(job.updated_at) - new Date(job.created_at)) / 1000))}s`,
+              status: job.status === "completed" ? "done" : job.status === "failed" ? "error" : job.status,
+              reportAvailable,
+            };
+          })
+        );
+        if (!cancelled) setHistory(enriched);
+      } catch {
+        if (!cancelled) setHistory([]);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  const doneCount = history.filter((item) => item.status === "done").length;
+  const avgQuality = history.filter((item) => item.quality != null).reduce((sum, item) => sum + item.quality, 0);
+  const avgQualityScore = history.filter((item) => item.quality != null).length > 0
+    ? Math.round(avgQuality / history.filter((item) => item.quality != null).length)
+    : 0;
+  const avgConfidence = history.filter((item) => item.confidence != null).reduce((sum, item) => sum + item.confidence, 0);
+  const avgConfidenceScore = history.filter((item) => item.confidence != null).length > 0
+    ? Math.round((avgConfidence / history.filter((item) => item.confidence != null).length) * 100)
+    : 0;
 
   if (!user) {
     return (
@@ -123,7 +180,11 @@ export default function ProfilePage() {
           <div className="flex flex-col gap-8">
             {/* Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              {PROFILE_STATS.map((s) => (
+              {[
+                { value: history.length, label: "Analyses Run", suffix: "", preset: "aurora" },
+                { value: doneCount, label: "Reports Generated", suffix: "", preset: "ocean" },
+                { value: avgQualityScore || avgConfidenceScore || 0, label: "Avg Quality / Confidence", suffix: "%", preset: "sunset" },
+              ].map((s) => (
                 <GlowBorderCard key={s.label} colorPreset={s.preset}
                   width="100%" height="auto" aspectRatio="unset"
                   animationDuration={5} className="bg-[#0a0a0a]">
@@ -163,14 +224,16 @@ export default function ProfilePage() {
                 </button>
               </div>
               <div className="flex flex-col gap-3">
-                {MOCK_HISTORY.slice(0, 3).map((item) => (
+                {history.slice(0, 3).map((item) => (
                   <div key={item.id}
                     className="flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/2 hover:border-white/10 transition-colors">
                     <div className="flex items-center gap-3">
                       <span className="text-xl">📁</span>
                       <div>
                         <p className="text-white/80 text-sm font-medium">{item.file}</p>
-                        <p className="text-white/30 text-xs">{item.rows.toLocaleString()} rows · {item.cols} cols · {item.date} · {item.duration}</p>
+                        <p className="text-white/30 text-xs">
+                          {item.rows != null ? item.rows.toLocaleString() : "—"} rows · {item.cols ?? "—"} cols · {item.profile} · {item.date} · {item.duration}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -180,13 +243,19 @@ export default function ProfilePage() {
                         <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 text-xs">✗ Error</span>
                       )}
                       {item.status === "done" && (
-                        <button className="text-violet-400 hover:text-violet-300 text-xs transition-colors cursor-pointer">
+                        <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
+                          className="text-violet-400 hover:text-violet-300 text-xs transition-colors cursor-pointer">
                           Download →
-                        </button>
+                        </a>
                       )}
                     </div>
                   </div>
                 ))}
+                {!historyLoading && history.length === 0 && (
+                  <div className="p-4 rounded-xl border border-white/5 bg-white/2 text-white/30 text-sm">
+                    No runs yet. Start an analysis to populate your account history.
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -198,10 +267,10 @@ export default function ProfilePage() {
             {/* Summary stat chips */}
             <div className="flex flex-wrap gap-3">
               {[
-                { label: "Total Runs",    value: MOCK_HISTORY.length,                                                      color: "border-white/10 text-white/50" },
-                { label: "Successful",    value: MOCK_HISTORY.filter(h => h.status === "done").length,                     color: "border-emerald-500/25 text-emerald-300" },
-                { label: "Failed",        value: MOCK_HISTORY.filter(h => h.status === "error").length,                    color: "border-red-500/25 text-red-300" },
-                { label: "Rows Analyzed", value: MOCK_HISTORY.reduce((s, h) => s + h.rows, 0).toLocaleString(),            color: "border-violet-500/25 text-violet-300" },
+                { label: "Total Runs",    value: history.length,                                                             color: "border-white/10 text-white/50" },
+                { label: "Successful",    value: history.filter(h => h.status === "done").length,                          color: "border-emerald-500/25 text-emerald-300" },
+                { label: "Failed",        value: history.filter(h => h.status === "error").length,                         color: "border-red-500/25 text-red-300" },
+                { label: "Rows Analyzed", value: history.reduce((s, h) => s + (h.rows || 0), 0).toLocaleString(),           color: "border-violet-500/25 text-violet-300" },
               ].map(s => (
                 <div key={s.label} className={`px-4 py-2 rounded-xl border bg-white/2 flex items-center gap-2 ${s.color}`}>
                   <span className="font-black text-sm">{s.value}</span>
@@ -230,17 +299,19 @@ export default function ProfilePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_HISTORY.map((item, i) => (
+                  {history.map((item, i) => (
                     <tr key={item.id}
-                      className={`border-b border-white/5 hover:bg-white/2 transition-colors ${i === MOCK_HISTORY.length - 1 ? "border-b-0" : ""}`}>
+                      className={`border-b border-white/5 hover:bg-white/2 transition-colors ${i === history.length - 1 ? "border-b-0" : ""}`}>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
                           <span className="text-lg">📁</span>
                           <span className="text-white/80 font-medium">{item.file}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-white/40">{item.rows.toLocaleString()}</td>
-                      <td className="px-4 py-4 text-white/40">{item.cols}</td>
+                      <td className="px-4 py-4 text-white/40">{item.rows != null ? item.rows.toLocaleString() : "—"}</td>
+                      <td className="px-4 py-4 text-white/40">{item.cols ?? "—"}</td>
+                      <td className="px-4 py-4 text-white/40 capitalize">{item.profile}</td>
+                      <td className="px-4 py-4 text-white/40">{item.confidence != null ? `${Math.round(item.confidence * 100)}%` : "—"}</td>
                       <td className="px-4 py-4 text-white/40">{item.date}</td>
                       <td className="px-4 py-4 text-white/40">{item.duration}</td>
                       <td className="px-4 py-4">
@@ -251,10 +322,11 @@ export default function ProfilePage() {
                         )}
                       </td>
                       <td className="px-4 py-4">
-                        {item.status === "done" && (
-                          <button className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors cursor-pointer">
+                        {item.status === "done" && item.reportAvailable && (
+                          <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
+                            className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors cursor-pointer">
                             Download →
-                          </button>
+                          </a>
                         )}
                       </td>
                     </tr>

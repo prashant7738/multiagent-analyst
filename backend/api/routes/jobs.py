@@ -19,6 +19,7 @@ def _to_summary(job) -> JobSummary:
         job_id=job.job_id,
         status=JobStatus(job.status),
         filename=job.filename,
+        analysis_config=job.analysis_config,
         progress=job.progress,
         created_at=job.created_at,
         updated_at=job.updated_at,

@@ -104,7 +104,10 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
     }
 
     # ── high-level summary block for quick display ────────────────────────
-    shape = raw_profile.get("shape", {}) or {}
+    # Prefer raw_shape (captured once by Agent 1 on ingestion, before any
+    # transform) over re-deriving from raw_profile - same numbers, single
+    # source of truth so "raw" row/column counts never drift downstream.
+    shape = state.get("raw_shape") or raw_profile.get("shape", {}) or {}
     cleaned_df = state.get("cleaned_df")
     cleaned_shape = dataframe_summary(cleaned_df) if cleaned_df is not None else {}
     internal_col_count = _count_internal_columns(cleaned_shape.get("columns", []))

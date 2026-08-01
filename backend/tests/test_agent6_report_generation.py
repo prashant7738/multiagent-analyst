@@ -46,6 +46,7 @@ def _build_state():
     return {
         "csv_path": "sample.csv",
         "raw_profile": {"shape": {"rows": 3, "cols": 2}},
+        "raw_shape": {"rows": 3, "cols": 2},
         "cleaned_df": df,
         "stats": stats,
         "data_quality": data_quality,
@@ -144,6 +145,60 @@ class TestAgent6ReportGeneration(unittest.TestCase):
 
         self.assertTrue(any("Agent6" in e for e in result["errors"]))
         self.assertNotIn("report_path", result)
+
+
+class TestRawColumnCountGuard(unittest.TestCase):
+    """Guards against the executive summary silently reporting a post-transform
+    column count as if it were the raw dataset's shape (Fix 2)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._original_reports_dir = agent_6.REPORTS_DIR
+        agent_6.REPORTS_DIR = self._tmpdir.name
+
+    def tearDown(self):
+        agent_6.REPORTS_DIR = self._original_reports_dir
+        self._tmpdir.cleanup()
+
+    def test_dataset_facts_prefer_raw_shape_over_raw_profile(self):
+        state = _build_state()
+        # Simulate a stale/incorrect raw_profile (e.g. mutated by another step) -
+        # raw_shape, captured once by Agent 1, must win.
+        state["raw_profile"] = {"shape": {"rows": 999, "cols": 999}}
+        state["raw_shape"] = {"rows": 3, "cols": 2}
+
+        facts = agent_6._extract_dataset_facts(state)
+
+        self.assertEqual(facts["raw_rows"], 3)
+        self.assertEqual(facts["raw_cols"], 2)
+
+    def test_validate_raw_column_count_passes_when_matching(self):
+        insight_facts = {"dataset": {"raw_cols": 29}}
+        agent_6._validate_raw_column_count(insight_facts, {"cols": 29})  # should not raise
+
+    def test_validate_raw_column_count_raises_on_mismatch(self):
+        insight_facts = {"dataset": {"raw_cols": 112}}
+        with self.assertRaises(AssertionError):
+            agent_6._validate_raw_column_count(insight_facts, {"cols": 29})
+
+    def test_agent6_records_error_instead_of_hard_failing_on_mismatch(self):
+        state = _build_state()
+        state["raw_shape"] = {"rows": 3, "cols": 2}
+
+        # Simulate a future regression where dataset fact extraction is changed to
+        # (incorrectly) report a post-transform column count as "raw" - this is the
+        # exact class of bug Fix 2 guards against.
+        stale_facts = agent_6._extract_insight_facts(state)
+        stale_facts["dataset"]["raw_cols"] = 112
+
+        with patch.object(agent_6, "_extract_insight_facts", return_value=stale_facts), \
+             patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_get_gemini_client", side_effect=RuntimeError("no gemini key")):
+            result = agent_6.agent6_insight_report_generator(state)
+
+        # Never hard-fails - a report is still produced.
+        self.assertTrue(result["report_path"])
+        self.assertTrue(any("raw column count" in e for e in result["errors"]))
 
 
 if __name__ == "__main__":

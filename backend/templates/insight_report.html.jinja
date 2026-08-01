@@ -121,6 +121,25 @@
 </table>
 {% endif %}
 
+{% if facts.excluded_columns and (facts.excluded_columns.flagged_columns or facts.excluded_columns.excluded_pairs) %}
+<h2>Excluded — Likely IDs or Artifacts</h2>
+<p class="empty-note">These columns look like identifiers or external-model outputs (e.g. row IDs, classifier scores/probabilities) rather than business signals, so they are excluded from the headline findings above.</p>
+{% if facts.excluded_columns.flagged_columns %}
+<p><strong>Flagged columns:</strong> {{ facts.excluded_columns.flagged_columns | join(", ") }}</p>
+{% endif %}
+{% if facts.excluded_columns.excluded_pairs %}
+<table>
+  <tr><th>Column 1</th><th>Column 2</th><th>Pearson r</th><th>Strength</th><th>Direction</th></tr>
+  {% for pair in facts.excluded_columns.excluded_pairs %}
+  <tr>
+    <td>{{ pair.col1 }}</td><td>{{ pair.col2 }}</td>
+    <td>{{ pair.pearson_r }}</td><td>{{ pair.strength }}</td><td>{{ pair.direction }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
+
 {% if facts.significant_trends %}
 <h2>Significant Trends</h2>
 <table>

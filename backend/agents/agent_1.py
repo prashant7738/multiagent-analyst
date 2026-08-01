@@ -420,6 +420,12 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         errors.append(f"Agent1: File load failed — {e}")
         return {**state, "errors": errors}
 
+    # Capture raw shape immediately, before any transform (encoding, feature
+    # engineering, etc.) ever touches the dataframe. Every downstream agent that
+    # mentions "columns" to the user must pull from this value, not re-derive it
+    # from a later (already-transformed) dataframe.
+    raw_shape = {"rows": int(df.shape[0]), "cols": int(df.shape[1])}
+
     total_cells = df.shape[0] * df.shape[1]
 
     # Per-column profile
@@ -523,6 +529,7 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
     return {
         **state_with_reliability,
         "raw_profile": raw_profile,
+        "raw_shape": raw_shape,
         "_df_cache": df,  # internal, agents share via state
         "errors": errors,
     }

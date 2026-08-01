@@ -7,6 +7,8 @@ class GraphState(TypedDict):
 
     # ── Agent 1 outputs ───────────────────────────────────────────────────────
     raw_profile: dict          # structural profile: shape, dtypes, missing rates
+    raw_shape: dict            # {rows, cols} captured on ingestion, before any transform - the
+                               # single source of truth for "raw" counts for every downstream agent
     _df_cache: Any             # raw DataFrame passed between agents
 
     # ── Agent 2 outputs ───────────────────────────────────────────────────────

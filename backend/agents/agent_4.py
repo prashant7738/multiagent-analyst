@@ -268,6 +268,78 @@ def _descriptive_stats(df, schema_blueprint):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 1.5 — LEAKAGE / JUNK COLUMN DETECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Bare/short tokens ("id", "index") are matched whole-word only, against the
+# column name split on non-alphanumeric boundaries and camelCase transitions -
+# a naive substring check on these would false-positive on names like "Valid"
+# or "Guide" (see agent_3._find_col for the same lesson learned on keyword
+# matching elsewhere in this codebase). Multi-character/underscore-anchored
+# patterns (e.g. "_score", "predicted_") are distinctive enough to stay as
+# plain substring checks.
+_LEAKAGE_WHOLE_WORD_PATTERNS = frozenset({"id", "index"})
+_LEAKAGE_CAMEL_SPLIT = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_LEAKAGE_TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _leakage_name_tokens(col: str) -> list[str]:
+    normalized = _LEAKAGE_CAMEL_SPLIT.sub("_", col).lower()
+    return [t for t in _LEAKAGE_TOKEN_SPLIT.split(normalized) if t]
+
+
+def flag_leakage_columns(df, corr_matrix, name_patterns=None):
+    """Flag columns likely to be IDs, model outputs, or leakage artifacts.
+
+    Runs on the correlation matrix as a safety net *in addition to* Agent 2's
+    semantic tagging (`is_identifier`/`semantic_tag`) - it exists specifically
+    to catch columns the schema blueprint mistagged or never saw (e.g. an
+    external model's output score/probability columns baked into the raw
+    file, like the well-known "Naive_Bayes_Classifier_..." leakage columns in
+    some public churn datasets). Flagged columns are excluded from headline
+    "Top Correlations" findings and reported to Insight Generation separately
+    instead of being narrated as business signal.
+    """
+    name_patterns = name_patterns or [
+        "classifier", "naive_bayes", "_score", "_proba", "predicted_",
+        "id", "clientnum", "customerid", "index", "_uuid",
+    ]
+    flagged = set()
+
+    # 1. Name-based heuristic (whole-word for ambiguous short tokens).
+    for col in df.columns:
+        low = col.lower()
+        tokens = None
+        for pattern in name_patterns:
+            if pattern in _LEAKAGE_WHOLE_WORD_PATTERNS:
+                if tokens is None:
+                    tokens = _leakage_name_tokens(col)
+                if pattern in tokens:
+                    flagged.add(col)
+                    break
+            elif pattern in low:
+                flagged.add(col)
+                break
+
+    # 2. Near-perfect correlation with exactly one other column, near-zero
+    #    with everything else = likely two halves of the same external
+    #    computation (e.g. complementary probabilities).
+    for col in corr_matrix.columns:
+        row = corr_matrix[col].drop(col)
+        near_one = (row.abs() > 0.98).sum()
+        near_zero = (row.abs() < 0.1).sum()
+        if near_one == 1 and near_zero >= len(row) - 2:
+            flagged.add(col)
+
+    # 3. Pure identifiers: unique count == row count, non-target.
+    for col in df.columns:
+        if len(df) > 0 and df[col].nunique() == len(df) and str(df[col].dtype) in ("int64", "object", "str", "string"):
+            flagged.add(col)
+
+    return flagged
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 2 — CORRELATION MATRIX
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -291,17 +363,24 @@ def _correlation(df, schema_blueprint):
     pearson  = corr_df.corr(method="pearson").round(4)
     spearman = corr_df.corr(method="spearman").round(4)
 
+    flagged_columns = flag_leakage_columns(df, pearson)
+
     strong_pairs = []
+    excluded_pairs = []
     for i, c1 in enumerate(cols):
         for c2 in cols[i+1:]:
             r = pearson.loc[c1, c2]
             if abs(r) >= 0.5:
-                strong_pairs.append({
+                pair = {
                     "col1": c1, "col2": c2,
                     "pearson_r": round(float(r), 4),
                     "direction": "positive" if r > 0 else "negative",
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
-                })
+                }
+                if c1 in flagged_columns or c2 in flagged_columns:
+                    excluded_pairs.append(pair)
+                else:
+                    strong_pairs.append(pair)
 
     fig, ax = plt.subplots(figsize=(max(6, len(cols)), max(5, len(cols)-1)))
     im = ax.imshow(pearson.values, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
@@ -320,9 +399,11 @@ def _correlation(df, schema_blueprint):
     path = _save(fig, "correlation_heatmap")
 
     return {
-        "pearson":      pearson.to_dict(),
-        "spearman":     spearman.to_dict(),
-        "strong_pairs": strong_pairs,
+        "pearson":         pearson.to_dict(),
+        "spearman":        spearman.to_dict(),
+        "strong_pairs":    strong_pairs,
+        "flagged_columns": sorted(flagged_columns & set(cols)),
+        "excluded_pairs":  excluded_pairs,
     }, path
 
 

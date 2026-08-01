@@ -54,7 +54,7 @@ def _get_gemini_client():
     return gemini_client
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-flash-latest"
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 15
 LLM_SINGLE_CALL_THRESHOLD = 20

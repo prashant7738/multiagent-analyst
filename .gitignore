@@ -27,3 +27,5 @@ backend/.venv/
 backend/uploads/
 backend/outputs/
 backend/*.csv
+
+.pgdata

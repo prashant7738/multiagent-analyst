@@ -914,6 +914,9 @@ def _clip_outliers(df, schema_blueprint, ledger=None, raw_profile=None, data_qua
         if bounds.get("note") == "zero IQR - likely constant column":
             notes.append(f"{col}: outlier clipping skipped (zero IQR)")
             continue
+        if "lower" not in bounds or "upper" not in bounds:
+            notes.append(f"{col}: outlier clipping skipped ({bounds.get('note', 'invalid bounds')})")
+            continue
 
         # Persist the pre-clip raw value and a boolean flag before overwriting
         raw_col = f"{col}_raw"

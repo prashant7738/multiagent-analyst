@@ -68,6 +68,8 @@ def _extract_quality_facts(state):
     data_quality = state.get("data_quality", {}) or {}
     return {
         "overall_quality_score": data_quality.get("overall_quality_score"),
+        "overall_quality_score_pre_anomaly": data_quality.get("overall_quality_score_pre_anomaly"),
+        "anomaly_quality_penalty": data_quality.get("anomaly_quality_penalty"),
         "completeness_pct": data_quality.get("completeness_pct"),
         "duplicates_removed": data_quality.get("duplicates_removed"),
     }

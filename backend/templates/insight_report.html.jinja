@@ -68,6 +68,12 @@
     <span class="badge bad">Validation: Failed</span>
   {% endif %}
 </p>
+{% if facts.data_quality.anomaly_quality_penalty and facts.data_quality.anomaly_quality_penalty > 0 %}
+<p class="empty-note">
+  Includes a -{{ facts.data_quality.anomaly_quality_penalty }} point adjustment for statistical
+  anomalies found during analysis (pre-adjustment score: {{ facts.data_quality.overall_quality_score_pre_anomaly }}).
+</p>
+{% endif %}
 
 {% if narrative.plain_language_insights or narrative.bottom_line %}
 <div class="plain-language-box">
@@ -103,6 +109,7 @@
 
 {% if facts.top_correlations %}
 <h2>Top Correlations</h2>
+<p class="empty-note">Computed on the cleaned dataset (after outlier clipping, imputation, and scaling) - values may differ from a Pearson correlation run directly on the raw file.</p>
 <table>
   <tr><th>Column 1</th><th>Column 2</th><th>Pearson r</th><th>Strength</th><th>Direction</th></tr>
   {% for pair in facts.top_correlations %}
@@ -147,7 +154,10 @@
 <h2>Anomalies</h2>
 <p>
   {{ facts.anomalies.unique_flagged_rows }} rows ({{ facts.anomalies.unique_flagged_row_pct }}%) flagged across
-  {{ facts.anomalies.flagged_columns }} column(s), using a z-score threshold of {{ facts.anomalies.z_threshold }}.
+  {{ facts.anomalies.flagged_columns }} column(s). Each column uses a z-score threshold of
+  {{ facts.anomalies.z_threshold }} on its raw or log-transformed values (log-transformed for
+  right-skewed columns) or a wider IQR rule for skewed columns with non-positive values, so the
+  method adapts to each column's distribution instead of assuming normality everywhere.
 </p>
 {% endif %}
 

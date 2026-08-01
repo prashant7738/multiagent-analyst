@@ -1151,7 +1151,16 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
 
 
 def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
-    """Build a conservative schema blueprint when the LLM path fails."""
+    """Build a conservative schema blueprint when the LLM path fails.
+
+    Deliberately omits `encoding_strategy` here: `_enrich_missingness_metadata`
+    (via `_apply_missingness_policy`, always called right after this) fills it
+    in with `_derive_encoding_strategy`, which is cardinality- and
+    datetime-aware. Hard-coding method="one_hot" for every "string"-inferred
+    column here — regardless of cardinality — previously caused high-cardinality
+    string/date-like columns (e.g. a date column that failed the 80% datetime
+    parseability threshold) to be one-hot encoded, exploding the column count.
+    """
     def _normalize_intended_type(t: str) -> str:
         if t == "numeric":
             return "float"
@@ -1170,10 +1179,6 @@ def _fallback_blueprint(df: pd.DataFrame, inferred_types: dict) -> dict:
                 "action": "flag_only",
                 "threshold_pct": 20.0,
                 "reason": "fallback policy inferred without LLM semantics",
-            },
-            "encoding_strategy": {
-                "method": "one_hot" if inferred_types[col] == "string" else "none",
-                "reason": "fallback encoding inferred without LLM semantics" if inferred_types[col] == "string" else "non-categorical fallback",
             },
             "analysis_allowed": True,
             "notes": "fallback — LLM call failed"

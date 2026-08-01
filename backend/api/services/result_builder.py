@@ -38,6 +38,21 @@ def _report_format(report_path: str) -> str | None:
     return report_path.rsplit(".", 1)[-1] if "." in report_path else None
 
 
+# Agent 3 keeps audit-trail/derived columns alongside the originals (e.g.
+# "Income_raw"/"Income_scaled" next to the scaled "Income", or
+# "*_range_failed" validation flags) instead of overwriting in place, so the
+# cleaned dataset's column count is not directly comparable to the raw file's.
+# These suffixes let the API surface an "analysis-facing" column count too,
+# so a much larger cleaned column count isn't mistaken for a bug.
+_INTERNAL_COLUMN_SUFFIXES = (
+    "_raw", "_scaled", "_was_clipped", "_parse_failed", "_range_failed",
+)
+
+
+def _count_internal_columns(columns: list[str]) -> int:
+    return sum(1 for c in columns if c.endswith(_INTERNAL_COLUMN_SUFFIXES))
+
+
 def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> dict[str, Any]:
     """Project a final GraphState into the API result contract."""
     state = state or {}
@@ -91,6 +106,11 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
     # ── high-level summary block for quick display ────────────────────────
     shape = raw_profile.get("shape", {}) or {}
     cleaned_df = state.get("cleaned_df")
+    cleaned_shape = dataframe_summary(cleaned_df) if cleaned_df is not None else {}
+    internal_col_count = _count_internal_columns(cleaned_shape.get("columns", []))
+    if cleaned_shape:
+        cleaned_shape["internal_audit_columns"] = internal_col_count
+        cleaned_shape["analysis_columns"] = cleaned_shape["cols"] - internal_col_count
     summary = {
         "filename": filename,
         "preprocessing_profile": state.get("preprocessing_profile") or analysis_config.get("preprocessing_profile"),
@@ -100,7 +120,7 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
         "overall_missing_rate_pct": raw_profile.get("overall_missing_rate_pct"),
         "duplicate_rate_pct": raw_profile.get("duplicate_rate_pct"),
         "quality_score": data_quality.get("overall_quality_score"),
-        "cleaned_shape": dataframe_summary(cleaned_df) if cleaned_df is not None else {},
+        "cleaned_shape": cleaned_shape,
         "column_count_tagged": len(schema_blueprint) if hasattr(schema_blueprint, "__len__") else None,
         "chart_count": len(charts),
         "validation_passed": validation_report.get("passed"),

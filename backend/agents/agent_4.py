@@ -570,8 +570,17 @@ def _seasonality(df, schema_blueprint):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6 — ANOMALY DETECTION (Z-score)
+# 6 — ANOMALY DETECTION (skew-aware: z-score / log-z / IQR)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# A plain mean/std z-score assumes a roughly symmetric distribution. Right-skewed
+# columns (e.g. per-category spend fields with a long tail of high spenders) blow
+# up std enough that z=3.5 either misses real anomalies or, more commonly here,
+# flags a large chunk of the legitimate tail as "anomalous". Route skewed columns
+# through a transform (log1p) or a robust IQR rule instead.
+ANOMALY_SKEW_THRESHOLD = 1.0
+ANOMALY_IQR_MULTIPLIER = 3.0  # wider than the 1.5x used for clipping — this is a flag, not a clip
+
 
 def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
     result = {}
@@ -580,21 +589,50 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
         s = df[col].dropna()
         if len(s) < 4:
             continue
-        mean, std = s.mean(), s.std()
+        std = s.std()
         if std == 0:
             continue
-        z_scores = (df[col] - mean) / std
-        anomaly_mask = z_scores.abs() > z_threshold
+
+        skewness = float(s.skew())
+        method = "zscore"
+        if abs(skewness) > ANOMALY_SKEW_THRESHOLD:
+            method = "log_zscore" if (s > 0).all() else "iqr"
+
+        if method == "iqr":
+            q1, q3 = s.quantile(0.25), s.quantile(0.75)
+            iqr = q3 - q1
+            if iqr == 0:
+                continue
+            lower = q1 - ANOMALY_IQR_MULTIPLIER * iqr
+            upper = q3 + ANOMALY_IQR_MULTIPLIER * iqr
+            anomaly_mask = ((df[col] < lower) | (df[col] > upper)) & df[col].notna()
+            col_mean, col_std = float(s.mean()), float(std)
+        else:
+            if method == "log_zscore":
+                transformed = np.log1p(df[col])
+                mean, std_calc = np.log1p(s).mean(), np.log1p(s).std()
+            else:
+                transformed = df[col]
+                mean, std_calc = s.mean(), std
+            if std_calc == 0:
+                continue
+            z_scores = (transformed - mean) / std_calc
+            anomaly_mask = z_scores.abs() > z_threshold
+            anomaly_mask = anomaly_mask.fillna(False)
+            col_mean, col_std = float(mean), float(std_calc)
+
         anomaly_indices = df.index[anomaly_mask].tolist()
         if anomaly_indices:
             all_anomaly_indices.update(anomaly_indices)
             result[col] = {
                 "count":           len(anomaly_indices),
-                "z_threshold":     z_threshold,
+                "method":          method,
+                "z_threshold":     z_threshold if method != "iqr" else None,
+                "skewness":        round(skewness, 4),
                 "anomaly_indices": anomaly_indices,
                 "anomaly_values":  df.loc[anomaly_indices, col].round(4).tolist(),
-                "col_mean":        round(float(mean), 4),
-                "col_std":         round(float(std), 4),
+                "col_mean":        round(col_mean, 4),
+                "col_std":         round(col_std, 4),
             }
     summary = {
         "z_threshold": z_threshold,
@@ -869,6 +907,43 @@ def _derived_metrics_charts(df):
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Anomaly rates below this are treated as expected noise in any real dataset
+# and don't further penalize the quality score computed by Agent 3.
+ANOMALY_QUALITY_TOLERANCE_PCT = 3.0
+ANOMALY_QUALITY_PENALTY_SCALE = 0.8
+ANOMALY_QUALITY_PENALTY_CAP = 25.0
+
+
+def _apply_anomaly_quality_penalty(data_quality, anomaly_summary):
+    """Fold Agent 4's anomaly rate into Agent 3's quality score.
+
+    Agent 3 computes `overall_quality_score` before anomaly detection has even
+    run (it runs in Agent 4), so a dataset with a large fraction of rows
+    flagged as statistical outliers could still show a deceptively high
+    headline score. This applies a penalty proportional to how far the
+    unique-flagged-row rate exceeds a small tolerance band, and keeps the
+    pre-anomaly score around for auditability.
+    """
+    if not isinstance(data_quality, dict) or "overall_quality_score" not in data_quality:
+        return data_quality
+
+    data_quality = dict(data_quality)
+    pre_anomaly_score = float(data_quality["overall_quality_score"])
+    flagged_pct = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
+
+    penalty = min(
+        ANOMALY_QUALITY_PENALTY_CAP,
+        max(0.0, flagged_pct - ANOMALY_QUALITY_TOLERANCE_PCT) * ANOMALY_QUALITY_PENALTY_SCALE,
+    )
+    adjusted_score = max(0.0, round(pre_anomaly_score - penalty, 2))
+
+    data_quality["overall_quality_score_pre_anomaly"] = round(pre_anomaly_score, 2)
+    data_quality["anomaly_flagged_row_pct"] = flagged_pct
+    data_quality["anomaly_quality_penalty"] = round(penalty, 2)
+    data_quality["overall_quality_score"] = adjusted_score
+    return data_quality
+
+
 def agent4_analysis(state: GraphState) -> GraphState:
     errors = state.get("errors", [])
     schema_blueprint = state.get("schema_blueprint", {})
@@ -995,6 +1070,14 @@ def agent4_analysis(state: GraphState) -> GraphState:
         paths = []
         print("[Agent 4] Step 10 — Derived metrics skipped (no derived metrics)")
 
+    data_quality = _apply_anomaly_quality_penalty(state.get("data_quality"), stats.get("anomaly_summary", {}))
+    if data_quality is not None:
+        print(
+            f"[Agent 4] Step 11 — Quality score adjusted for anomalies: "
+            f"{data_quality.get('overall_quality_score_pre_anomaly')} -> {data_quality.get('overall_quality_score')} "
+            f"(penalty={data_quality.get('anomaly_quality_penalty')}, flagged={data_quality.get('anomaly_flagged_row_pct')}%)"
+        )
+
     print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")
 
     state_with_reliability = update_reliability(
@@ -1007,7 +1090,8 @@ def agent4_analysis(state: GraphState) -> GraphState:
 
     return {
         **state_with_reliability,
-        "stats":       stats,
-        "chart_paths": all_chart_paths,
-        "errors":      errors,
+        "stats":        stats,
+        "chart_paths":  all_chart_paths,
+        "data_quality": data_quality if data_quality is not None else state.get("data_quality"),
+        "errors":       errors,
     }

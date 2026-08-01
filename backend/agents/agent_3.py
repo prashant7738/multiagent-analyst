@@ -290,6 +290,11 @@ def _is_categorical_for_encoding(meta):
         return False
     semantic_tag = meta.get("semantic_tag")
     intended_type = meta.get("intended_type")
+    # Defense-in-depth: never one-hot/ordinal encode an actual datetime column,
+    # even if semantic_tag was mistagged as categorical_label/geographic upstream
+    # (e.g. a bad LLM call or a date string that dodges the parseability check).
+    if intended_type == "datetime":
+        return False
     if semantic_tag in {"categorical_label", "geographic"}:
         return True
     if intended_type in {"string", "category"}:
@@ -524,6 +529,19 @@ def _encode_categorical_columns(df, schema_blueprint):
 
         if method == "one_hot":
             cardinality = int(df[col].nunique(dropna=True))
+            near_unique = len(df) > 0 and (cardinality / len(df)) > 0.5
+            if near_unique and cardinality > ONE_HOT_LOW_CARDINALITY:
+                # Safety net: a column this close to unique-per-row (e.g. a
+                # mistagged date/ID that slipped past upstream checks) makes
+                # one-hot/top-N+Other encoding meaningless — the "Other" bucket
+                # would swallow almost every row. Skip encoding entirely instead
+                # of exploding the column count.
+                notes.append(
+                    f"{col}: one-hot encoding skipped (cardinality={cardinality} is "
+                    f"{cardinality / len(df) * 100:.1f}% of rows — looks like an "
+                    f"identifier/date, not a nominal category)"
+                )
+                continue
             if cardinality <= ONE_HOT_LOW_CARDINALITY:
                 # Low cardinality → standard full one-hot encoding
                 encoded = pd.get_dummies(df[col].astype("string"), prefix=col, prefix_sep="__", dummy_na=False)

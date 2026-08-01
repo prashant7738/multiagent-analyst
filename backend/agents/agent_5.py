@@ -49,6 +49,7 @@ HEURISTIC_TYPE_TO_COARSE = {
 
 MIN_ACCEPTABLE_KAPPA = 0.4       # "fair" agreement or better (Landis & Koch)
 MAX_VALIDATION_FAIL_PCT = 15.0   # business-rule failure tolerance
+MIN_TREND_SAMPLE_SIZE = 10       # trends below this many points aren't trustworthy even if p < 0.05
 
 
 def _verbose_logging_enabled():
@@ -194,6 +195,34 @@ def _check_chart_artifact_integrity(state, ledger):
     )
 
 
+def _check_trend_sample_sufficiency(state, ledger, min_sample_size=MIN_TREND_SAMPLE_SIZE):
+    """Flag regression trends marked significant but backed by too few data points.
+
+    A p-value < 0.05 from 4-5 rows is not a trend worth reporting - it's noise
+    that happened to fit a line. Agent 4 doesn't know Agent 5's reliability
+    bar, so this check re-validates each "significant" trend against a minimum
+    sample size before the pipeline trusts it downstream.
+    """
+    stats = state.get("stats", {}) or {}
+    regression = stats.get("regression", {}) or {}
+
+    insufficient = []
+    for col, metrics in regression.items():
+        if not isinstance(metrics, dict) or not metrics.get("significant"):
+            continue
+        sample_size = metrics.get("n")
+        if sample_size is not None and int(sample_size) < min_sample_size:
+            insufficient.append(f"{col} (n={sample_size})")
+
+    ok = not insufficient
+    ledger.record(
+        "trend_sample_sufficiency", ok,
+        f"significant trends with n<{min_sample_size}: {insufficient[:5]}",
+        severity="warning",
+    )
+    return insufficient
+
+
 def _check_business_rule_validation(state, ledger, max_fail_pct=MAX_VALIDATION_FAIL_PCT):
     """Roll up Agent 3's count-range / financial-constraint validation failures."""
     column_ledger = state.get("column_ledger", {}) or {}
@@ -313,6 +342,7 @@ def agent5_output_validator(state: GraphState) -> GraphState:
     _check_stats_numeric_sanity(state, ledger)
     _check_chart_artifact_integrity(state, ledger)
     _check_business_rule_validation(state, ledger)
+    _check_trend_sample_sufficiency(state, ledger)
 
     semantic_agreement = _validate_semantic_tagging_agreement(state, ledger)
 

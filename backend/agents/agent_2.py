@@ -8,6 +8,7 @@ available or returns invalid JSON.
 
 import re
 import os
+import hashlib
 import pandas as pd
 import json
 import numpy as np
@@ -16,6 +17,19 @@ from groq import Groq
 
 client = None
 gemini_client = None
+_gemini_client_cache = {}
+_gemini_rotation_index = 0
+
+
+def _has_explicit_multi_gemini_key_config() -> bool:
+    return bool(
+        os.getenv("GEMINI_API_KEYS")
+        or os.getenv("GEMINI_API_KEY_1")
+        or os.getenv("GEMINI_API_KEY_2")
+        or os.getenv("GEMINI_API_KEY_3")
+        or os.getenv("GEMINI_API_KEY_4")
+        or os.getenv("GEMINI_API_KEY_5")
+    )
 
 
 class SchemaBlueprint(dict):
@@ -41,20 +55,180 @@ def _get_groq_client() -> Groq:
 def _get_gemini_client():
     """Return the active Gemini client, importing the SDK only when needed."""
     global gemini_client
-    if gemini_client is not None:
+    if gemini_client is not None and not _has_explicit_multi_gemini_key_config():
         return gemini_client
 
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_Key") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
+    if not api_key and not _has_explicit_multi_gemini_key_config():
         raise RuntimeError("GEMINI_API_KEY is not set")
+
+    if api_key:
+        return _get_gemini_client_for_key(api_key)
+
+    return _get_gemini_client_for_key(_get_configured_gemini_api_keys()[0])
+
+
+def _collect_gemini_key_candidates() -> list[str]:
+    """Collect configured Gemini key strings in priority order, preserving duplicates.
+
+    Supports either a single key (`GEMINI_API_KEY`) or multiple keys via a
+    comma/space/semicolon-separated `GEMINI_API_KEYS`, plus numbered env vars
+    like `GEMINI_API_KEY_1` ... `GEMINI_API_KEY_5`.
+    """
+    env_names = [
+        "GEMINI_API_KEYS",
+        "GEMINI_API_KEY",
+        "Gemini_API_Key",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY_1",
+        "GEMINI_API_KEY_2",
+        "GEMINI_API_KEY_3",
+        "GEMINI_API_KEY_4",
+        "GEMINI_API_KEY_5",
+    ]
+    for env_name in env_names:
+        raw_value = os.getenv(env_name)
+        if not raw_value:
+            continue
+        for candidate in re.split(r"[\s,;]+", raw_value):
+            candidate = candidate.strip()
+            if candidate:
+                yield candidate
+
+
+def _get_configured_gemini_api_keys() -> list[str]:
+    """Return all configured Gemini API keys in priority order, de-duplicated."""
+    keys = []
+    seen = set()
+    for candidate in _collect_gemini_key_candidates():
+        if candidate not in seen:
+            seen.add(candidate)
+            keys.append(candidate)
+    return keys
+
+
+def _mask_gemini_key(api_key: str) -> str:
+    """Return a short stable fingerprint for logging without revealing secrets."""
+    digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    return digest[:10]
+
+
+def _describe_configured_gemini_keys() -> dict:
+    """Summarize configured Gemini keys without exposing the full values."""
+    raw_keys = list(_collect_gemini_key_candidates())
+    keys = _get_configured_gemini_api_keys()
+    fingerprints = [_mask_gemini_key(key) for key in keys]
+    return {
+        "raw_key_count": len(raw_keys),
+        "configured_key_count": len(keys),
+        "distinct_key_count": len(set(keys)),
+        "fingerprints": fingerprints,
+        "distinct_fingerprints": len(set(fingerprints)),
+        "has_duplicate_sources": len(raw_keys) != len(set(raw_keys)),
+    }
+
+
+def _get_gemini_client_for_key(api_key: str):
+    """Return a cached Gemini client bound to a specific API key."""
+    global gemini_client
+    if gemini_client is not None and not _has_explicit_multi_gemini_key_config():
+        return gemini_client
+
+    cached_client = _gemini_client_cache.get(api_key)
+    if cached_client is not None:
+        return cached_client
 
     from google import genai
 
-    gemini_client = genai.Client(api_key=api_key)
-    return gemini_client
+    client_instance = genai.Client(api_key=api_key)
+    _gemini_client_cache[api_key] = client_instance
+    return client_instance
+
+
+def _is_model_unavailable_error(exc: Exception) -> bool:
+    """Detect a retired/renamed model (404) rather than a quota or transient error."""
+    text = str(exc).lower()
+    return any(term in text for term in ("404", "not_found", "no longer available"))
+
+
+def _gemini_model_candidates() -> list[str]:
+    """Models to try in order; falls over to newer aliases if one gets retired."""
+    seen = set()
+    candidates = []
+    for model in (GEMINI_MODEL, *GEMINI_MODEL_FALLBACKS):
+        if model and model not in seen:
+            seen.add(model)
+            candidates.append(model)
+    return candidates
+
+
+def _call_gemini_with_failover(*, contents, system_instruction: str, temperature: float, max_output_tokens: int):
+    """Call Gemini, trying each configured key and model until one succeeds.
+
+    This keeps multi-key deployments working without asking the caller to know
+    which key is healthy. If no multi-key env vars are set, the legacy cached
+    single-client path still works for tests and existing deployments. If the
+    primary model has been retired (404), the next candidate model is tried
+    for the same keys instead of failing outright.
+    """
+    keys = _get_configured_gemini_api_keys()
+    global _gemini_rotation_index
+
+    start = 0
+    if keys and _has_explicit_multi_gemini_key_config():
+        start = _gemini_rotation_index % len(keys)
+        ordered_keys = keys[start:] + keys[:start]
+        print(f"[Agent 2] Gemini key diagnostics: {_describe_configured_gemini_keys()}")
+    elif keys:
+        ordered_keys = [None] if gemini_client is not None else [keys[0]]
+    elif gemini_client is not None:
+        ordered_keys = [None]
+    else:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+
+    last_error = None
+    total_attempts = 0
+    for model_name in _gemini_model_candidates():
+        for offset, api_key in enumerate(ordered_keys):
+            total_attempts += 1
+            try:
+                client_obj = gemini_client if api_key is None else _get_gemini_client_for_key(api_key)
+                if api_key is not None:
+                    print(f"[Agent 2] Trying Gemini key fingerprint={_mask_gemini_key(api_key)} model={model_name}")
+                response = client_obj.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config={
+                        "system_instruction": system_instruction,
+                        "temperature": temperature,
+                        "max_output_tokens": max_output_tokens,
+                    },
+                )
+                if keys:
+                    _gemini_rotation_index = (start + offset + 1) % len(keys)
+                return response
+            except Exception as exc:  # noqa: BLE001 - try the next key/model
+                last_error = exc
+                if _is_model_unavailable_error(exc):
+                    print(f"[Agent 2] Gemini model '{model_name}' unavailable, trying next model")
+                    break
+
+    raise RuntimeError(f"Gemini calls failed across {total_attempts} attempt(s): {last_error}") from last_error
+
+
+def _call_gemini_json_with_failover(*, contents, system_instruction: str, temperature: float, max_output_tokens: int) -> dict:
+    response = _call_gemini_with_failover(
+        contents=contents,
+        system_instruction=system_instruction,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+    )
+    raw_text = response.text.strip()
+    return _parse_schema_blueprint_response(raw_text)
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-flash-latest"
+GEMINI_MODEL_FALLBACKS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 15
 LLM_SINGLE_CALL_THRESHOLD = 20
@@ -626,17 +800,12 @@ def _call_llm_for_schema_blueprint(
         print(f"[Agent 2] Groq unavailable; trying Gemini: {groq_error}")
 
     try:
-        response = _get_gemini_client().models.generate_content(
-            model=GEMINI_MODEL,
+        return _call_gemini_json_with_failover(
             contents=user_content,
-            config={
-                "system_instruction": SEMANTIC_SYSTEM_PROMPT,
-                "temperature": 0.1,
-                "max_output_tokens": LLM_MAX_TOKENS,
-            },
+            system_instruction=SEMANTIC_SYSTEM_PROMPT,
+            temperature=0.1,
+            max_output_tokens=LLM_MAX_TOKENS,
         )
-        raw_text = response.text.strip()
-        return _parse_schema_blueprint_response(raw_text)
     except Exception as gemini_error:
         raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
 

@@ -18,6 +18,7 @@ statistics, charts, validation) into a single grounded document:
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,8 +28,8 @@ from agents.agent_1 import GraphState
 from agents.agent_2 import (
     GEMINI_MODEL,
     GROQ_MODEL,
-    _get_gemini_client,
     _get_groq_client,
+    _call_gemini_json_with_failover,
     _parse_schema_blueprint_response,
 )
 from main import update_reliability
@@ -40,6 +41,8 @@ TEMPLATE_NAME = "insight_report.html.jinja"
 TOP_CORRELATIONS_LIMIT = 5
 TOP_RANKING_LIMIT = 3
 TOP_REGRESSION_LIMIT = 5
+MIN_TREND_SAMPLE_SIZE = 10       # matches agents.agent_5; trends below this aren't cited as fact
+CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the known value)
 
 
 def _verbose_logging_enabled():
@@ -133,7 +136,10 @@ def _extract_regression_facts(stats):
     significant = [
         {"column": col, **metrics}
         for col, metrics in regression.items()
-        if isinstance(metrics, dict) and metrics.get("significant")
+        if isinstance(metrics, dict)
+        and metrics.get("significant")
+        # A missing "n" (older/mocked stats) is treated as unknown, not insufficient.
+        and (metrics.get("n") is None or int(metrics["n"]) >= MIN_TREND_SAMPLE_SIZE)
     ]
     significant.sort(key=lambda r: r.get("r_squared", 0), reverse=True)
     return significant[:TOP_REGRESSION_LIMIT]
@@ -171,6 +177,99 @@ def _extract_insight_facts(state):
         "significant_trends": _extract_regression_facts(stats),
         "validation": _extract_validation_facts(state),
         "reliability": _extract_reliability_facts(state),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1b — NARRATIVE CLAIM GROUNDING (self-check, no LLM)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CLAIM_PATTERN = re.compile(r"-?\d[\d,]*\.?\d*%?")
+
+
+def _flatten_numeric_facts(insight_facts: dict) -> set[float]:
+    """Collect every numeric value appearing anywhere in the deterministic facts."""
+    values: set[float] = set()
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                _walk(value)
+        elif isinstance(node, bool):
+            return
+        elif isinstance(node, (int, float)):
+            try:
+                values.add(round(float(node), 2))
+            except (TypeError, ValueError):
+                pass
+
+    _walk(insight_facts)
+    return values
+
+
+def _extract_numeric_claims(text: str) -> list[float]:
+    """Pull out numbers worth fact-checking, skipping small ordinal-style digits
+    (e.g. "top 3") that aren't really claims about the data."""
+    if not text:
+        return []
+
+    claims = []
+    for match in _CLAIM_PATTERN.findall(text):
+        has_percent = match.endswith("%")
+        cleaned = match.rstrip("%").replace(",", "")
+        if not cleaned or cleaned in {"-", "."}:
+            continue
+        try:
+            value = float(cleaned)
+        except ValueError:
+            continue
+        has_decimal = "." in cleaned
+        if has_percent or has_decimal or abs(value) >= 10:
+            claims.append(value)
+    return claims
+
+
+def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: float = CLAIM_GROUNDING_TOLERANCE) -> dict:
+    """Verify that numbers cited in the LLM narrative actually appear in the
+    deterministic facts it was given, within a small tolerance for rounding.
+
+    This is a best-effort self-check, not a hard gate: it flags likely
+    hallucinated numbers instead of silently trusting free-form LLM prose.
+    """
+    known_values = _flatten_numeric_facts(insight_facts)
+
+    sections = []
+    if narrative.get("executive_summary"):
+        sections.append(("executive_summary", narrative["executive_summary"]))
+    for index, finding in enumerate(narrative.get("key_findings") or []):
+        sections.append((f"key_finding[{index}]", finding))
+
+    checked = 0
+    grounded = 0
+    flagged = []
+
+    for label, text in sections:
+        for claim in _extract_numeric_claims(text):
+            checked += 1
+            is_grounded = any(
+                abs(claim - known) <= max(tolerance, abs(known) * 0.05)
+                for known in known_values
+            )
+            if is_grounded:
+                grounded += 1
+            else:
+                flagged.append({"source": label, "value": claim})
+
+    confidence = round(grounded / checked, 3) if checked else 1.0
+    return {
+        "claims_checked": checked,
+        "claims_grounded": grounded,
+        "claims_flagged": len(flagged),
+        "flagged_examples": flagged[:5],
+        "confidence": confidence,
     }
 
 
@@ -242,17 +341,12 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         print(f"[Agent 6] Groq unavailable; trying Gemini: {groq_error}")
 
     try:
-        response = _get_gemini_client().models.generate_content(
-            model=GEMINI_MODEL,
+        narrative = _call_gemini_json_with_failover(
             contents=user_content,
-            config={
-                "system_instruction": INSIGHT_SYSTEM_PROMPT,
-                "temperature": 0.2,
-                "max_output_tokens": 1024,
-            },
+            system_instruction=INSIGHT_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_output_tokens=1024,
         )
-        raw_text = response.text.strip()
-        narrative = _parse_schema_blueprint_response(raw_text)
         narrative["source"] = "gemini"
         return narrative
     except Exception as gemini_error:
@@ -486,6 +580,14 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         narrative = _fallback_narrative(insight_facts)
         narrative_source = "fallback"
 
+    claims_grounding = _check_narrative_grounding(insight_facts, narrative)
+    narrative["claims_grounding"] = claims_grounding
+    if claims_grounding["claims_flagged"]:
+        print(
+            f"[Agent 6] Claim grounding: {claims_grounding['claims_grounded']}/{claims_grounding['claims_checked']} "
+            f"checked claims matched computed facts; flagged={claims_grounding['flagged_examples']}"
+        )
+
     chart_paths = state.get("chart_paths", []) or []
     html_string = _render_html(insight_facts, narrative, chart_paths, state)
     report_path, pdf_written = _write_report(html_string, REPORTS_DIR, errors)
@@ -501,6 +603,11 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
     else:
         confidence = 0.85 if not pdf_written else 1.0
 
+    # A narrative that cites numbers absent from the computed facts is less
+    # trustworthy even if it read grammatically fine and the PDF rendered.
+    grounding_confidence = claims_grounding.get("confidence", 1.0)
+    confidence = round(confidence * (0.7 + 0.3 * grounding_confidence), 3)
+
     state_with_reliability = update_reliability(
         state,
         "agent6",
@@ -509,6 +616,7 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
             f"narrative_source={narrative.get('source', narrative_source)}",
             f"pdf_written={pdf_written}",
             f"report_path={report_path}",
+            f"claims_grounded={claims_grounding['claims_grounded']}/{claims_grounding['claims_checked']}",
         ],
         decision_readiness="ready" if pdf_written else "needs_review",
     )

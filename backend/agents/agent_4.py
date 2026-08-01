@@ -49,6 +49,14 @@ _VALIDATION_SUFFIXES = ("_parse_failed", "_range_failed")
 _BACKUP_SUFFIXES = ("_raw", "_scaled", "_was_clipped")
 ANOMALY_Z_THRESHOLD = 3.5
 
+# A heatmap of near-zero correlations tells the reader nothing useful - skip
+# drawing it rather than dumping a wall of gray/pale cells into the report.
+CORRELATION_HEATMAP_MIN_R = 0.3
+# Global cap on total charts across all families, applied by informativeness
+# ranking rather than truncating whichever family happens to run last.
+MAX_CHARTS_PER_REPORT = int(os.getenv("MAX_CHARTS_PER_REPORT", "16"))
+
+
 def _numeric_cols(df, schema_blueprint):
     """Return numeric columns, excluding validation suffixes and identifiers/datetimes."""
     cols = []
@@ -282,19 +290,21 @@ def _correlation(df, schema_blueprint):
         if not _is_date_derived(c)
     ]
     if len(cols) < 2:
-        return {}, None
+        return {}, []
 
     corr_df = df[cols].dropna()
     if len(corr_df) < 3:
-        return {}, None
+        return {}, []
 
     pearson  = corr_df.corr(method="pearson").round(4)
     spearman = corr_df.corr(method="spearman").round(4)
 
     strong_pairs = []
+    max_abs_r = 0.0
     for i, c1 in enumerate(cols):
         for c2 in cols[i+1:]:
             r = pearson.loc[c1, c2]
+            max_abs_r = max(max_abs_r, abs(float(r)))
             if abs(r) >= 0.5:
                 strong_pairs.append({
                     "col1": c1, "col2": c2,
@@ -303,27 +313,67 @@ def _correlation(df, schema_blueprint):
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
                 })
 
-    fig, ax = plt.subplots(figsize=(max(6, len(cols)), max(5, len(cols)-1)))
-    im = ax.imshow(pearson.values, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
-    plt.colorbar(im, ax=ax, shrink=0.8)
-    ax.set_xticks(range(len(cols)))
-    ax.set_yticks(range(len(cols)))
-    ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=9)
-    ax.set_yticklabels(cols, fontsize=9)
-    for i in range(len(cols)):
-        for j in range(len(cols)):
-            ax.text(j, i, f"{pearson.values[i,j]:.2f}",
-                    ha="center", va="center", fontsize=8,
-                    color="black" if abs(pearson.values[i,j]) < 0.7 else "white")
-    ax.set_title("Pearson Correlation Heatmap", fontsize=13, fontweight="bold", pad=12)
-    fig.tight_layout()
-    path = _save(fig, "correlation_heatmap")
-
-    return {
+    result = {
         "pearson":      pearson.to_dict(),
         "spearman":     spearman.to_dict(),
         "strong_pairs": strong_pairs,
-    }, path
+        "max_abs_r":    round(max_abs_r, 4),
+    }
+    chart_candidates = []
+
+    # A wall of near-zero correlation cells is noise, not insight - only draw
+    # the heatmap when at least one pair shows a real relationship.
+    if max_abs_r >= CORRELATION_HEATMAP_MIN_R:
+        fig, ax = plt.subplots(figsize=(max(6, len(cols)), max(5, len(cols)-1)))
+        im = ax.imshow(pearson.values, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
+        plt.colorbar(im, ax=ax, shrink=0.8)
+        ax.set_xticks(range(len(cols)))
+        ax.set_yticks(range(len(cols)))
+        ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=9)
+        ax.set_yticklabels(cols, fontsize=9)
+        for i in range(len(cols)):
+            for j in range(len(cols)):
+                ax.text(j, i, f"{pearson.values[i,j]:.2f}",
+                        ha="center", va="center", fontsize=8,
+                        color="black" if abs(pearson.values[i,j]) < 0.7 else "white")
+        ax.set_title("Pearson Correlation Heatmap", fontsize=13, fontweight="bold", pad=12)
+        fig.tight_layout()
+        path = _save(fig, "correlation_heatmap")
+        chart_candidates.append({
+            "path": path, "family": "correlation_heatmap",
+            "score": round(max_abs_r * 100, 1),
+            "reason": f"max |pearson r|={max_abs_r:.2f}",
+        })
+
+    # Give the single strongest relationship an actual scatter plot instead of
+    # making the reader infer it from one heatmap cell - this is also what
+    # makes the chart set vary by dataset instead of always looking the same.
+    if strong_pairs:
+        top_pair = max(strong_pairs, key=lambda p: abs(p["pearson_r"]))
+        c1, c2 = top_pair["col1"], top_pair["col2"]
+        pair_df = df[[c1, c2]].dropna()
+        if len(pair_df) >= 3:
+            fig, ax = plt.subplots(figsize=(6.5, 5))
+            ax.scatter(pair_df[c1], pair_df[c2], color=COLORS["primary"],
+                       alpha=0.6, s=35, edgecolor="white")
+            slope, intercept = np.polyfit(pair_df[c1].to_numpy(dtype="float64"),
+                                           pair_df[c2].to_numpy(dtype="float64"), 1)
+            xs = np.linspace(pair_df[c1].min(), pair_df[c1].max(), 100)
+            ax.plot(xs, slope * xs + intercept, color=COLORS["accent"],
+                    linewidth=2, linestyle="--")
+            ax.set_xlabel(c1, fontsize=10)
+            ax.set_ylabel(c2, fontsize=10)
+            ax.set_title(f"{c1} vs {c2} (r={top_pair['pearson_r']:.2f}, {top_pair['strength']})",
+                         fontsize=12, fontweight="bold")
+            fig.tight_layout()
+            scatter_path = _save(fig, f"scatter_{_slug(c1)}_vs_{_slug(c2)}")
+            chart_candidates.append({
+                "path": scatter_path, "family": "correlation_scatter",
+                "score": round(abs(top_pair["pearson_r"]) * 100, 1),
+                "reason": f"strongest pair r={top_pair['pearson_r']:.2f}",
+            })
+
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -332,11 +382,11 @@ def _correlation(df, schema_blueprint):
 
 def _growth_rates(df, schema_blueprint):
     result = {}
-    chart_paths = []
+    chart_candidates = []
 
     rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
-        return result, chart_paths
+        return result, chart_candidates
 
     label = _revenue_label(rev_col)
     slug = _slug(label)
@@ -376,7 +426,13 @@ def _growth_rates(df, schema_blueprint):
             lines2, labels2 = ax2.get_legend_handles_labels()
             ax.legend(lines1+lines2, labels1+labels2, loc="upper left", fontsize=9)
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"monthly_{slug}_growth"))
+            growth_path = _save(fig, f"monthly_{slug}_growth")
+            max_swing = float(valid["mom_growth_pct"].abs().max()) if not valid.empty else 0.0
+            chart_candidates.append({
+                "path": growth_path, "family": "growth_rates_monthly",
+                "score": round(min(100.0, max_swing), 1),
+                "reason": f"max MoM swing={max_swing:.1f}%",
+            })
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
     if quarter_col and year_col:
@@ -404,9 +460,16 @@ def _growth_rates(df, schema_blueprint):
             ax.set_ylabel(label)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"quarterly_{slug}"))
+            quarterly_path = _save(fig, f"quarterly_{slug}")
+            valid_q = quarterly.dropna(subset=["qoq_growth_pct"])
+            max_swing_q = float(valid_q["qoq_growth_pct"].abs().max()) if not valid_q.empty else 0.0
+            chart_candidates.append({
+                "path": quarterly_path, "family": "growth_rates_quarterly",
+                "score": round(min(100.0, max_swing_q), 1),
+                "reason": f"max QoQ swing={max_swing_q:.1f}%",
+            })
 
-    return result, chart_paths
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -415,11 +478,11 @@ def _growth_rates(df, schema_blueprint):
 
 def _top_bottom_rankings(df, schema_blueprint, n=5):
     result = {}
-    chart_paths = []
+    chart_candidates = []
 
     rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
-        return result, chart_paths
+        return result, chart_candidates
 
     label = _revenue_label(rev_col)
     slug = _slug(label)
@@ -482,9 +545,15 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
         ax.invert_yaxis()
         fig.tight_layout()
-        chart_paths.append(_save(fig, f"top_{n}_{cat_col.lower()}_{slug}"))
+        ranking_path = _save(fig, f"top_{n}_{cat_col.lower()}_{slug}")
+        spread = float(grouped["revenue_share_pct"].max() - grouped["revenue_share_pct"].min())
+        chart_candidates.append({
+            "path": ranking_path, "family": "top_bottom_ranking",
+            "score": round(min(100.0, spread), 1),
+            "reason": f"{cat_col} revenue share spread={spread:.1f}pp",
+        })
 
-    return result, chart_paths
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -493,11 +562,11 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
 
 def _seasonality(df, schema_blueprint):
     result = {}
-    chart_paths = []
+    chart_candidates = []
 
     rev_col = _find_revenue_col(df, schema_blueprint)
     if not rev_col or not pd.api.types.is_numeric_dtype(df[rev_col]):
-        return result, chart_paths
+        return result, chart_candidates
 
     label = _revenue_label(rev_col)
     slug = _slug(label)
@@ -531,7 +600,14 @@ def _seasonality(df, schema_blueprint):
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             ax.grid(axis="y", linestyle="--", alpha=0.5)
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"monthly_{slug}_seasonality"))
+            monthly_path = _save(fig, f"monthly_{slug}_seasonality")
+            spread = abs(float(best_month[rev_col]) - float(worst_month[rev_col]))
+            relative_spread = spread / max(abs(float(worst_month[rev_col])), 1e-9) * 100
+            chart_candidates.append({
+                "path": monthly_path, "family": "seasonality_monthly",
+                "score": round(min(100.0, relative_spread), 1),
+                "reason": f"best/worst month spread={relative_spread:.1f}%",
+            })
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
     if quarter_col:
@@ -557,7 +633,14 @@ def _seasonality(df, schema_blueprint):
             ax.set_ylabel(f"Avg {label}", fontsize=10)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"quarterly_{slug}_seasonality"))
+            quarterly_path = _save(fig, f"quarterly_{slug}_seasonality")
+            spread_q = abs(float(best_q[rev_col]) - float(worst_q[rev_col]))
+            relative_spread_q = spread_q / max(abs(float(worst_q[rev_col])), 1e-9) * 100
+            chart_candidates.append({
+                "path": quarterly_path, "family": "seasonality_quarterly",
+                "score": round(min(100.0, relative_spread_q), 1),
+                "reason": f"best/worst quarter spread={relative_spread_q:.1f}%",
+            })
 
     dow_col = next((c for c in df.columns if c.endswith("_day_of_week")), None)
     if dow_col:
@@ -566,7 +649,7 @@ def _seasonality(df, schema_blueprint):
         dow_avg["day_name"] = dow_avg[dow_col].map(day_names)
         result["day_of_week"] = dow_avg.to_dict(orient="records")
 
-    return result, chart_paths
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -650,7 +733,7 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
 
 def _category_distributions(df, schema_blueprint):
     result = {}
-    chart_paths = []
+    chart_candidates = []
 
     for col in _categorical_cols(df, schema_blueprint):
         counts = df[col].value_counts(dropna=False)
@@ -675,9 +758,18 @@ def _category_distributions(df, schema_blueprint):
             ax.set_ylabel("Count", fontsize=10)
             plt.xticks(rotation=30, ha="right")
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"dist_{col.lower()}"))
+            dist_path = _save(fig, f"dist_{col.lower()}")
+            # A distribution that's far from uniform (one category dominating
+            # or a long tail) is more worth showing than a near-even split.
+            uniform_pct = 100.0 / len(counts)
+            imbalance = float(pct.max()) - uniform_pct
+            chart_candidates.append({
+                "path": dist_path, "family": "category_distribution",
+                "score": round(max(15.0, min(100.0, imbalance)), 1),
+                "reason": f"{col} top share={pct.max():.1f}% vs uniform={uniform_pct:.1f}%",
+            })
 
-    return result, chart_paths
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -686,7 +778,7 @@ def _category_distributions(df, schema_blueprint):
 
 def _regression_trends(df, schema_blueprint):
     result = {}
-    chart_paths = []
+    chart_candidates = []
 
     # Build a monotonic time index from year+month (if available) so that the
     # regression x-axis increases across years rather than cycling 1-12.
@@ -708,7 +800,7 @@ def _regression_trends(df, schema_blueprint):
         time_label = "row_index"
 
     if time_index is None or time_index.dropna().empty:
-        return result, chart_paths
+        return result, chart_candidates
 
     # Columns eligible for regression: exclude date-derived columns entirely
     # (they are trivially correlated with the time axis itself), and exclude
@@ -753,6 +845,7 @@ def _regression_trends(df, schema_blueprint):
             "trend":       "upward" if slope > 0 else "downward",
             "significant": p_value < 0.05,
             "x_axis":      time_label,
+            "n":           int(len(x)),
         }
 
     # Revenue trend line chart — only draw it when the trend is statistically
@@ -785,9 +878,14 @@ def _regression_trends(df, schema_blueprint):
             ax.legend(fontsize=9)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
-            chart_paths.append(_save(fig, f"{_slug(label)}_trend_regression"))
+            trend_path = _save(fig, f"{_slug(label)}_trend_regression")
+            chart_candidates.append({
+                "path": trend_path, "family": "regression_trend",
+                "score": round(result[rev_col]["r_squared"] * 100, 1),
+                "reason": f"R²={result[rev_col]['r_squared']:.3f}",
+            })
 
-    return result, chart_paths
+    return result, chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -795,11 +893,11 @@ def _regression_trends(df, schema_blueprint):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _distribution_charts(df, schema_blueprint):
-    chart_paths = []
+    chart_candidates = []
     num_cols = _numeric_cols(df, schema_blueprint)[:6]
 
     if not num_cols:
-        return chart_paths
+        return chart_candidates
 
     # Standardize each column (z-score) before combining them on one boxplot.
     # Numeric columns are rarely on the same scale (e.g. price in currency vs.
@@ -825,7 +923,12 @@ def _distribution_charts(df, schema_blueprint):
     ax.set_title("Numeric Columns — Distribution Comparison (standardized)", fontsize=13, fontweight="bold")
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     fig.tight_layout()
-    chart_paths.append(_save(fig, "boxplot_numeric_cols"))
+    boxplot_path = _save(fig, "boxplot_numeric_cols")
+    chart_candidates.append({
+        "path": boxplot_path, "family": "distribution_boxplot",
+        "score": 55.0,
+        "reason": f"overview across {len(num_cols)} numeric columns",
+    })
 
     rev_col = _find_revenue_col(df, schema_blueprint)
     if rev_col and pd.api.types.is_numeric_dtype(df[rev_col]):
@@ -841,9 +944,17 @@ def _distribution_charts(df, schema_blueprint):
         ax.legend(fontsize=9)
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
         fig.tight_layout()
-        chart_paths.append(_save(fig, f"{_slug(label)}_histogram"))
+        hist_path = _save(fig, f"{_slug(label)}_histogram")
+        # A skewed distribution (long tail of high/low values) is more worth
+        # showing than a plain, roughly-symmetric bell curve.
+        skew_score = min(100.0, abs(float(s.skew())) * 15 + 35)
+        chart_candidates.append({
+            "path": hist_path, "family": "revenue_histogram",
+            "score": round(skew_score, 1),
+            "reason": f"{label} skewness={s.skew():.2f}",
+        })
 
-    return chart_paths
+    return chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -851,13 +962,13 @@ def _distribution_charts(df, schema_blueprint):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _derived_metrics_charts(df):
-    chart_paths = []
+    chart_candidates = []
 
     derived_cols = [c for c in df.columns if c.startswith("derived_")
                     and pd.api.types.is_numeric_dtype(df[c])]
 
     if not derived_cols:
-        return chart_paths
+        return chart_candidates
 
     margin_col = next((c for c in derived_cols if "margin" in c), None)
     month_col  = next((c for c in df.columns if c.endswith("_month")), None)
@@ -876,7 +987,14 @@ def _derived_metrics_charts(df):
             ax.legend(fontsize=9)
             ax.grid(axis="y", linestyle="--", alpha=0.4)
             fig.tight_layout()
-            chart_paths.append(_save(fig, "profit_margin_trend"))
+            margin_path = _save(fig, "profit_margin_trend")
+            margin_mean = monthly[margin_col].mean()
+            cv = float(monthly[margin_col].std() / abs(margin_mean)) if margin_mean else 0.0
+            chart_candidates.append({
+                "path": margin_path, "family": "derived_margin_trend",
+                "score": round(min(100.0, cv * 200 + 30), 1),
+                "reason": f"margin CV={cv:.2f}",
+            })
 
     if len(derived_cols) >= 2:
         # Each derived metric can be on a wildly different unit (currency profit
@@ -898,9 +1016,14 @@ def _derived_metrics_charts(df):
             ax.tick_params(axis="x", labelsize=8)
         fig.suptitle("Derived Business Metrics — Averages", fontsize=13, fontweight="bold")
         fig.tight_layout()
-        chart_paths.append(_save(fig, "derived_metrics_summary"))
+        summary_path = _save(fig, "derived_metrics_summary")
+        chart_candidates.append({
+            "path": summary_path, "family": "derived_metrics_summary",
+            "score": 40.0,
+            "reason": f"averages across {len(cols_to_plot)} derived metrics",
+        })
 
-    return chart_paths
+    return chart_candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -965,7 +1088,7 @@ def agent4_analysis(state: GraphState) -> GraphState:
         f"time_axis={chart_plan['has_time_axis']}"
     )
 
-    all_chart_paths = []
+    all_chart_candidates = []
     stats = {}
     stats["chart_plan"] = chart_plan
 
@@ -973,19 +1096,18 @@ def agent4_analysis(state: GraphState) -> GraphState:
     print(f"[Agent 4] Step 1 — Descriptive stats: {len(stats['descriptive'])} columns")
 
     if chart_plan["chart_families"]["correlation"]:
-        stats["correlation"], corr_path = _correlation(df, schema_blueprint)
-        if corr_path:
-            all_chart_paths.append(corr_path)
+        stats["correlation"], candidates = _correlation(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
         print(f"[Agent 4] Step 2 — Correlation done, strong pairs: {len(stats['correlation'].get('strong_pairs', []))}")
     else:
         stats["correlation"] = {}
         print("[Agent 4] Step 2 — Correlation skipped (fewer than 2 numeric columns)")
 
     if chart_plan["chart_families"]["growth_rates"]:
-        stats["growth_rates"], paths = _growth_rates(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        if stats["growth_rates"] or paths:
-            print(f"[Agent 4] Step 3 — Growth rates done ({len(paths)} charts)")
+        stats["growth_rates"], candidates = _growth_rates(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        if stats["growth_rates"] or candidates:
+            print(f"[Agent 4] Step 3 — Growth rates done ({len(candidates)} charts)")
         else:
             print("[Agent 4] Step 3 — Growth rates skipped (no usable revenue/time axis after filtering)")
     else:
@@ -993,10 +1115,10 @@ def agent4_analysis(state: GraphState) -> GraphState:
         print("[Agent 4] Step 3 — Growth rates skipped (no revenue/time axis)")
 
     if chart_plan["chart_families"]["top_bottom"]:
-        stats["top_bottom"], paths = _top_bottom_rankings(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        if stats["top_bottom"] or paths:
-            print(f"[Agent 4] Step 4 — Rankings done ({len(paths)} charts)")
+        stats["top_bottom"], candidates = _top_bottom_rankings(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        if stats["top_bottom"] or candidates:
+            print(f"[Agent 4] Step 4 — Rankings done ({len(candidates)} charts)")
         else:
             print("[Agent 4] Step 4 — Rankings skipped (no usable categorical ranking columns)")
     else:
@@ -1004,10 +1126,10 @@ def agent4_analysis(state: GraphState) -> GraphState:
         print("[Agent 4] Step 4 — Rankings skipped (no revenue/category pairing)")
 
     if chart_plan["chart_families"]["seasonality"]:
-        stats["seasonality"], paths = _seasonality(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        if stats["seasonality"] or paths:
-            print(f"[Agent 4] Step 5 — Seasonality done ({len(paths)} charts)")
+        stats["seasonality"], candidates = _seasonality(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        if stats["seasonality"] or candidates:
+            print(f"[Agent 4] Step 5 — Seasonality done ({len(candidates)} charts)")
         else:
             print("[Agent 4] Step 5 — Seasonality skipped (no usable time axis after filtering)")
     else:
@@ -1033,18 +1155,18 @@ def agent4_analysis(state: GraphState) -> GraphState:
         print("[Agent 4] Step 6 — Anomalies skipped (no numeric columns)")
 
     if chart_plan["chart_families"]["distributions"]:
-        stats["distributions"], paths = _category_distributions(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        print(f"[Agent 4] Step 7 — Distributions done ({len(paths)} charts)")
+        stats["distributions"], candidates = _category_distributions(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 7 — Distributions done ({len(candidates)} charts)")
     else:
         stats["distributions"] = {}
         print("[Agent 4] Step 7 — Distributions skipped (no categorical columns)")
 
     if chart_plan["chart_families"]["regression"]:
-        stats["regression"], paths = _regression_trends(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        if stats["regression"] or paths:
-            print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(paths)} charts)")
+        stats["regression"], candidates = _regression_trends(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        if stats["regression"] or candidates:
+            print(f"[Agent 4] Step 8 — Regression done ({len(stats['regression'])} columns, {len(candidates)} charts)")
         else:
             print("[Agent 4] Step 8 — Regression skipped (no usable time axis after filtering)")
     else:
@@ -1052,22 +1174,22 @@ def agent4_analysis(state: GraphState) -> GraphState:
         print("[Agent 4] Step 8 — Regression skipped (no time axis)")
 
     if chart_plan["chart_families"]["distribution_charts"]:
-        paths = _distribution_charts(df, schema_blueprint)
-        all_chart_paths.extend(paths)
-        print(f"[Agent 4] Step 9 — Distribution charts done ({len(paths)} charts)")
+        candidates = _distribution_charts(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 9 — Distribution charts done ({len(candidates)} charts)")
     else:
-        paths = []
+        candidates = []
         print("[Agent 4] Step 9 — Distribution charts skipped (no numeric columns)")
 
     if chart_plan["chart_families"]["derived_metrics"]:
-        paths = _derived_metrics_charts(df)
-        all_chart_paths.extend(paths)
-        if paths:
-            print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(paths)} charts)")
+        candidates = _derived_metrics_charts(df)
+        all_chart_candidates.extend(candidates)
+        if candidates:
+            print(f"[Agent 4] Step 10 — Derived metrics charts done ({len(candidates)} charts)")
         else:
             print("[Agent 4] Step 10 — Derived metrics skipped (derived columns present but no useful chart pairing)")
     else:
-        paths = []
+        candidates = []
         print("[Agent 4] Step 10 — Derived metrics skipped (no derived metrics)")
 
     data_quality = _apply_anomaly_quality_penalty(state.get("data_quality"), stats.get("anomaly_summary", {}))
@@ -1077,6 +1199,36 @@ def agent4_analysis(state: GraphState) -> GraphState:
             f"{data_quality.get('overall_quality_score_pre_anomaly')} -> {data_quality.get('overall_quality_score')} "
             f"(penalty={data_quality.get('anomaly_quality_penalty')}, flagged={data_quality.get('anomaly_flagged_row_pct')}%)"
         )
+
+    # Rank all chart candidates across every family by informativeness score
+    # and keep only the top MAX_CHARTS_PER_REPORT. Without this cap, a wide
+    # dataset with many numeric/categorical columns produces dozens of charts
+    # of wildly uneven value (e.g. a near-uniform category bar chart next to a
+    # strong correlation heatmap), which buries the genuinely useful ones and
+    # makes every report look the same regardless of what the data says.
+    ranked = sorted(all_chart_candidates, key=lambda c: c["score"], reverse=True)
+    kept_paths = {c["path"] for c in ranked[:MAX_CHARTS_PER_REPORT]}
+    dropped = [c for c in all_chart_candidates if c["path"] not in kept_paths]
+    for c in dropped:
+        try:
+            os.remove(c["path"])
+        except OSError:
+            pass
+    # Preserve original generation order among the kept charts so the report
+    # gallery still reads top-to-bottom the way the pipeline produced it,
+    # rather than jumping around in score order.
+    all_chart_paths = [c["path"] for c in all_chart_candidates if c["path"] in kept_paths]
+
+    stats["chart_selection"] = {
+        "candidates": all_chart_candidates,
+        "kept_count": len(all_chart_paths),
+        "dropped_count": len(dropped),
+        "max_charts_per_report": MAX_CHARTS_PER_REPORT,
+    }
+    print(
+        f"[Agent 4] Step 12 — Chart selection: {len(all_chart_candidates)} candidates -> "
+        f"kept {len(all_chart_paths)} (dropped {len(dropped)} low-informativeness charts)"
+    )
 
     print(f"[Agent 4] Done — {len(all_chart_paths)} charts saved to {CHARTS_DIR}/")
 

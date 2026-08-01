@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import uuid
+import re
+import time
 from typing import Any, TYPE_CHECKING
 
 import matplotlib
@@ -27,8 +29,8 @@ import pandas as pd
 from agents.agent_2 import (
     GEMINI_MODEL,
     GROQ_MODEL,
-    _get_gemini_client,
     _get_groq_client,
+    _call_gemini_json_with_failover,
     _parse_schema_blueprint_response,
 )
 from api.utils.serialization import chart_url
@@ -47,6 +49,13 @@ COLORS = {
 }
 
 MAX_HISTORY_TURNS = 6  # recent user/assistant turns replayed to the model for context
+MAX_LLM_COLUMNS = 18
+MAX_LLM_CORRELATIONS = 5
+MAX_LLM_TRENDS = 4
+MAX_LLM_FINDINGS = 4
+MAX_LLM_TEXT_CHARS = 280
+MAX_LLM_USER_CONTENT_CHARS = 12000
+GEMINI_COOLDOWN_SECONDS = 60
 ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
 # "income" is intentionally excluded: a customer/personal income column is not
 # company revenue (see agent_2.py's financial_role tagging), so treating it as
@@ -54,6 +63,34 @@ ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
 REVENUE_QUERY_TERMS = ("revenue", "sales", "profit", "amount", "turnover")
 RANKING_QUERY_TERMS = ("top", "best", "highest", "most", "max", "largest", "leader")
 ACTION_QUERY_TERMS = ("what do i do", "what should i do", "recommend", "next step", "how do i improve", "action")
+
+# Maps a topic to the phrases that imply the question needs that section of the
+# dataset context. Only matched topics are sent to the LLM - unrelated sections
+# (e.g. seasonality for a pure anomaly question) are left out of the prompt
+# entirely, which is what actually keeps the request small turn over turn.
+TOPIC_KEYWORDS = {
+    "correlation": ("correlat", "relationship", "related", "linked", "connect"),
+    "trend": ("trend", "growth", "increas", "decreas", "season", "over time", "month", "quarter", "year"),
+    "ranking": ("top", "best", "highest", "most", "max", "largest", "leader", "worst", "bottom", "lowest", "least"),
+    "anomaly": ("anomal", "outlier", "unusual", "weird", "odd", "suspicious"),
+    "quality": ("quality", "trust", "confidence", "reliable", "valid", "accurate"),
+    "distribution": ("distribut", "categor", "breakdown", "split", "segment"),
+    "stats": ("average", "mean", "median", "std", "deviation", "statistic", "describe"),
+}
+
+_GEMINI_RETRY_AT = 0.0
+_GEMINI_DISABLED_BY_QUOTA = False
+
+
+def _disable_gemini_due_to_quota(reason: str) -> None:
+    global _GEMINI_DISABLED_BY_QUOTA, _GEMINI_RETRY_AT
+    _GEMINI_DISABLED_BY_QUOTA = True
+    _GEMINI_RETRY_AT = float("inf")
+    print(f"[Chat] Gemini disabled for this process after quota error: {reason}")
+
+
+def _gemini_is_disabled() -> bool:
+    return _GEMINI_DISABLED_BY_QUOTA
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +148,214 @@ def _condense_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
         for m in trimmed
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
+
+
+def _truncate_text(value: Any, limit: int = MAX_LLM_TEXT_CHARS) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _compact_context_for_llm(context: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the facts that help the model answer, not the entire analysis blob.
+
+    This prevents provider-side input limit errors while preserving grounded
+    signals for correlations, trends, rankings, anomalies, quality, and chart
+    availability.
+    """
+    context = context or {}
+    dataset = context.get("dataset", {}) or {}
+    available_columns = context.get("available_columns", {}) or {}
+    descriptive_stats = context.get("descriptive_stats", {}) or {}
+    strong_correlations = context.get("strong_correlations", []) or []
+    significant_trends = context.get("significant_trends", {}) or {}
+    top_bottom_rankings = context.get("top_bottom_rankings", {}) or {}
+
+    compact_columns = {
+        col: meta
+        for idx, (col, meta) in enumerate(available_columns.items())
+        if idx < MAX_LLM_COLUMNS and isinstance(meta, dict)
+    }
+
+    compact_descriptive = {}
+    for idx, (col, metrics) in enumerate(descriptive_stats.items()):
+        if idx >= MAX_LLM_COLUMNS or not isinstance(metrics, dict):
+            continue
+        compact_descriptive[col] = {
+            key: metrics.get(key)
+            for key in ("count", "mean", "median", "std", "min", "max", "missing_pct", "unique")
+            if key in metrics
+        }
+
+    compact_correlations = [
+        {
+            "col1": pair.get("col1"),
+            "col2": pair.get("col2"),
+            "pearson_r": pair.get("pearson_r"),
+            "direction": pair.get("direction"),
+            "strength": pair.get("strength"),
+        }
+        for pair in strong_correlations[:MAX_LLM_CORRELATIONS]
+        if isinstance(pair, dict)
+    ]
+
+    compact_trends = {}
+    for idx, (col, metrics) in enumerate(significant_trends.items()):
+        if idx >= MAX_LLM_TRENDS or not isinstance(metrics, dict):
+            continue
+        compact_trends[col] = {
+            key: metrics.get(key)
+            for key in ("trend", "slope", "r_squared", "p_value", "n", "x_axis")
+            if key in metrics
+        }
+
+    compact_rankings = {}
+    for idx, (col, metrics) in enumerate(top_bottom_rankings.items()):
+        if idx >= MAX_LLM_FINDINGS or not isinstance(metrics, dict):
+            continue
+        compact_rankings[col] = {
+            "top": (metrics.get("top") or [])[:3],
+            "bottom": (metrics.get("bottom") or [])[:3],
+        }
+
+    return {
+        "dataset": dataset,
+        "chart_plan": context.get("chart_plan", {}) or {},
+        "available_columns": compact_columns,
+        "descriptive_stats": compact_descriptive,
+        "strong_correlations": compact_correlations,
+        "growth_rates": context.get("growth_rates", {}) or {},
+        "seasonality": context.get("seasonality", {}) or {},
+        "top_bottom_rankings": compact_rankings,
+        "anomaly_summary": context.get("anomaly_summary", {}) or {},
+        "significant_trends": compact_trends,
+        "category_distributions": context.get("category_distributions", {}) or {},
+        "validation": context.get("validation", {}) or {},
+        "reliability": context.get("reliability", {}) or {},
+        "executive_summary": _truncate_text(context.get("executive_summary")),
+        "key_findings": [
+            _truncate_text(item)
+            for item in (context.get("key_findings", []) or [])[:MAX_LLM_FINDINGS]
+            if item
+        ],
+        "existing_charts": (context.get("existing_charts", []) or [])[:MAX_LLM_FINDINGS],
+    }
+
+
+def _detect_question_topics(question: str) -> set[str]:
+    """Classify which dataset-context sections a question actually needs."""
+    q = (question or "").lower()
+    return {topic for topic, terms in TOPIC_KEYWORDS.items() if any(term in q for term in terms)}
+
+
+def _build_topic_scoped_context(compact_context: dict[str, Any], topics: set[str]) -> dict[str, Any]:
+    """Keep only the dataset-fact sections relevant to the detected topics.
+
+    Base facts (dataset shape, columns, executive summary, existing charts)
+    are always included since the model needs them to answer anything and to
+    know what it can chart. Everything else is only attached when the
+    question's topic calls for it, which is what actually shrinks the prompt
+    on follow-up turns instead of resending the whole analysis every time.
+    """
+    scoped = {
+        "dataset": compact_context.get("dataset", {}),
+        "available_columns": compact_context.get("available_columns", {}),
+        "executive_summary": compact_context.get("executive_summary"),
+        "existing_charts": compact_context.get("existing_charts", []),
+    }
+
+    # An unrecognized/generic question ("tell me about this data") gets a
+    # light default sample of every section rather than nothing at all - the
+    # sections are already tightly capped by _compact_context_for_llm.
+    include_all = not topics
+
+    if include_all or "correlation" in topics:
+        scoped["strong_correlations"] = compact_context.get("strong_correlations", [])
+    if include_all or "trend" in topics:
+        scoped["growth_rates"] = compact_context.get("growth_rates", {})
+        scoped["seasonality"] = compact_context.get("seasonality", {})
+        scoped["significant_trends"] = compact_context.get("significant_trends", {})
+    if include_all or "ranking" in topics:
+        scoped["top_bottom_rankings"] = compact_context.get("top_bottom_rankings", {})
+    if include_all or "anomaly" in topics:
+        scoped["anomaly_summary"] = compact_context.get("anomaly_summary", {})
+    if include_all or "quality" in topics:
+        scoped["validation"] = compact_context.get("validation", {})
+        scoped["reliability"] = compact_context.get("reliability", {})
+    if include_all or "distribution" in topics:
+        scoped["category_distributions"] = compact_context.get("category_distributions", {})
+    if include_all or "stats" in topics:
+        scoped["descriptive_stats"] = compact_context.get("descriptive_stats", {})
+    if include_all:
+        scoped["key_findings"] = compact_context.get("key_findings", [])
+
+    return scoped
+
+
+def _build_llm_user_content(context: dict[str, Any], question: str, history: list[dict[str, str]]) -> str:
+    import json
+
+    compact_context = _compact_context_for_llm(context)
+    topics = _detect_question_topics(question)
+    scoped_context = _build_topic_scoped_context(compact_context, topics)
+    compact_history = [
+        {"role": turn.get("role"), "content": _truncate_text(turn.get("content"), 400)}
+        for turn in history[-4:]
+        if turn.get("role") in ("user", "assistant") and turn.get("content")
+    ]
+
+    user_content = (
+        f"Dataset facts:\n{json.dumps(scoped_context, separators=(',', ':'), default=str)}\n\n"
+        f"Conversation so far:\n{json.dumps(compact_history, separators=(',', ':'), default=str)}\n\n"
+        f"User question: {question}"
+    )
+
+    if len(user_content) > MAX_LLM_USER_CONTENT_CHARS:
+        minimal_context = {
+            "dataset": scoped_context.get("dataset", {}),
+            "available_columns": scoped_context.get("available_columns", {}),
+            "executive_summary": scoped_context.get("executive_summary"),
+            "existing_charts": scoped_context.get("existing_charts", []),
+        }
+        # Even scoped, keep at most one extra section under the hard cap -
+        # whichever the topic router already decided was most relevant.
+        for key in ("strong_correlations", "significant_trends", "top_bottom_rankings",
+                    "anomaly_summary", "validation", "category_distributions", "descriptive_stats"):
+            if key in scoped_context:
+                minimal_context[key] = scoped_context[key]
+                break
+        user_content = (
+            f"Dataset facts:\n{json.dumps(minimal_context, separators=(',', ':'), default=str)}\n\n"
+            f"Conversation so far:\n{json.dumps(compact_history[-2:], separators=(',', ':'), default=str)}\n\n"
+            f"User question: {question}"
+        )
+
+    return user_content
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(term in text for term in ("429", "resource_exhausted", "quota exceeded", "rate limit"))
+
+
+def _quota_retry_delay_seconds(exc: Exception) -> int:
+    text = str(exc)
+    match = re.search(r"retry in\s+(\d+(?:\.\d+)?)s", text, re.IGNORECASE)
+    if match:
+        try:
+            return max(5, int(float(match.group(1))))
+        except ValueError:
+            pass
+    retry_match = re.search(r"retryDelay['\"]?:\s*['\"]?(\d+)s", text, re.IGNORECASE)
+    if retry_match:
+        try:
+            return max(5, int(retry_match.group(1)))
+        except ValueError:
+            pass
+    return GEMINI_COOLDOWN_SECONDS
 
 
 def _normalize_question(question: str) -> str:
@@ -253,13 +498,7 @@ Return ONLY a JSON object with exactly these keys:
 
 def _call_llm_for_chat(context: dict[str, Any], question: str, history: list[dict[str, str]]) -> dict[str, Any]:
     """Ask Groq for a grounded chat answer, falling back to Gemini on provider failure."""
-    import json
-
-    user_content = (
-        f"Dataset facts:\n{json.dumps(context, indent=2, default=str)}\n\n"
-        f"Conversation so far:\n{json.dumps(history, indent=2)}\n\n"
-        f"User question: {question}"
-    )
+    user_content = _build_llm_user_content(context, question, history)
 
     try:
         response = _get_groq_client().chat.completions.create(
@@ -269,7 +508,7 @@ def _call_llm_for_chat(context: dict[str, Any], question: str, history: list[dic
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=700,
+            max_tokens=512,
         )
         raw_text = response.choices[0].message.content.strip()
         parsed = _parse_schema_blueprint_response(raw_text)
@@ -278,19 +517,28 @@ def _call_llm_for_chat(context: dict[str, Any], question: str, history: list[dic
     except Exception as groq_error:
         print(f"[Chat] Groq unavailable; trying Gemini: {groq_error}")
 
-    response = _get_gemini_client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=user_content,
-        config={
-            "system_instruction": CHAT_SYSTEM_PROMPT,
-            "temperature": 0.3,
-            "max_output_tokens": 700,
-        },
-    )
-    raw_text = response.text.strip()
-    parsed = _parse_schema_blueprint_response(raw_text)
-    parsed["source"] = "gemini"
-    return parsed
+    global _GEMINI_RETRY_AT
+    if _gemini_is_disabled():
+        raise RuntimeError("Gemini disabled after quota exhaustion; using fallback")
+
+    now = time.monotonic()
+    if now < _GEMINI_RETRY_AT:
+        remaining = int(round(_GEMINI_RETRY_AT - now))
+        raise RuntimeError(f"Gemini temporarily skipped after quota error; retry in {remaining}s")
+
+    try:
+        parsed = _call_gemini_json_with_failover(
+            contents=user_content,
+            system_instruction=CHAT_SYSTEM_PROMPT,
+            temperature=0.3,
+            max_output_tokens=512,
+        )
+        parsed["source"] = "gemini"
+        return parsed
+    except Exception as gemini_error:
+        if _is_quota_error(gemini_error):
+            _disable_gemini_due_to_quota(str(gemini_error))
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -482,6 +730,10 @@ def ask_question(job: "Job", question: str) -> dict[str, Any]:
     )
     if deterministic_answer is not None:
         return deterministic_answer
+
+    if _gemini_is_disabled():
+        print("[Chat] Gemini previously disabled by quota; using deterministic fallback directly")
+        return _fallback_answer(context, question)
 
     try:
         llm_out = _call_llm_for_chat(context, question, history)

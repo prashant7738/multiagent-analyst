@@ -70,7 +70,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         state = _build_state()
 
         with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
-             patch.object(agent_6, "_get_gemini_client", side_effect=RuntimeError("no gemini key")):
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
         self.assertEqual(result["insight_narrative"]["source"], "fallback")
@@ -116,7 +116,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         state = _build_state()
 
         with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
-             patch.object(agent_6, "_get_gemini_client", side_effect=RuntimeError("no gemini key")):
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             agent_6.agent6_insight_report_generator(state)
             agent_6.agent6_insight_report_generator(state)
 
@@ -129,7 +129,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         state = _build_state()
 
         with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
-             patch.object(agent_6, "_get_gemini_client", side_effect=RuntimeError("no gemini key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")), \
              patch("weasyprint.HTML", side_effect=RuntimeError("simulated missing system libs")):
             result = agent_6.agent6_insight_report_generator(state)
 

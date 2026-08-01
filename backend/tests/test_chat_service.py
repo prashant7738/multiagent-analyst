@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -31,6 +32,135 @@ class TestChatServiceFacts(unittest.TestCase):
         self.assertIn("revenue", context["significant_trends"])
         self.assertEqual(context["existing_charts"], ["chart1.png"])
         self.assertEqual(context["executive_summary"], "Solid dataset.")
+
+    def test_llm_user_content_is_compacted_for_large_contexts(self):
+        result = {
+            "summary": {"filename": "sample.csv", "rows": 1000, "columns": 120, "quality_score": 91.0},
+            "schema_blueprint": {
+                f"col_{index}": {"semantic_tag": "numeric", "intended_type": "float"}
+                for index in range(60)
+            },
+            "stats": {
+                "descriptive": {
+                    f"col_{index}": {"count": 1000, "mean": float(index), "std": 2.5, "min": 0, "max": 100}
+                    for index in range(60)
+                },
+                "correlation": {
+                    "strong_pairs": [
+                        {"col1": f"col_{index}", "col2": f"col_{index + 1}", "pearson_r": 0.9,
+                         "direction": "positive", "strength": "strong"}
+                        for index in range(10)
+                    ]
+                },
+                "regression": {
+                    f"col_{index}": {"significant": True, "trend": "increasing", "r_squared": 0.8, "n": 100}
+                    for index in range(10)
+                },
+                "top_bottom": {
+                    "region": {
+                        "top": [{"region": f"Region {index}", "revenue_share_pct": 20.0} for index in range(10)],
+                        "bottom": [{"region": f"Region {index}", "revenue_share_pct": 1.0} for index in range(10)],
+                    }
+                },
+            },
+            "insight_narrative": {
+                "executive_summary": "A" * 2000,
+                "key_findings": ["B" * 600 for _ in range(10)],
+            },
+            "charts": [{"name": f"chart_{index}.png", "url": f"/plots/chart_{index}.png"} for index in range(10)],
+            "validation": {"passed": True},
+            "reliability": {"overall_confidence": 0.9},
+        }
+
+        context = chat_service.build_dataset_context(result)
+        user_content = chat_service._build_llm_user_content(context, "What is the biggest trend?", [
+            {"role": "user", "content": "x" * 3000},
+            {"role": "assistant", "content": "y" * 3000},
+            {"role": "user", "content": "z" * 3000},
+        ])
+
+        self.assertLess(len(user_content), 12000)
+        self.assertIn("What is the biggest trend?", user_content)
+        self.assertNotIn("A" * 500, user_content)
+
+    def _multi_topic_context(self):
+        return chat_service.build_dataset_context({
+            "summary": {"filename": "sample.csv", "rows": 500, "columns": 10, "quality_score": 90.0},
+            "schema_blueprint": {"revenue": {"semantic_tag": "currency", "intended_type": "float"}},
+            "stats": {
+                "correlation": {"strong_pairs": [{"col1": "price", "col2": "sales", "pearson_r": 0.9,
+                                                    "direction": "positive", "strength": "strong"}]},
+                "regression": {"revenue": {"significant": True, "trend": "increasing", "r_squared": 0.8, "n": 50}},
+                "growth_rates": {"monthly": {"pct_change": 5.0}},
+                "top_bottom": {"region": {"top": [{"region": "North", "revenue_share_pct": 40.0}], "bottom": []}},
+                "anomaly_summary": {"unique_flagged_rows": 3, "unique_flagged_row_pct": 6.0},
+                "distributions": {"region": {"North": 40, "South": 60}},
+                "descriptive": {"revenue": {"count": 500, "mean": 120.0}},
+            },
+            "insight_narrative": {"executive_summary": "Overview.", "key_findings": ["finding 1"]},
+            "charts": [{"name": "chart1.png", "url": "/plots/chart1.png"}],
+            "validation": {"passed": True},
+            "reliability": {"overall_confidence": 0.9},
+        })
+
+    def test_topic_scoped_context_excludes_unrelated_sections_for_anomaly_question(self):
+        context = self._multi_topic_context()
+
+        user_content = chat_service._build_llm_user_content(context, "Are there any unusual outliers?", [])
+
+        self.assertIn("anomaly_summary", user_content)
+        self.assertNotIn("strong_correlations", user_content)
+        self.assertNotIn("growth_rates", user_content)
+        self.assertNotIn("top_bottom_rankings", user_content)
+        self.assertNotIn("descriptive_stats", user_content)
+
+    def test_topic_scoped_context_excludes_unrelated_sections_for_correlation_question(self):
+        context = self._multi_topic_context()
+
+        user_content = chat_service._build_llm_user_content(context, "What columns are correlated?", [])
+
+        self.assertIn("strong_correlations", user_content)
+        self.assertNotIn("anomaly_summary", user_content)
+        self.assertNotIn("top_bottom_rankings", user_content)
+        self.assertNotIn("significant_trends", user_content)
+
+    def test_topic_scoped_context_includes_default_sections_for_generic_question(self):
+        context = self._multi_topic_context()
+
+        user_content = chat_service._build_llm_user_content(context, "Tell me about this data", [])
+
+        self.assertIn("strong_correlations", user_content)
+        self.assertIn("anomaly_summary", user_content)
+        self.assertIn("top_bottom_rankings", user_content)
+        self.assertIn("key_findings", user_content)
+
+    def test_detect_question_topics_matches_expected_keywords(self):
+        self.assertEqual(chat_service._detect_question_topics("any outliers here?"), {"anomaly"})
+        self.assertEqual(chat_service._detect_question_topics("what's correlated with sales?"), {"correlation"})
+        self.assertEqual(chat_service._detect_question_topics("how many rows are in this file"), set())
+
+    def test_gemini_is_skipped_during_quota_cooldown(self):
+        context = {
+            "dataset": {"rows": 10, "columns": 3, "quality_score": 90},
+            "available_columns": {"region": {"semantic_tag": "categorical"}},
+        }
+
+        original_retry_at = chat_service._GEMINI_RETRY_AT
+        original_disabled = chat_service._GEMINI_DISABLED_BY_QUOTA
+
+        try:
+            chat_service._GEMINI_DISABLED_BY_QUOTA = True
+            with patch.object(chat_service, "_get_groq_client", side_effect=RuntimeError("groq down")), \
+                 patch.object(chat_service, "_call_gemini_json_with_failover") as gemini_call, \
+                 patch.object(chat_service, "_fallback_answer", return_value={"answer": "fallback", "needs_new_chart": False, "chart_request": None, "source": "fallback"}) as fallback_answer:
+                outcome = chat_service.ask_question(type("JobLike", (), {"result": {"summary": {}, "stats": {}}, "chat_history": []})(), "What is the trend?")
+
+            gemini_call.assert_not_called()
+            fallback_answer.assert_called_once()
+            self.assertEqual(outcome["answer"], "fallback")
+        finally:
+            chat_service._GEMINI_RETRY_AT = original_retry_at
+            chat_service._GEMINI_DISABLED_BY_QUOTA = original_disabled
 
     def test_fallback_answer_uses_correlation_facts(self):
         context = {

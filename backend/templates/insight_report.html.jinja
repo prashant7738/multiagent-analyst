@@ -191,6 +191,18 @@
 </div>
 {% endif %}
 
+{% set grounding = narrative.claims_grounding %}
+{% if grounding and grounding.claims_checked %}
+<h2>Narrative Self-Check</h2>
+<p>
+  {{ grounding.claims_grounded }} of {{ grounding.claims_checked }} numbers cited in the narrative
+  matched the computed facts above (confidence {{ grounding.confidence }}).
+  {% if grounding.claims_flagged %}
+    {{ grounding.claims_flagged }} number(s) could not be matched and should be double-checked.
+  {% endif %}
+</p>
+{% endif %}
+
 <div class="footer">
   Validation score: {{ facts.validation.overall_validation_score }}/100
   &middot; Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}

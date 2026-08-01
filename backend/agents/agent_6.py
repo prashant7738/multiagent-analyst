@@ -55,13 +55,19 @@ def _verbose_logging_enabled():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_dataset_facts(state):
-    raw_profile = state.get("raw_profile", {}) or {}
-    shape = raw_profile.get("shape", {}) or {}
+    # `raw_shape` is captured once by Agent 1, immediately on ingestion, before any
+    # transform touches the dataframe (see agent_1.agent1_structural_profiler) and
+    # passed through the state unchanged - it is the single source of truth for
+    # "raw" row/column counts. Fall back to raw_profile.shape (same numbers) only
+    # for states produced before raw_shape existed, e.g. older tests/fixtures.
+    raw_shape = state.get("raw_shape") or {}
+    if not raw_shape:
+        raw_shape = (state.get("raw_profile", {}) or {}).get("shape", {}) or {}
     cleaned_df = state.get("cleaned_df")
     return {
         "csv_path": state.get("csv_path", ""),
-        "raw_rows": shape.get("rows"),
-        "raw_cols": shape.get("cols"),
+        "raw_rows": raw_shape.get("rows"),
+        "raw_cols": raw_shape.get("cols"),
         "cleaned_rows": int(cleaned_df.shape[0]) if cleaned_df is not None else None,
         "cleaned_cols": int(cleaned_df.shape[1]) if cleaned_df is not None else None,
     }
@@ -79,9 +85,23 @@ def _extract_quality_facts(state):
 
 
 def _extract_correlation_facts(stats):
+    # `strong_pairs` already excludes pairs involving Agent 4's leakage-flagged
+    # columns (agent_4.flag_leakage_columns) - flagged columns are surfaced
+    # separately via _extract_excluded_columns_facts instead of as findings here.
     strong_pairs = (stats.get("correlation", {}) or {}).get("strong_pairs", []) or []
     ranked = sorted(strong_pairs, key=lambda p: abs(p.get("pearson_r", 0)), reverse=True)
     return ranked[:TOP_CORRELATIONS_LIMIT]
+
+
+def _extract_excluded_columns_facts(stats):
+    """Columns Agent 4 flagged as likely IDs/leakage artifacts, plus the correlation
+    pairs involving them - kept out of headline findings but still surfaced as an
+    appendix so nothing is silently dropped without explanation."""
+    correlation = stats.get("correlation", {}) or {}
+    return {
+        "flagged_columns": correlation.get("flagged_columns", []) or [],
+        "excluded_pairs": (correlation.get("excluded_pairs", []) or [])[:TOP_CORRELATIONS_LIMIT],
+    }
 
 
 def _extract_growth_facts(stats):
@@ -171,6 +191,7 @@ def _extract_insight_facts(state):
         "dataset": _extract_dataset_facts(state),
         "data_quality": _extract_quality_facts(state),
         "top_correlations": _extract_correlation_facts(stats),
+        "excluded_columns": _extract_excluded_columns_facts(stats),
         "growth": _extract_growth_facts(stats),
         "rankings": _extract_ranking_facts(stats),
         "anomalies": _extract_anomaly_facts(stats),
@@ -287,6 +308,15 @@ Rules:
 statistic that is not present in the input.
 - If a section of the facts is empty or missing, do not mention it.
 - Be concise and business-readable, not academic.
+- Do not report correlations, distributions, or findings involving columns listed under \
+"excluded_columns" (in facts.excluded_columns.flagged_columns / excluded_pairs). These are \
+identifiers or external-model artifacts, not business signals - never narrate them as insights.
+- "dataset.raw_rows"/"dataset.raw_cols" describe the original file as ingested. \
+"dataset.cleaned_rows"/"dataset.cleaned_cols" describe the dataset AFTER cleaning/encoding, \
+which can have a different (often larger, due to one-hot encoding and feature engineering) \
+column count. When the executive summary states "the dataset contains X rows and Y columns", \
+X and Y MUST be raw_rows/raw_cols. If you also mention the post-processing column count, label \
+it explicitly (e.g. "expanded to N features for analysis") - never present it as the raw shape.
 
 You must also write a "plain_language_insights" section aimed at a completely non-technical \
 reader (e.g. a small business owner or manager with no statistics background). This is the \
@@ -553,6 +583,26 @@ def _write_report(html_string, reports_dir, errors):
         return str(html_path), False
 
 
+def _validate_raw_column_count(insight_facts: dict, raw_shape: dict | None) -> None:
+    """Guard against the executive summary silently reporting a post-transform column
+    count as if it were the raw dataset's shape. `raw_shape` is captured once by Agent 1
+    immediately on ingestion (see agent_1.agent1_structural_profiler) and must never be
+    re-derived downstream; `insight_facts["dataset"]["raw_cols"]` should always agree
+    with it. Raises AssertionError on mismatch so this class of bug is caught in tests
+    (or here, best-effort) instead of only surfacing when someone manually diffs the
+    report against the source file.
+    """
+    expected = (raw_shape or {}).get("cols")
+    actual = (insight_facts.get("dataset") or {}).get("raw_cols")
+    if expected is None or actual is None:
+        return
+    assert actual == expected, (
+        f"Executive summary is reporting raw column count as {actual} but Agent 1's "
+        f"raw_shape captured {expected} columns at ingestion — a downstream step is "
+        f"overwriting the raw shape with a post-transform column count."
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -571,6 +621,10 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
     print("[Agent 6] Starting insight report generation")
 
     insight_facts = _extract_insight_facts(state)
+    try:
+        _validate_raw_column_count(insight_facts, state.get("raw_shape"))
+    except AssertionError as shape_error:
+        errors.append(f"Agent6: {shape_error}")
 
     narrative_source = "llm"
     try:

@@ -228,7 +228,10 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
 
 GROQ_MODEL = "llama-3.3-70b-versatile" 
 GEMINI_MODEL = "gemini-flash-latest"
+<<<<<<< HEAD
 GEMINI_MODEL_FALLBACKS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
+=======
+>>>>>>> 9b9347a8038dee305ec3498661677449c55c8c38
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 15
 LLM_SINGLE_CALL_THRESHOLD = 20

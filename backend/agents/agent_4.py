@@ -374,11 +374,8 @@ def _correlation(df, schema_blueprint):
     flagged_columns = flag_leakage_columns(df, pearson)
 
     strong_pairs = []
-<<<<<<< HEAD
     max_abs_r = 0.0
-=======
     excluded_pairs = []
->>>>>>> 9b9347a8038dee305ec3498661677449c55c8c38
     for i, c1 in enumerate(cols):
         for c2 in cols[i+1:]:
             r = pearson.loc[c1, c2]
@@ -395,12 +392,13 @@ def _correlation(df, schema_blueprint):
                 else:
                     strong_pairs.append(pair)
 
-<<<<<<< HEAD
     result = {
-        "pearson":      pearson.to_dict(),
-        "spearman":     spearman.to_dict(),
-        "strong_pairs": strong_pairs,
-        "max_abs_r":    round(max_abs_r, 4),
+        "pearson":         pearson.to_dict(),
+        "spearman":        spearman.to_dict(),
+        "strong_pairs":    strong_pairs,
+        "max_abs_r":       round(max_abs_r, 4),
+        "flagged_columns": sorted(flagged_columns & set(cols)),
+        "excluded_pairs":  excluded_pairs,
     }
     chart_candidates = []
 
@@ -457,31 +455,6 @@ def _correlation(df, schema_blueprint):
             })
 
     return result, chart_candidates
-=======
-    fig, ax = plt.subplots(figsize=(max(6, len(cols)), max(5, len(cols)-1)))
-    im = ax.imshow(pearson.values, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
-    plt.colorbar(im, ax=ax, shrink=0.8)
-    ax.set_xticks(range(len(cols)))
-    ax.set_yticks(range(len(cols)))
-    ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=9)
-    ax.set_yticklabels(cols, fontsize=9)
-    for i in range(len(cols)):
-        for j in range(len(cols)):
-            ax.text(j, i, f"{pearson.values[i,j]:.2f}",
-                    ha="center", va="center", fontsize=8,
-                    color="black" if abs(pearson.values[i,j]) < 0.7 else "white")
-    ax.set_title("Pearson Correlation Heatmap", fontsize=13, fontweight="bold", pad=12)
-    fig.tight_layout()
-    path = _save(fig, "correlation_heatmap")
-
-    return {
-        "pearson":         pearson.to_dict(),
-        "spearman":        spearman.to_dict(),
-        "strong_pairs":    strong_pairs,
-        "flagged_columns": sorted(flagged_columns & set(cols)),
-        "excluded_pairs":  excluded_pairs,
-    }, path
->>>>>>> 9b9347a8038dee305ec3498661677449c55c8c38
 
 
 # ─────────────────────────────────────────────────────────────────────────────

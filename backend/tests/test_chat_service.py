@@ -33,127 +33,41 @@ class TestChatServiceFacts(unittest.TestCase):
         self.assertEqual(context["existing_charts"], ["chart1.png"])
         self.assertEqual(context["executive_summary"], "Solid dataset.")
 
-    def test_llm_user_content_is_compacted_for_large_contexts(self):
-        result = {
-            "summary": {"filename": "sample.csv", "rows": 1000, "columns": 120, "quality_score": 91.0},
-            "schema_blueprint": {
-                f"col_{index}": {"semantic_tag": "numeric", "intended_type": "float"}
-                for index in range(60)
-            },
-            "stats": {
-                "descriptive": {
-                    f"col_{index}": {"count": 1000, "mean": float(index), "std": 2.5, "min": 0, "max": 100}
-                    for index in range(60)
-                },
-                "correlation": {
-                    "strong_pairs": [
-                        {"col1": f"col_{index}", "col2": f"col_{index + 1}", "pearson_r": 0.9,
-                         "direction": "positive", "strength": "strong"}
-                        for index in range(10)
-                    ]
-                },
-                "regression": {
-                    f"col_{index}": {"significant": True, "trend": "increasing", "r_squared": 0.8, "n": 100}
-                    for index in range(10)
-                },
-                "top_bottom": {
-                    "region": {
-                        "top": [{"region": f"Region {index}", "revenue_share_pct": 20.0} for index in range(10)],
-                        "bottom": [{"region": f"Region {index}", "revenue_share_pct": 1.0} for index in range(10)],
-                    }
-                },
-            },
-            "insight_narrative": {
-                "executive_summary": "A" * 2000,
-                "key_findings": ["B" * 600 for _ in range(10)],
-            },
-            "charts": [{"name": f"chart_{index}.png", "url": f"/plots/chart_{index}.png"} for index in range(10)],
-            "validation": {"passed": True},
-            "reliability": {"overall_confidence": 0.9},
-        }
+    def test_build_rag_user_content_is_compacted_for_large_contexts(self):
+        facts = [
+            {"doc_type": "descriptive_stat", "text": "A" * 2000}
+            for _ in range(20)
+        ]
+        rows = [
+            {"row_index": index, "text": f"Row {index}: value={index}"}
+            for index in range(50)
+        ]
+        retrieved = {"facts": facts, "rows": rows}
 
-        context = chat_service.build_dataset_context(result)
-        user_content = chat_service._build_llm_user_content(context, "What is the biggest trend?", [
+        user_content = chat_service._build_rag_user_content(retrieved, "What is the biggest trend?", [
             {"role": "user", "content": "x" * 3000},
             {"role": "assistant", "content": "y" * 3000},
             {"role": "user", "content": "z" * 3000},
         ])
 
-        self.assertLess(len(user_content), 12000)
+        self.assertLessEqual(len(user_content), chat_service.MAX_LLM_USER_CONTENT_CHARS)
         self.assertIn("What is the biggest trend?", user_content)
-        self.assertNotIn("A" * 500, user_content)
-
-    def _multi_topic_context(self):
-        return chat_service.build_dataset_context({
-            "summary": {"filename": "sample.csv", "rows": 500, "columns": 10, "quality_score": 90.0},
-            "schema_blueprint": {"revenue": {"semantic_tag": "currency", "intended_type": "float"}},
-            "stats": {
-                "correlation": {"strong_pairs": [{"col1": "price", "col2": "sales", "pearson_r": 0.9,
-                                                    "direction": "positive", "strength": "strong"}]},
-                "regression": {"revenue": {"significant": True, "trend": "increasing", "r_squared": 0.8, "n": 50}},
-                "growth_rates": {"monthly": {"pct_change": 5.0}},
-                "top_bottom": {"region": {"top": [{"region": "North", "revenue_share_pct": 40.0}], "bottom": []}},
-                "anomaly_summary": {"unique_flagged_rows": 3, "unique_flagged_row_pct": 6.0},
-                "distributions": {"region": {"North": 40, "South": 60}},
-                "descriptive": {"revenue": {"count": 500, "mean": 120.0}},
-            },
-            "insight_narrative": {"executive_summary": "Overview.", "key_findings": ["finding 1"]},
-            "charts": [{"name": "chart1.png", "url": "/plots/chart1.png"}],
-            "validation": {"passed": True},
-            "reliability": {"overall_confidence": 0.9},
-        })
-
-    def test_topic_scoped_context_excludes_unrelated_sections_for_anomaly_question(self):
-        context = self._multi_topic_context()
-
-        user_content = chat_service._build_llm_user_content(context, "Are there any unusual outliers?", [])
-
-        self.assertIn("anomaly_summary", user_content)
-        self.assertNotIn("strong_correlations", user_content)
-        self.assertNotIn("growth_rates", user_content)
-        self.assertNotIn("top_bottom_rankings", user_content)
-        self.assertNotIn("descriptive_stats", user_content)
-
-    def test_topic_scoped_context_excludes_unrelated_sections_for_correlation_question(self):
-        context = self._multi_topic_context()
-
-        user_content = chat_service._build_llm_user_content(context, "What columns are correlated?", [])
-
-        self.assertIn("strong_correlations", user_content)
-        self.assertNotIn("anomaly_summary", user_content)
-        self.assertNotIn("top_bottom_rankings", user_content)
-        self.assertNotIn("significant_trends", user_content)
-
-    def test_topic_scoped_context_includes_default_sections_for_generic_question(self):
-        context = self._multi_topic_context()
-
-        user_content = chat_service._build_llm_user_content(context, "Tell me about this data", [])
-
-        self.assertIn("strong_correlations", user_content)
-        self.assertIn("anomaly_summary", user_content)
-        self.assertIn("top_bottom_rankings", user_content)
-        self.assertIn("key_findings", user_content)
-
-    def test_detect_question_topics_matches_expected_keywords(self):
-        self.assertEqual(chat_service._detect_question_topics("any outliers here?"), {"anomaly"})
-        self.assertEqual(chat_service._detect_question_topics("what's correlated with sales?"), {"correlation"})
-        self.assertEqual(chat_service._detect_question_topics("how many rows are in this file"), set())
 
     def test_gemini_is_skipped_during_quota_cooldown(self):
-        context = {
-            "dataset": {"rows": 10, "columns": 3, "quality_score": 90},
-            "available_columns": {"region": {"semantic_tag": "categorical"}},
-        }
+        job = Job(job_id="job-quota", result={"summary": {}, "stats": {}}, chat_history=[], rag_status="ready")
+        manager = JobManager()
 
         original_retry_at = chat_service._GEMINI_RETRY_AT
         original_disabled = chat_service._GEMINI_DISABLED_BY_QUOTA
 
         try:
             chat_service._GEMINI_DISABLED_BY_QUOTA = True
-            with patch.object(chat_service, "_get_groq_client", side_effect=RuntimeError("groq down")), \
+            with patch.object(chat_service, "get_settings", return_value=type("S", (), {"database_url": "postgresql://x"})()), \
+                 patch.object(chat_service.rag_service, "retrieve", return_value={"facts": [], "rows": []}), \
+                 patch.object(chat_service, "_get_groq_client", side_effect=RuntimeError("groq down")), \
                  patch.object(chat_service, "_call_gemini_json_with_failover") as gemini_call, \
                  patch.object(chat_service, "_fallback_answer", return_value={"answer": "fallback", "needs_new_chart": False, "chart_request": None, "source": "fallback"}) as fallback_answer:
-                outcome = chat_service.ask_question(type("JobLike", (), {"result": {"summary": {}, "stats": {}}, "chat_history": []})(), "What is the trend?")
+                outcome = chat_service.ask_question(manager, job, "What is the trend?")
 
             gemini_call.assert_not_called()
             fallback_answer.assert_called_once()
@@ -180,31 +94,72 @@ class TestChatServiceFacts(unittest.TestCase):
         outcome = chat_service._fallback_answer(context, "Tell me something interesting")
         self.assertEqual(outcome["answer"], "It's fine.")
 
-    def test_anomaly_question_uses_anomaly_facts(self):
-        context = {
-            "dataset": {"rows": 10, "columns": 3, "quality_score": 90},
-            "anomaly_summary": {"unique_flagged_rows": 4, "unique_flagged_row_pct": 40.0, "flagged_columns": 2},
-        }
-        outcome = chat_service._answer_anomaly_question(context, "is there any anomaly that i should worry about?")
 
-        self.assertIsNotNone(outcome)
-        self.assertIn("4 unusual rows", outcome["answer"])
+class TestAskQuestionRagStatusBranches(unittest.TestCase):
+    def setUp(self):
+        self.manager = JobManager()
+        self.db_settings = type("S", (), {"database_url": "postgresql://x"})()
+        self.no_db_settings = type("S", (), {"database_url": ""})()
 
-    def test_highest_revenue_question_uses_rankings(self):
-        context = {
-            "dataset": {"rows": 10, "columns": 3, "quality_score": 90},
-            "top_bottom_rankings": {
-                "region": {
-                    "top": [{"region": "North", "revenue_share_pct": 52.3}],
-                    "bottom": [{"region": "West", "revenue_share_pct": 4.1}],
-                }
-            },
-        }
-        outcome = chat_service._answer_ranking_question(context, "what do i do for highest revenue?")
+    def test_no_database_configured_uses_fallback(self):
+        job = Job(job_id="job-no-db", result={"summary": {}, "stats": {}})
+        with patch.object(chat_service, "get_settings", return_value=self.no_db_settings):
+            outcome = chat_service.ask_question(self.manager, job, "Tell me about this data")
 
-        self.assertIsNotNone(outcome)
-        self.assertIn("North", outcome["answer"])
-        self.assertIn("52.3%", outcome["answer"])
+        self.assertEqual(outcome["source"], "fallback")
+        self.assertEqual(outcome["index_status"], "unavailable")
+
+    def test_not_built_triggers_build_and_returns_indexing_message(self):
+        job = Job(job_id="job-not-built", result={"summary": {}, "stats": {}}, rag_status="not_built")
+        with patch.object(chat_service, "get_settings", return_value=self.db_settings), \
+             patch.object(chat_service.rag_service, "start_rag_build", return_value=True) as start_build:
+            outcome = chat_service.ask_question(self.manager, job, "What's the trend?")
+
+        start_build.assert_called_once_with(self.manager, job)
+        self.assertEqual(outcome["index_status"], "building")
+
+    def test_building_status_returns_still_indexing_message(self):
+        job = Job(job_id="job-building", result={"summary": {}, "stats": {}}, rag_status="building")
+        with patch.object(chat_service, "get_settings", return_value=self.db_settings), \
+             patch.object(chat_service.rag_service, "start_rag_build") as start_build:
+            outcome = chat_service.ask_question(self.manager, job, "What's the trend?")
+
+        start_build.assert_not_called()
+        self.assertEqual(outcome["index_status"], "building")
+
+    def test_failed_status_uses_fallback_with_reason(self):
+        job = Job(job_id="job-failed", result={"summary": {}, "stats": {}}, rag_status="failed", rag_error="boom")
+        with patch.object(chat_service, "get_settings", return_value=self.db_settings):
+            outcome = chat_service.ask_question(self.manager, job, "Tell me about this data")
+
+        self.assertEqual(outcome["index_status"], "failed")
+        self.assertIn("boom", outcome["answer"])
+
+    def test_ready_status_retrieves_and_calls_llm(self):
+        job = Job(job_id="job-ready", result={"summary": {}, "stats": {}}, rag_status="ready")
+        retrieved = {"facts": [{"doc_type": "dataset_summary", "doc_text": "10 rows"}], "rows": []}
+        llm_response = {"answer": "Here you go.", "needs_new_chart": False, "chart_request": None, "source": "groq"}
+
+        with patch.object(chat_service, "get_settings", return_value=self.db_settings), \
+             patch.object(chat_service.rag_service, "retrieve", return_value=retrieved) as retrieve_mock, \
+             patch.object(chat_service, "_call_llm_for_rag_chat", return_value=llm_response) as llm_mock:
+            outcome = chat_service.ask_question(self.manager, job, "What's the trend?")
+
+        retrieve_mock.assert_called_once_with(job.job_id, "What's the trend?")
+        llm_mock.assert_called_once()
+        self.assertEqual(outcome["answer"], "Here you go.")
+        self.assertEqual(outcome["source"], "groq")
+        self.assertEqual(outcome["index_status"], "ready")
+
+    def test_ready_status_retrieval_error_falls_back(self):
+        job = Job(job_id="job-ready-err", result={"summary": {}, "stats": {}}, rag_status="ready")
+
+        with patch.object(chat_service, "get_settings", return_value=self.db_settings), \
+             patch.object(chat_service.rag_service, "retrieve", side_effect=RuntimeError("db down")):
+            outcome = chat_service.ask_question(self.manager, job, "Tell me about this data")
+
+        self.assertEqual(outcome["index_status"], "ready")
+        self.assertEqual(outcome["source"], "fallback")
 
 
 class TestChartRequestRendering(unittest.TestCase):

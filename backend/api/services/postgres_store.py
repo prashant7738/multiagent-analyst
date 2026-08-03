@@ -43,6 +43,11 @@ class PostgresJobStore:
                             events JSONB NOT NULL DEFAULT '[]'::jsonb,
                             state JSONB,
                             result JSONB,
+                            chat_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+                            rag_status TEXT NOT NULL DEFAULT 'not_built',
+                            rag_error TEXT,
+                            rag_built_at TIMESTAMPTZ,
+                            rag_sample_info JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                             errors JSONB NOT NULL DEFAULT '[]'::jsonb,
                             error TEXT,
                             created_at TIMESTAMPTZ NOT NULL,
@@ -52,6 +57,19 @@ class PostgresJobStore:
                         """
                     ).format(sql.Identifier(self.schema), sql.Identifier(self.table))
                 )
+                # Additive columns for installs whose table predates this feature.
+                for column_def in (
+                    "chat_history JSONB NOT NULL DEFAULT '[]'::jsonb",
+                    "rag_status TEXT NOT NULL DEFAULT 'not_built'",
+                    "rag_error TEXT",
+                    "rag_built_at TIMESTAMPTZ",
+                    "rag_sample_info JSONB NOT NULL DEFAULT '{}'::jsonb",
+                ):
+                    cur.execute(
+                        sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS " + column_def + ";").format(
+                            sql.Identifier(self.schema), sql.Identifier(self.table)
+                        )
+                    )
         self._initialized = True
 
     def save_job(self, record: dict[str, Any]) -> None:
@@ -62,6 +80,8 @@ class PostgresJobStore:
             "events": Jsonb(json_safe(record.get("events") or [])),
             "state": Jsonb(json_safe(record.get("state"))) if record.get("state") is not None else None,
             "result": Jsonb(json_safe(record.get("result"))) if record.get("result") is not None else None,
+            "chat_history": Jsonb(json_safe(record.get("chat_history") or [])),
+            "rag_sample_info": Jsonb(json_safe(record.get("rag_sample_info") or {})),
             "errors": Jsonb(json_safe(record.get("errors") or [])),
         }
 
@@ -71,8 +91,10 @@ class PostgresJobStore:
                     sql.SQL(
                         """
                         INSERT INTO {}.{}
-                        (job_id, filename, csv_path, status, progress, events, state, result, errors, error, created_at, updated_at, finished)
-                        VALUES (%(job_id)s, %(filename)s, %(csv_path)s, %(status)s, %(progress)s, %(events)s, %(state)s, %(result)s, %(errors)s, %(error)s, %(created_at)s, %(updated_at)s, %(finished)s)
+                        (job_id, filename, csv_path, status, progress, events, state, result, chat_history,
+                         rag_status, rag_error, rag_built_at, rag_sample_info, errors, error, created_at, updated_at, finished)
+                        VALUES (%(job_id)s, %(filename)s, %(csv_path)s, %(status)s, %(progress)s, %(events)s, %(state)s, %(result)s, %(chat_history)s,
+                                %(rag_status)s, %(rag_error)s, %(rag_built_at)s, %(rag_sample_info)s, %(errors)s, %(error)s, %(created_at)s, %(updated_at)s, %(finished)s)
                         ON CONFLICT (job_id) DO UPDATE SET
                             filename = EXCLUDED.filename,
                             csv_path = EXCLUDED.csv_path,
@@ -81,6 +103,11 @@ class PostgresJobStore:
                             events = EXCLUDED.events,
                             state = EXCLUDED.state,
                             result = EXCLUDED.result,
+                            chat_history = EXCLUDED.chat_history,
+                            rag_status = EXCLUDED.rag_status,
+                            rag_error = EXCLUDED.rag_error,
+                            rag_built_at = EXCLUDED.rag_built_at,
+                            rag_sample_info = EXCLUDED.rag_sample_info,
                             errors = EXCLUDED.errors,
                             error = EXCLUDED.error,
                             created_at = EXCLUDED.created_at,

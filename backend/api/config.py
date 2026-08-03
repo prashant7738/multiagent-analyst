@@ -103,6 +103,15 @@ class Settings:
         self.postgres_jobs_table: str = os.getenv("POSTGRES_JOBS_TABLE", "analysis_jobs")
         self.postgres_users_table: str = os.getenv("POSTGRES_USERS_TABLE", "app_users")
 
+        # RAG dataset-chat: pgvector-backed row + fact embeddings (requires database_url).
+        self.rag_embeddings_table: str = os.getenv("RAG_EMBEDDINGS_TABLE", "dataset_embeddings")
+        self.rag_embedding_model: str = os.getenv("RAG_EMBEDDING_MODEL", "gemini-embedding-001")
+        self.rag_embedding_dim: int = _get_int("RAG_EMBEDDING_DIM", 768)
+        self.rag_max_rows: int = _get_int("RAG_MAX_ROWS", 20000)
+        self.rag_embed_batch_size: int = _get_int("RAG_EMBED_BATCH_SIZE", 50)
+        self.rag_top_k_rows: int = _get_int("RAG_TOP_K_ROWS", 8)
+        self.rag_top_k_facts: int = _get_int("RAG_TOP_K_FACTS", 6)
+
         # Filesystem layout (all absolute, derived from backend/).
         self.backend_dir: Path = BACKEND_DIR
         self.outputs_dir: Path = BACKEND_DIR / os.getenv("API_OUTPUTS_DIR", "outputs")

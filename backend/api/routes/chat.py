@@ -49,7 +49,7 @@ async def ask_dataset_question(
     job = _get_ready_job(job_id, manager)
 
     try:
-        outcome = ask_question(job, payload.question)
+        outcome = ask_question(manager, job, payload.question)
     except Exception as exc:  # noqa: BLE001 — surface as a clean 500, never crash the app
         logger.exception("Chat request failed for job %s", job_id)
         outcome = build_fallback_chat_response(job, payload.question)
@@ -70,4 +70,5 @@ async def ask_dataset_question(
         chart=outcome.get("chart"),
         chart_generated=outcome.get("chart_generated", False),
         history=history,
+        index_status=outcome.get("index_status"),
     )

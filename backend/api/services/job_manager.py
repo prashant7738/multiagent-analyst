@@ -40,6 +40,10 @@ class Job:
     state: dict[str, Any] | None = None  # final GraphState (post-run)
     result: dict[str, Any] | None = None  # frontend-friendly analysis result
     chat_history: list[dict[str, Any]] = field(default_factory=list)  # dataset Q&A transcript
+    rag_status: str = "not_built"  # not_built | building | ready | failed — RAG embedding index for chat
+    rag_error: str | None = None
+    rag_built_at: datetime | None = None
+    rag_sample_info: dict[str, Any] = field(default_factory=dict)  # {total_rows, sampled_rows} for the row index
     errors: list[str] = field(default_factory=list)
     error: str | None = None  # fatal error message, if any
     created_at: datetime = field(default_factory=_utcnow)
@@ -61,6 +65,10 @@ class Job:
             "state": json_safe(self.state),
             "result": json_safe(self.result),
             "chat_history": json_safe(self.chat_history),
+            "rag_status": self.rag_status,
+            "rag_error": self.rag_error,
+            "rag_built_at": self.rag_built_at,
+            "rag_sample_info": json_safe(self.rag_sample_info),
             "errors": json_safe(self.errors),
             "error": self.error,
             "created_at": self.created_at,
@@ -88,6 +96,10 @@ class Job:
             state=record.get("state"),
             result=record.get("result"),
             chat_history=list(record.get("chat_history") or []),
+            rag_status=str(record.get("rag_status") or "not_built"),
+            rag_error=record.get("rag_error"),
+            rag_built_at=_parse_dt(record["rag_built_at"]) if record.get("rag_built_at") else None,
+            rag_sample_info=dict(record.get("rag_sample_info") or {}),
             errors=list(record.get("errors") or []),
             error=record.get("error"),
             created_at=_parse_dt(record.get("created_at")),
@@ -242,6 +254,42 @@ class JobManager:
         if job is None:
             return []
         return list(job.chat_history)
+
+    def try_begin_rag_build(self, job_id: str) -> bool:
+        """Atomically claim the "building" state. Returns False if a build is already in flight."""
+        job = self.get_job(job_id)
+        if job is None:
+            return False
+        with job.condition:
+            if job.rag_status == "building":
+                return False
+            job.rag_status = "building"
+            job.rag_error = None
+            job.updated_at = _utcnow()
+            job.condition.notify_all()
+        self._persist(job)
+        return True
+
+    def set_rag_status(
+        self,
+        job_id: str,
+        status: str,
+        error: str | None = None,
+        sample_info: dict[str, Any] | None = None,
+    ) -> None:
+        job = self.get_job(job_id)
+        if job is None:
+            return
+        with job.condition:
+            job.rag_status = status
+            job.rag_error = error
+            if sample_info is not None:
+                job.rag_sample_info = sample_info
+            if status == "ready":
+                job.rag_built_at = _utcnow()
+            job.updated_at = _utcnow()
+            job.condition.notify_all()
+        self._persist(job)
 
 
 # Process-wide singleton used via dependency injection.

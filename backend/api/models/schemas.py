@@ -175,6 +175,7 @@ class ChatResponse(BaseModel):
     chart: dict[str, str] | None = None
     chart_generated: bool = False
     history: list[ChatMessage] = Field(default_factory=list)
+    index_status: str | None = None  # "building" | "ready" | "failed" | "unavailable" | None
 
 
 class ErrorResponse(BaseModel):

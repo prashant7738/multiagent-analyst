@@ -4,7 +4,7 @@
 @import "@fontsource-variable/space-grotesk";
 @import "@fontsource-variable/dm-sans";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark *):not(.theme-light *));
 
 @theme inline {
     --font-heading: 'Space Grotesk Variable', sans-serif;
@@ -173,4 +173,123 @@
       0 8px 32px rgba(0, 0, 0, 0.5),
       0 1px 0px rgba(255, 255, 255, 0.1) inset;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THEME OVERRIDES  (colors only — no layout/spacing/animation changes)
+
+   App markup hardcodes dark-theme utilities (bg-black, text-white/NN, …).
+   These unlayered rules remap ONLY color utilities:
+     • html:not(.theme-light)  → dark theme (default). Bumps a few too-dim
+                                 text opacities so every label is readable.
+     • html.theme-light        → light theme. A soft, premium light palette
+                                 (off-white canvas, white cards, slate text).
+   Library components (perspective grid, glow card, FAQ, spotlight nav) flip to
+   their built-in light styles automatically because the `dark` custom-variant
+   above is disabled inside `.theme-light`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Smooth, subtle cross-fade only while switching themes — no component animation
+   is altered. */
+html.theme-light,
+html.theme-light body {
+  background-color: #f6f7fb;
+}
+html.theme-light body,
+html.theme-light .bg-black,
+html.theme-light .bg-\[\#080808\],
+html.theme-light .bg-\[\#0a0a0a\],
+html.theme-light .text-white,
+html.theme-light [class*="text-white\/"],
+html.theme-light [class*="border-white\/"] {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+
+/* ── Dark theme (default): raise contrast of the dimmest text ─────────────── */
+html:not(.theme-light) .text-white\/35 { color: rgba(255, 255, 255, 0.62); }
+html:not(.theme-light) .text-white\/30 { color: rgba(255, 255, 255, 0.58); }
+html:not(.theme-light) .text-white\/25 { color: rgba(255, 255, 255, 0.52); }
+html:not(.theme-light) .text-white\/20 { color: rgba(255, 255, 255, 0.48); }
+html:not(.theme-light) .text-white\/15 { color: rgba(255, 255, 255, 0.40); }
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+/* Surfaces: soft off-white canvas, elevated white cards, tinted alt sections */
+html.theme-light .bg-black            { background-color: #f6f7fb; }
+html.theme-light .bg-black\/95        { background-color: rgba(255, 255, 255, 0.92); }
+html.theme-light .bg-black\/85        { background-color: rgba(255, 255, 255, 0.82); }
+html.theme-light .bg-black\/80        { background-color: rgba(255, 255, 255, 0.8); }
+html.theme-light .bg-black\/60        { background-color: rgba(255, 255, 255, 0.65); }
+html.theme-light .bg-black\/40        { background-color: rgba(17, 20, 28, 0.04); }
+html.theme-light .bg-black\/20        { background-color: rgba(17, 20, 28, 0.03); }
+html.theme-light .bg-\[\#080808\]     { background-color: #eef0f6; }
+html.theme-light .bg-\[\#0a0a0a\]     { background-color: #ffffff; }
+
+/* Subtle white fills (cards / hover) → subtle slate fills on light */
+html.theme-light .bg-white\/5         { background-color: rgba(17, 20, 28, 0.04); }
+html.theme-light .bg-white\/4         { background-color: rgba(17, 20, 28, 0.035); }
+html.theme-light .bg-white\/3         { background-color: rgba(17, 20, 28, 0.03); }
+html.theme-light .bg-white\/2         { background-color: rgba(17, 20, 28, 0.022); }
+html.theme-light .bg-white\/1\.5      { background-color: rgba(17, 20, 28, 0.018); }
+
+/* Text: white → deep slate, preserving the original visual hierarchy */
+html.theme-light .text-white          { color: #171a21; }
+html.theme-light .text-white\/80      { color: rgba(23, 26, 33, 0.86); }
+html.theme-light .text-white\/70      { color: rgba(23, 26, 33, 0.80); }
+html.theme-light .text-white\/60      { color: rgba(23, 26, 33, 0.72); }
+html.theme-light .text-white\/50      { color: rgba(23, 26, 33, 0.62); }
+html.theme-light .text-white\/40      { color: rgba(23, 26, 33, 0.54); }
+html.theme-light .text-white\/35      { color: rgba(23, 26, 33, 0.50); }
+html.theme-light .text-white\/30      { color: rgba(23, 26, 33, 0.46); }
+html.theme-light .text-white\/25      { color: rgba(23, 26, 33, 0.42); }
+html.theme-light .text-white\/20      { color: rgba(23, 26, 33, 0.38); }
+html.theme-light .text-white\/15      { color: rgba(23, 26, 33, 0.32); }
+html.theme-light .text-white\/10      { color: rgba(23, 26, 33, 0.24); }
+html.theme-light .text-white\/5       { color: rgba(23, 26, 33, 0.18); }
+
+/* Borders: white → soft slate at comparable weights */
+html.theme-light .border-white\/30    { border-color: rgba(23, 26, 33, 0.20); }
+html.theme-light .border-white\/15    { border-color: rgba(23, 26, 33, 0.12); }
+html.theme-light .border-white\/10    { border-color: rgba(23, 26, 33, 0.10); }
+html.theme-light .border-white\/8     { border-color: rgba(23, 26, 33, 0.09); }
+html.theme-light .border-white\/6     { border-color: rgba(23, 26, 33, 0.07); }
+html.theme-light .border-white\/5     { border-color: rgba(23, 26, 33, 0.07); }
+html.theme-light .border-\[\#222\]    { border-color: rgba(23, 26, 33, 0.12); }
+
+/* Inputs / placeholders / focus ring */
+html.theme-light .placeholder-white\/20::placeholder { color: rgba(23, 26, 33, 0.4); }
+html.theme-light .ring-white\/30      { --tw-ring-color: rgba(23, 26, 33, 0.14); }
+
+/* Decorative dark gradient scrims → fade to the light canvas instead of black */
+html.theme-light .to-black            { --tw-gradient-to: #f6f7fb; }
+html.theme-light .via-black\/50       { --tw-gradient-via: rgba(246, 247, 251, 0.5); }
+html.theme-light .via-black\/40       { --tw-gradient-via: rgba(246, 247, 251, 0.55); }
+html.theme-light .from-black\/40      { --tw-gradient-from: rgba(246, 247, 251, 0.4); }
+html.theme-light .from-black\/20      { --tw-gradient-from: rgba(246, 247, 251, 0.2); }
+
+/* Navbar glass helpers (declared above with fixed dark values) */
+html.theme-light .spotlight-nav-bg {
+  background: rgba(255, 255, 255, 0.85);
+}
+html.theme-light .glass-border {
+  border: 1px solid rgba(23, 26, 33, 0.1);
+}
+html.theme-light .spotlight-nav-shadow {
+  box-shadow:
+    0 8px 30px rgba(23, 26, 33, 0.1),
+    0 1px 0px rgba(255, 255, 255, 0.9) inset;
+}
+
+/* Elevate white cards with a soft shadow so the light UI reads with depth */
+html.theme-light .bg-\[\#0a0a0a\] {
+  box-shadow: 0 1px 2px rgba(23, 26, 33, 0.04), 0 8px 24px rgba(23, 26, 33, 0.06);
+}
+
+/* Keep the brand wordmark legible on a light background */
+html.theme-light .logo-brand {
+  background: linear-gradient(90deg, #4c1d95 0%, #7c3aed 40%, #8b5cf6 60%, #4c1d95 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.25));
 }

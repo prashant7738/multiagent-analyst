@@ -8,6 +8,7 @@ import { GlowBorderCard } from "@/components/ui/glow-border-card";
 import { FaqAccordion } from "@/components/ui/faq-accordion";
 import AnimatedButton from "@/components/ui/animated-button";
 import { useAuth } from "@/contexts/AuthContext";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV_ITEMS = [
   { label: "Home",         href: "/" },
@@ -169,6 +170,7 @@ function HeroSection({ onAnalyzeClick, onNavClick }) {
         </div>
         {/* Auth-aware right side */}
         <div className="shrink-0 flex justify-end items-center gap-2 min-w-44">
+          <ThemeToggle />
           {user ? (
             <>
               <button onClick={() => onNavClick("/profile")}

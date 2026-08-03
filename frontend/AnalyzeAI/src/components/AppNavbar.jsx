@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { SpotlightNavbar } from "@/components/ui/spotlight-navbar";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV_ITEMS = [
   { label: "Home",         href: "/" },
@@ -52,6 +53,7 @@ export default function AppNavbar() {
 
         {/* Right side actions */}
         <div className="shrink-0 w-40 flex items-center justify-end gap-2.5">
+          <ThemeToggle />
           {user ? (
             <>
               <button onClick={() => navigate("/profile")}

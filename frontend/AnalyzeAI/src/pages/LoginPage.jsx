@@ -4,11 +4,12 @@ import AppNavbar from "@/components/AppNavbar";
 import { CandyButton } from "@/components/ui/candy-button";
 import { FlipText } from "@/components/ui/flip-text";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { loginUser } from "@/lib/api";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
 
   const [form, setForm] = useState({ email: "", password: "" });
@@ -30,7 +31,8 @@ export default function LoginPage() {
     try {
       const response = await loginUser(form.email, form.password);
       login(response.user);
-      navigate("/profile");
+      const redirectTo = location.state?.from?.pathname || "/profile";
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(err.message || "Unable to sign in.");
     } finally {

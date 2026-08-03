@@ -63,7 +63,7 @@ class PostgresJobStore:
                     "rag_status TEXT NOT NULL DEFAULT 'not_built'",
                     "rag_error TEXT",
                     "rag_built_at TIMESTAMPTZ",
-                    "rag_sample_info JSONB NOT NULL DEFAULT '{}'::jsonb",
+                    "rag_sample_info JSONB NOT NULL DEFAULT '{{}}'::jsonb",
                 ):
                     cur.execute(
                         sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS " + column_def + ";").format(

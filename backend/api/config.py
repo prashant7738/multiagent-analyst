@@ -104,9 +104,11 @@ class Settings:
         self.postgres_users_table: str = os.getenv("POSTGRES_USERS_TABLE", "app_users")
 
         # RAG dataset-chat: pgvector-backed row + fact embeddings (requires database_url).
+        # Embeddings are computed via the Hugging Face Inference API (HF_TOKEN required).
         self.rag_embeddings_table: str = os.getenv("RAG_EMBEDDINGS_TABLE", "dataset_embeddings")
-        self.rag_embedding_model: str = os.getenv("RAG_EMBEDDING_MODEL", "gemini-embedding-001")
+        self.rag_embedding_model: str = os.getenv("RAG_EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
         self.rag_embedding_dim: int = _get_int("RAG_EMBEDDING_DIM", 768)
+        self.hf_token: str | None = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN")
         self.rag_max_rows: int = _get_int("RAG_MAX_ROWS", 20000)
         self.rag_embed_batch_size: int = _get_int("RAG_EMBED_BATCH_SIZE", 50)
         self.rag_top_k_rows: int = _get_int("RAG_TOP_K_ROWS", 8)

@@ -31,6 +31,7 @@ import re
 from contextlib import contextmanager
 from typing import Any, Iterator, TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 import psycopg
 from psycopg import sql
@@ -38,7 +39,6 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pgvector.psycopg import register_vector
 
-from agents.agent_2 import _get_gemini_client
 from api.config import get_settings
 from api.utils.serialization import json_safe
 
@@ -49,10 +49,18 @@ _SCHEMA_READY = False
 _MAX_EMBED_RETRIES = 4
 _MAX_BACKOFF_SECONDS = 90
 
+# BAAI/bge-* models are asymmetric: queries need this instruction prefix, documents don't.
+_HF_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
+_hf_client = None
+
 
 def _is_quota_error(exc: Exception) -> bool:
     text = str(exc).lower()
-    return any(term in text for term in ("429", "resource_exhausted", "quota exceeded", "rate limit"))
+    return any(
+        term in text
+        for term in ("429", "resource_exhausted", "quota exceeded", "rate limit", "too many requests")
+    )
 
 
 def _quota_retry_delay_seconds(exc: Exception) -> int:
@@ -117,34 +125,48 @@ def _ensure_schema() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Embeddings (Gemini, quota-aware batching)
+# Embeddings (Hugging Face Inference API, quota-aware batching)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _get_hf_client():
+    """Return the cached Hugging Face Inference client, importing the SDK only when needed."""
+    global _hf_client
+    if _hf_client is not None:
+        return _hf_client
+
+    settings = get_settings()
+    if not settings.hf_token:
+        raise RuntimeError("HF_TOKEN is not set")
+
+    from huggingface_hub import InferenceClient
+
+    _hf_client = InferenceClient(
+        model=settings.rag_embedding_model,
+        provider="hf-inference",
+        token=settings.hf_token,
+    )
+    return _hf_client
+
 
 def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
     """Embed ``texts`` in provider-safe batches, retrying with backoff on quota errors."""
     if not texts:
         return []
 
-    from google.genai import types
-
     settings = get_settings()
-    client = _get_gemini_client()
+    client = _get_hf_client()
+    is_query = task_type == "RETRIEVAL_QUERY"
     vectors: list[list[float]] = []
 
     for start in range(0, len(texts), settings.rag_embed_batch_size):
         batch = texts[start:start + settings.rag_embed_batch_size]
+        if is_query:
+            batch = [_HF_QUERY_INSTRUCTION + text for text in batch]
         last_error: Exception | None = None
         for attempt in range(_MAX_EMBED_RETRIES):
             try:
-                response = client.models.embed_content(
-                    model=settings.rag_embedding_model,
-                    contents=batch,
-                    config=types.EmbedContentConfig(
-                        task_type=task_type,
-                        output_dimensionality=settings.rag_embedding_dim,
-                    ),
-                )
-                vectors.extend([list(e.values) for e in (response.embeddings or [])])
+                embeddings = client.feature_extraction(batch)
+                vectors.extend(np.asarray(embeddings).reshape(len(batch), -1).tolist())
                 last_error = None
                 break
             except Exception as exc:  # noqa: BLE001 — retried below, re-raised if exhausted

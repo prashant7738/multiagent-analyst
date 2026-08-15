@@ -914,6 +914,11 @@ def _clip_outliers(df, schema_blueprint, ledger=None, raw_profile=None, data_qua
             continue
         if meta.get("is_identifier", False):
             continue
+        # Hard override: never clip currency/financial values even if the schema
+        # blueprint mistakenly set scaling_allowed=True (e.g. an LLM tagging error) -
+        # mirrors the same guardrail _scale_columns already applies below.
+        if meta.get("semantic_tag") in ("currency", "financial", "datetime", "identifier"):
+            continue
         if meta.get("intended_type") not in ("float", "int"):
             continue
 
@@ -981,7 +986,7 @@ def _scale_columns(df, schema_blueprint):
             continue
         if meta.get("is_identifier", False):
             continue
-        if meta.get("semantic_tag") in ("currency", "datetime", "identifier"):
+        if meta.get("semantic_tag") in ("currency", "financial", "datetime", "identifier"):
             continue
         if meta.get("intended_type") not in ("float", "int"):
             continue

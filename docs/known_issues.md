@@ -1,6 +1,6 @@
 # Known Issues (Audit Findings)
 
-- [ ] **1. MoM/QoQ growth figures contradict a direct recomputation from the source CSV**
+- [x] **1. MoM/QoQ growth figures contradict a direct recomputation from the source CSV**
   (e.g. reported December revenue -21% vs. actual +36% from raw `Gross_Sales`).
   Responsible: `_growth_rates()` in [agent_4.py](../backend/agents/agent_4.py#L464), which
   groups `cleaned_df` (post Agent 3 dedup/imputation, not the raw file) by whichever
@@ -11,6 +11,19 @@
   used is traceable and reproducible from the raw CSV, with the date column used for
   grouping made explicit (not an arbitrary first match), and dedup/imputation's effect
   on the revenue sum documented or excluded from the growth calc.
+  **Partially fixed (2026-08-15)**: real root cause found via
+  [test_ground_truth_reconciliation.py](../backend/tests/test_ground_truth_reconciliation.py) -
+  `_clip_outliers()` in [agent_3.py](../backend/agents/agent_3.py) had no `semantic_tag`
+  override (unlike `_scale_columns()`, which already skipped currency/datetime/identifier),
+  so a currency column mistagged `scaling_allowed: True` by the LLM got IQR-clipped,
+  understating total revenue by 18.6% and flipping the sign of several months'
+  MoM/QoQ growth. Added the same `semantic_tag in ("currency","financial","datetime",
+  "identifier")` guard to `_clip_outliers()`. Total revenue now reconciles within 2% of
+  the raw CSV. **Still open**: ~8-10 individual months/quarters still show a sign flip or
+  magnitude miss even after this fix (total is right, so it's a within-year
+  redistribution issue) - suspected ambiguous date parsing in `_coerce_types()`/
+  `_extract_date_features()` (`pd.to_datetime(..., errors="coerce")` with no `format`/
+  `dayfirst` on mixed-format date strings like "07/06/2023"), not yet confirmed or fixed.
 
 - [ ] **2. Category normalization only folds case; typos/near-duplicates stay separate**
   ("COMPLETE"/"Complete" merge, "Completed" doesn't).

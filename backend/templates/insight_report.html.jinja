@@ -169,6 +169,82 @@
 {% endfor %}
 {% endif %}
 
+{% if facts.profit_breakdown %}
+<h2>Profit Breakdown</h2>
+{% for cat_col, data in facts.profit_breakdown.items() %}
+<h3>{{ cat_col }} (showing top {{ data.top | length }} / bottom {{ data.bottom | length }} of {{ data.total_categories }})</h3>
+<table>
+  <tr><th>Rank</th><th>{{ cat_col }}</th><th>Total Profit</th><th>Share %</th></tr>
+  {% for row in data.top %}
+  <tr><td>Top</td><td>{{ row[cat_col] }}</td><td>{{ row.total_profit }}</td><td>{{ row.profit_share_pct }}</td></tr>
+  {% endfor %}
+  {% for row in data.bottom %}
+  <tr><td>Bottom</td><td>{{ row[cat_col] }}</td><td>{{ row.total_profit }}</td><td>{{ row.profit_share_pct }}</td></tr>
+  {% endfor %}
+</table>
+{% endfor %}
+{% endif %}
+
+{% set xdim = facts.cross_dimensional %}
+{% if xdim and (xdim.discount_return_rate.buckets or xdim.rep_discount_margin.records or xdim.segment_order_value.records or xdim.region_shipping_cost.records or xdim.category_margin_trend) %}
+<h2>Cross-Dimensional Analysis</h2>
+
+{% if xdim.discount_return_rate.buckets %}
+<h3>Return Rate by Discount Quartile</h3>
+<table>
+  <tr><th>Discount Range</th><th>Return Rate %</th><th>Records</th></tr>
+  {% for bucket in xdim.discount_return_rate.buckets %}
+  <tr><td>{{ bucket.discount_range }}</td><td>{{ bucket.return_rate_pct }}</td><td>{{ bucket.records }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if xdim.rep_discount_margin.records %}
+<h3>Avg Discount % and Margin by {{ xdim.rep_discount_margin.rep_column }}</h3>
+<table>
+  <tr><th>{{ xdim.rep_discount_margin.rep_column }}</th><th>Avg Discount %</th><th>Avg Margin %</th></tr>
+  {% for r in xdim.rep_discount_margin.records[:10] %}
+  <tr><td>{{ r[xdim.rep_discount_margin.rep_column] }}</td><td>{{ r.avg_discount_pct }}</td><td>{{ r.avg_margin_pct }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if xdim.segment_order_value.records %}
+<h3>Avg Order Value by {{ xdim.segment_order_value.segment_column }}</h3>
+<table>
+  <tr><th>{{ xdim.segment_order_value.segment_column }}</th><th>Avg Order Value</th></tr>
+  {% for r in xdim.segment_order_value.records %}
+  <tr><td>{{ r[xdim.segment_order_value.segment_column] }}</td><td>{{ r.avg_order_value }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if xdim.region_shipping_cost.records %}
+<h3>Avg Shipping Cost by {{ xdim.region_shipping_cost.region_column }}</h3>
+<table>
+  <tr><th>{{ xdim.region_shipping_cost.region_column }}</th><th>Avg Shipping Cost</th></tr>
+  {% for r in xdim.region_shipping_cost.records %}
+  <tr><td>{{ r[xdim.region_shipping_cost.region_column] }}</td><td>{{ r.avg_shipping_cost }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if xdim.category_margin_trend %}
+<p class="empty-note">Profit margin by product category over time is shown in the Visualizations chart gallery below.</p>
+{% endif %}
+{% endif %}
+
+{% if facts.category_normalization %}
+<h2>Normalization Applied</h2>
+<p class="empty-note">Near-duplicate category spellings merged during preprocessing (case/separator folding, then fuzzy match at edit distance &le; 2).</p>
+<table>
+  <tr><th>Column</th><th>Raw Value</th><th>Canonical Value</th><th>Row Count</th></tr>
+  {% for row in facts.category_normalization %}
+  <tr><td>{{ row.column }}</td><td>{{ row.raw }}</td><td>{{ row.canonical }}</td><td>{{ row.row_count }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 {% if facts.anomalies and facts.anomalies.unique_flagged_rows %}
 <h2>Anomalies</h2>
 <p>

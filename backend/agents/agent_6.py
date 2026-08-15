@@ -148,6 +148,49 @@ def _extract_ranking_facts(stats):
     return facts
 
 
+def _extract_profit_facts(stats):
+    profit_breakdown = stats.get("profit_breakdown", {}) or {}
+    facts = {}
+    for cat_col, data in profit_breakdown.items():
+        facts[cat_col] = {
+            "top": (data.get("top") or [])[:TOP_RANKING_LIMIT],
+            "bottom": (data.get("bottom") or [])[:TOP_RANKING_LIMIT],
+            "total_categories": data.get("total_categories"),
+        }
+    return facts
+
+
+def _extract_cross_dimensional_facts(stats):
+    """The 5 cross-dimensional analyses added alongside Part B's ranking fix
+    (discount-vs-return-rate, margin-by-category-over-time, discount/margin by
+    rep, order value by segment, shipping cost by region) - each is already
+    empty-safe (agent_4 returns {} when its required columns aren't present)."""
+    return {
+        "discount_return_rate": stats.get("discount_return_rate", {}) or {},
+        "category_margin_trend": stats.get("category_margin_trend", {}) or {},
+        "rep_discount_margin": stats.get("rep_discount_margin", {}) or {},
+        "segment_order_value": stats.get("segment_order_value", {}) or {},
+        "region_shipping_cost": stats.get("region_shipping_cost", {}) or {},
+    }
+
+
+def _extract_normalization_facts(state):
+    """Flatten Agent 3's per-column fuzzy category merges (docs/known_issues.md
+    #2) into report-ready rows: column, raw spelling, canonical spelling, and
+    how many rows had the raw spelling."""
+    category_normalization = state.get("category_normalization", {}) or {}
+    rows = []
+    for col, merges in category_normalization.items():
+        for merge in merges or []:
+            rows.append({
+                "column": col,
+                "raw": merge.get("raw"),
+                "canonical": merge.get("canonical"),
+                "row_count": merge.get("row_count"),
+            })
+    return rows
+
+
 def _extract_anomaly_facts(stats):
     return stats.get("anomaly_summary", {}) or {}
 
@@ -195,6 +238,9 @@ def _extract_insight_facts(state):
         "excluded_columns": _extract_excluded_columns_facts(stats),
         "growth": _extract_growth_facts(stats),
         "rankings": _extract_ranking_facts(stats),
+        "profit_breakdown": _extract_profit_facts(stats),
+        "cross_dimensional": _extract_cross_dimensional_facts(stats),
+        "category_normalization": _extract_normalization_facts(state),
         "anomalies": _extract_anomaly_facts(stats),
         "significant_trends": _extract_regression_facts(stats),
         "validation": _extract_validation_facts(state),

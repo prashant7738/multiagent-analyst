@@ -25,6 +25,7 @@ class GraphState(TypedDict):
     preprocessing_log: list    # full audit trail of every preprocessing action
     data_quality: dict         # 0-100 quality score for Agent 5 and Agent 6
     column_ledger: dict        # per-column transformation tracking and validation failures
+    category_normalization: dict  # per-column fuzzy category merges: {col: [{raw, canonical, row_count, edit_distance}]}
 
     # ── Agent 4 outputs ───────────────────────────────────────────────────────
     stats: dict

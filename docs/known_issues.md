@@ -11,19 +11,28 @@
   used is traceable and reproducible from the raw CSV, with the date column used for
   grouping made explicit (not an arbitrary first match), and dedup/imputation's effect
   on the revenue sum documented or excluded from the growth calc.
-  **Partially fixed (2026-08-15)**: real root cause found via
-  [test_ground_truth_reconciliation.py](../backend/tests/test_ground_truth_reconciliation.py) -
-  `_clip_outliers()` in [agent_3.py](../backend/agents/agent_3.py) had no `semantic_tag`
+  **Fixed (2026-08-15)**: two independent bugs found via
+  [test_ground_truth_reconciliation.py](../backend/tests/test_ground_truth_reconciliation.py):
+  (1) `_clip_outliers()` in [agent_3.py](../backend/agents/agent_3.py) had no `semantic_tag`
   override (unlike `_scale_columns()`, which already skipped currency/datetime/identifier),
   so a currency column mistagged `scaling_allowed: True` by the LLM got IQR-clipped,
-  understating total revenue by 18.6% and flipping the sign of several months'
-  MoM/QoQ growth. Added the same `semantic_tag in ("currency","financial","datetime",
-  "identifier")` guard to `_clip_outliers()`. Total revenue now reconciles within 2% of
-  the raw CSV. **Still open**: ~8-10 individual months/quarters still show a sign flip or
-  magnitude miss even after this fix (total is right, so it's a within-year
-  redistribution issue) - suspected ambiguous date parsing in `_coerce_types()`/
-  `_extract_date_features()` (`pd.to_datetime(..., errors="coerce")` with no `format`/
-  `dayfirst` on mixed-format date strings like "07/06/2023"), not yet confirmed or fixed.
+  understating total revenue by 18.6%. Fixed by adding the same
+  `semantic_tag in ("currency","financial","datetime","identifier")` guard to
+  `_clip_outliers()`. (2) `_coerce_types()`/`_extract_date_features()` in
+  [agent_3.py](../backend/agents/agent_3.py) called `pd.to_datetime(df[col],
+  errors="coerce")` with no `format` argument on `Order_Date`, a column with genuinely
+  mixed date formats (ISO, `DD/MM/YYYY`, `MM-DD-YYYY`, `"Mon DD, YYYY"`). Without an
+  explicit `format`, pandas infers ONE format from the first value and silently NaTs
+  every row that doesn't match it - confirmed 1313/2537 (51.7%) of `Order_Date` values
+  became NaT this way, vs only 15/2537 with `format="mixed"`. This is why nearly every
+  month/quarter (not just December/Q4) showed a growth mismatch: most transactions for
+  most periods were silently falling out of the date-based groupby. Fixed by adding
+  `format="mixed"` to both `pd.to_datetime` calls in agent_3.py (matching what
+  `agent_1.py`'s type-sniffer and the reconciliation test's ground-truth loader already
+  used). Verified: `test_ground_truth_reconciliation.py` is now 5/5 passing (was 56
+  failed/2 passed), including all MoM/QoQ sign-match and magnitude asserts. Full suite:
+  3 failed/93 passed/5 skipped - same 3 pre-existing baseline failures documented in
+  repo memory, no regressions.
 
 - [ ] **2. Category normalization only folds case; typos/near-duplicates stay separate**
   ("COMPLETE"/"Complete" merge, "Completed" doesn't).

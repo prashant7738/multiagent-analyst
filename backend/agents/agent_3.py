@@ -236,6 +236,188 @@ def _normalize_category_label(value):
     return normalized.casefold()
 
 
+# Fuzzy category-spelling merge (docs/known_issues.md #2): case/separator folding
+# alone merges "COMPLETE"/"Complete" but leaves "Complete"/"Completed" as separate
+# categories. FUZZY_MATCH_MIN_LENGTH guards against short codes/antonyms that are
+# trivially within FUZZY_MATCH_MAX_DISTANCE of each other (e.g. "North"/"South" is
+# edit-distance 2, "Cc"/"Dc" is edit-distance 1) being spuriously merged just
+# because they clear the distance bar - verified against a real dataset's category
+# values (see repo memory) that this length gate keeps every legitimate merge
+# ("Complete"/"Completed", "Cancelled"/"Canceled", "Bank Transfer"/"Banktransfer",
+# "Credit Card"/"Creditcard", "Debit Card"/"Debitcard", "Pay Pal"/"Paypal") while
+# excluding every observed false-positive risk ("Card"/"Cash", "Cc"/"Dc",
+# "North"/"South", "East"/"West", single-letter region codes). A same-column,
+# same-length-class pair passing both of those bars can still be two genuinely
+# different real-world names (confirmed on real data: "Houston"/"Boston" is
+# edit-distance 2 and both are 6+ chars) - real spelling variants/typos of the
+# same word essentially never change the leading character, so also requiring
+# a matching first character (case-insensitive) catches this without rejecting
+# any of the legitimate merges above (all of which already share their first
+# letter).
+FUZZY_MATCH_MAX_DISTANCE = 2
+FUZZY_MATCH_MIN_LENGTH = 6
+
+
+def _levenshtein_distance(a, b):
+    if a == b:
+        return 0
+    len_a, len_b = len(a), len(b)
+    if len_a == 0:
+        return len_b
+    if len_b == 0:
+        return len_a
+
+    previous_row = list(range(len_b + 1))
+    for i, char_a in enumerate(a, 1):
+        current_row = [i] + [0] * len_b
+        for j, char_b in enumerate(b, 1):
+            cost = 0 if char_a == char_b else 1
+            current_row[j] = min(
+                previous_row[j] + 1,      # deletion
+                current_row[j - 1] + 1,   # insertion
+                previous_row[j - 1] + cost,  # substitution
+            )
+        previous_row = current_row
+    return previous_row[len_b]
+
+
+def _build_canonical_category_map(value_counts):
+    """Cluster near-duplicate category labels into a canonical form.
+
+    `value_counts` is a pandas Series (label -> row count) of already
+    exact/case-folded distinct labels for one column. The mapping is built
+    entirely from these observed labels - no hardcoded variant list. Each
+    cluster's canonical label is its most frequent member (ties broken by
+    first-seen order in `value_counts`, which pandas already sorts by
+    frequency descending).
+
+    Returns:
+        mapping: {raw_label -> canonical_label} for every label (identity for
+            labels that didn't merge with anything).
+        merges: list of {raw, canonical, row_count, edit_distance} for labels
+            that DID get merged into a different canonical label.
+        flagged: list of {label, row_count, near_candidate, edit_distance} for
+            singleton labels that have a same-column near neighbor excluded
+            only by FUZZY_MATCH_MIN_LENGTH - left unmapped, surfaced for
+            manual review rather than guessed at.
+    """
+    labels = list(value_counts.index)
+    canonical_for = {}
+    clusters = []
+
+    def _fuzzy_eligible(a, b):
+        if min(len(a), len(b)) < FUZZY_MATCH_MIN_LENGTH:
+            return False
+        if a[0].lower() != b[0].lower():
+            return False
+        return _levenshtein_distance(a, b) <= FUZZY_MATCH_MAX_DISTANCE
+
+    for label in labels:
+        if label in canonical_for:
+            continue
+        members = [label]
+        canonical_for[label] = label
+        for other in labels:
+            if other in canonical_for:
+                continue
+            if _fuzzy_eligible(label, other):
+                canonical_for[other] = label
+                members.append(other)
+        clusters.append((label, members))
+
+    mapping = {}
+    merges = []
+    for canonical, members in clusters:
+        for member in members:
+            mapping[member] = canonical
+            if member != canonical:
+                merges.append({
+                    "raw": member,
+                    "canonical": canonical,
+                    "row_count": int(value_counts[member]),
+                    "edit_distance": _levenshtein_distance(member, canonical),
+                })
+
+    flagged = []
+    for canonical, members in clusters:
+        if len(members) != 1:
+            continue
+        label = members[0]
+        best = None
+        for other in labels:
+            if other == label:
+                continue
+            if label[0].lower() != other[0].lower():
+                continue
+            distance = _levenshtein_distance(label, other)
+            if distance <= FUZZY_MATCH_MAX_DISTANCE and min(len(label), len(other)) < FUZZY_MATCH_MIN_LENGTH:
+                if best is None or distance < best[1]:
+                    best = (other, distance)
+        if best:
+            flagged.append({
+                "label": label,
+                "row_count": int(value_counts[label]),
+                "near_candidate": best[0],
+                "edit_distance": best[1],
+            })
+
+    return mapping, merges, flagged
+
+
+def _fuzzy_canonicalize_categories(df, schema_blueprint):
+    """Merge near-duplicate category spellings that survive the exact
+    case/separator fold in `_standardize_text_columns` (e.g. "Complete" vs
+    "Completed", "Cancelled" vs "Canceled"). Applies to the same columns
+    `_standardize_text_columns` canonicalizes (categorical_label/geographic
+    semantic tags, or one_hot/ordinal encoded columns) - the canonical
+    mapping is built fresh from each column's own distinct values.
+    """
+    notes = []
+    normalization_applied = {}
+    df = df.copy()
+
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns:
+            continue
+        if meta.get("is_identifier"):
+            continue
+
+        encoding_strategy = meta.get("encoding_strategy") if isinstance(meta.get("encoding_strategy"), dict) else {}
+        semantic_tag = meta.get("semantic_tag")
+        should_canonicalize = semantic_tag in {"categorical_label", "geographic"} or encoding_strategy.get("method") in {"one_hot", "ordinal"}
+        if not should_canonicalize:
+            continue
+
+        series = df[col].dropna()
+        if series.empty:
+            continue
+
+        value_counts = series.astype("string").value_counts()
+        if len(value_counts) < 2:
+            continue
+
+        mapping, merges, flagged = _build_canonical_category_map(value_counts)
+
+        if merges:
+            df[col] = df[col].map(lambda v: mapping.get(v, v) if pd.notna(v) else v)
+            normalization_applied[col] = merges
+            for merge in merges:
+                notes.append(
+                    f"{col}: fuzzy-canonicalized '{merge['raw']}' -> '{merge['canonical']}' "
+                    f"({merge['row_count']} rows, edit_distance={merge['edit_distance']})"
+                )
+
+        for flag in flagged:
+            notes.append(
+                f"{col}: '{flag['label']}' ({flag['row_count']} rows) not confidently mapped - "
+                f"nearest candidate '{flag['near_candidate']}' (edit_distance={flag['edit_distance']}) "
+                f"is below the {FUZZY_MATCH_MIN_LENGTH}-char minimum length safeguard; left as-is, "
+                f"flagged for manual review"
+            )
+
+    return df, notes, normalization_applied
+
+
 def _normalize_currency_text(value):
     if pd.isna(value):
         return pd.NA
@@ -361,7 +543,9 @@ def _coerce_types(df, schema_blueprint):
                 if intended == "int" and df[col].isna().sum() == 0:
                     df[col] = df[col].astype(int)
             elif intended == "datetime":
-                df[col] = pd.to_datetime(df[col], errors="coerce")
+                # format="mixed" parses each value against its own format instead of locking
+                # onto the first row's format and NaT-ing every other format in the column.
+                df[col] = pd.to_datetime(df[col], format="mixed", errors="coerce")
                 notes.append(f"{col}: coerced to datetime")
             elif intended == "boolean":
                 df[col] = df[col].map(
@@ -1032,7 +1216,7 @@ def _extract_date_features(df, schema_blueprint):
             continue
 
         try:
-            dt = pd.to_datetime(df[col], errors="coerce")
+            dt = pd.to_datetime(df[col], format="mixed", errors="coerce")
             df[f"{col}_year"] = dt.dt.year
             df[f"{col}_month"] = dt.dt.month
             df[f"{col}_quarter"] = dt.dt.quarter
@@ -1476,6 +1660,13 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
     before_step = df.copy()
+    df, notes, category_normalization = _fuzzy_canonicalize_categories(df, schema_blueprint)
+    preprocessing_log.extend(notes)
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3a"))
+    if verbose:
+        print(f"[Agent 3] Step 3a - Fuzzy category canonicalization done ({len(category_normalization)} columns affected)")
+
+    before_step = df.copy()
     try:
         df, canonical_duplicates, duplicate_samples = _dedup_after_canonicalization(df)
     except Exception as e:
@@ -1668,6 +1859,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         "dataset_domain": dataset_domain,
         "data_quality": data_quality,
         "schema_blueprint": schema_blueprint,
+        "category_normalization": category_normalization,
         "column_ledger": {
             "columns": ledger.columns,
             "clip_bounds": ledger.clip_bounds,

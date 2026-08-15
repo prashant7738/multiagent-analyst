@@ -116,15 +116,21 @@ def _categorical_cols(df, schema_blueprint):
             continue
         if meta.get("semantic_tag") in ("datetime", "identifier"):
             continue
-        # pandas 3.x uses StringDtype (dtype=string) instead of object for text columns.
+        # pandas 3.x reports text-column dtype as literally "str" (not "object"/
+        # "string") via str(dtype) - without checking for it here, every
+        # "geographic"-tagged column (e.g. Region) on pandas 3.x silently fell out
+        # of both the dtype check AND the semantic_tag check below (which only
+        # matched "categorical_label"), excluding it from every ranking/insight
+        # function downstream (docs/known_issues.md #3).
         is_string_col = (
             df[col].dtype == object
-            or str(df[col].dtype) == "string"
-            or hasattr(df[col].dtype, "name") and df[col].dtype.name == "string"
+            or str(df[col].dtype) in ("string", "str")
+            or (hasattr(df[col].dtype, "name") and df[col].dtype.name in ("string", "str"))
         )
-        if is_string_col or meta.get("semantic_tag") == "categorical_label":
+        if is_string_col or meta.get("semantic_tag") in ("categorical_label", "geographic"):
             cols.append(col)
     return cols
+
 
 def _find_col(df, keywords, schema_blueprint):
     """Find a column containing any keyword; restrict to valid numeric columns."""
@@ -206,11 +212,24 @@ def _build_chart_plan(df, schema_blueprint):
     categorical_cols = _categorical_cols(df, schema_blueprint)
     datetime_cols = _datetime_cols(df, schema_blueprint)
     revenue_col = _find_revenue_col(df, schema_blueprint)
+    profit_col = _find_profit_col(df, schema_blueprint)
     derived_cols = [c for c in df.columns if c.startswith("derived_") and pd.api.types.is_numeric_dtype(df[c])]
 
     time_axis_cols = [c for c in df.columns if c.endswith(("_year", "_month", 
         "_quarter", "_day", "_day_of_week", "_is_weekend", "_week_of_year"))]
     has_time_axis = bool(datetime_cols or time_axis_cols)
+    month_col_present = any(c.endswith("_month") for c in df.columns)
+
+    discount_col = _find_numeric_col_by_phrases(
+        df, schema_blueprint, ["discount percentage", "discount pct", "discount rate", "discount"]
+    )
+    returned_col = _find_boolean_col_by_phrases(df, ["returned", "is returned", "return flag"])
+    margin_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["profit margin", "margin pct", "margin"])
+    category_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["product category", "category"])
+    rep_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["sales representative", "representative"])
+    segment_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["customer segment", "segment"])
+    region_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["region"])
+    shipping_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["shipping cost", "shipping"])
 
     if revenue_col and has_time_axis and categorical_cols:
         dataset_type = "sales_timeseries"
@@ -233,6 +252,7 @@ def _build_chart_plan(df, schema_blueprint):
         "categorical_columns": categorical_cols,
         "datetime_columns": datetime_cols,
         "revenue_column": revenue_col,
+        "profit_column": profit_col,
         "derived_columns": derived_cols,
         "has_time_axis": has_time_axis,
         "chart_families": {
@@ -240,12 +260,18 @@ def _build_chart_plan(df, schema_blueprint):
             "correlation": len(numeric_cols) >= 2,
             "growth_rates": bool(revenue_col and has_time_axis),
             "top_bottom": bool(revenue_col and categorical_cols),
+            "profit_breakdown": bool(profit_col and categorical_cols),
             "seasonality": bool(revenue_col and has_time_axis),
             "anomalies": len(numeric_cols) >= 1,
             "distributions": len(categorical_cols) >= 1,
             "regression": bool(revenue_col and has_time_axis),
             "distribution_charts": len(numeric_cols) >= 1,
             "derived_metrics": len(derived_cols) >= 1,
+            "discount_return_rate": bool(discount_col and returned_col),
+            "category_margin_trend": bool(margin_col and category_col and month_col_present),
+            "rep_discount_margin": bool(rep_col and discount_col and margin_col),
+            "segment_order_value": bool(segment_col and revenue_col),
+            "region_shipping_cost": bool(shipping_col and region_col),
         },
     }
 
@@ -557,6 +583,68 @@ def _growth_rates(df, schema_blueprint):
 # 4 — TOP / BOTTOM N RANKINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# docs/known_issues.md #3: Region/Product_Category/Customer_Segment/
+# Sales_Representative-style dimensions were never guaranteed a ranking slot -
+# they simply lost the "top 3 most differentiated" selection race against
+# noisier columns (e.g. Customer_City, Product_Name). Matched by keyword
+# (not hardcoded exact column names) so it generalizes to similarly-named
+# columns in other datasets.
+PRIORITY_DIMENSION_KEYWORDS = ("region", "category", "segment", "representative")
+MAX_RANKING_DIMENSIONS = 6  # was an unconditional top-3; raised to leave room for priority dims
+
+
+def _is_priority_dimension(col):
+    tokens = re.findall(r"[a-z0-9]+", col.lower())
+    return any(kw in tokens for kw in PRIORITY_DIMENSION_KEYWORDS)
+
+
+def _select_ranking_dimensions(df, cat_cols, metric_col):
+    """Pick categorical columns to rank `metric_col` by.
+
+    Business-priority dimensions (region/category/segment/representative-style
+    columns, matched by keyword) always get a slot if they pass the basic
+    cardinality sanity check, topped up with the most metric-differentiated of
+    the rest, up to MAX_RANKING_DIMENSIONS total. A column with <2 unique
+    values can't be ranked; one with >20 groups makes "bottom N" meaningless
+    single-row noise rather than a real underperformer.
+    """
+    priority_cols = []
+    other_candidates = []
+    for cat_col in cat_cols:
+        nunique = df[cat_col].nunique(dropna=True)
+        if nunique < 2 or nunique > 20:
+            continue
+        totals = df.groupby(cat_col)[metric_col].sum()
+        grand_total = totals.sum()
+        if grand_total == 0:
+            continue
+        shares = totals / grand_total * 100
+        spread = float(shares.max() - shares.min())
+        if _is_priority_dimension(cat_col):
+            priority_cols.append(cat_col)
+        else:
+            other_candidates.append((cat_col, spread))
+
+    other_candidates.sort(key=lambda c: c[1], reverse=True)
+    remaining_slots = max(0, MAX_RANKING_DIMENSIONS - len(priority_cols))
+    return priority_cols + [c for c, _ in other_candidates[:remaining_slots]]
+
+
+def _find_profit_col(df, schema_blueprint):
+    """Locate the primary profit column, explicitly excluding margin/percentage
+    columns (e.g. "Profit_Margin") so profit breakdowns sum an absolute
+    currency amount, not a percentage."""
+    numeric_cols = _numeric_cols(df, schema_blueprint)
+    exact = [c for c in numeric_cols if c.lower() == "profit"]
+    if exact:
+        return exact[0]
+    for col in numeric_cols:
+        tokens = re.findall(r"[a-z0-9]+", col.lower())
+        if "profit" in tokens and "margin" not in tokens:
+            return col
+    return None
+
+
 def _top_bottom_rankings(df, schema_blueprint, n=5):
     result = {}
     chart_candidates = []
@@ -568,27 +656,7 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
     label = _revenue_label(rev_col)
     slug = _slug(label)
     cat_cols = _categorical_cols(df, schema_blueprint)
-
-    # Score each categorical column by how differentiated its group revenue is,
-    # restricted to a sensible number of groups. A column with <2 unique values
-    # can't be ranked; one with >20 groups makes "bottom N" meaningless single-row
-    # noise rather than a real underperformer. Picking the most differentiated
-    # columns (instead of blindly using the first 3 in dataframe order) ensures
-    # the charts drawn actually tell a "who's winning / who's losing" story.
-    candidates = []
-    for cat_col in cat_cols:
-        nunique = df[cat_col].nunique(dropna=True)
-        if nunique < 2 or nunique > 20:
-            continue
-        totals = df.groupby(cat_col)[rev_col].sum()
-        grand_total = totals.sum()
-        if grand_total == 0:
-            continue
-        shares = totals / grand_total * 100
-        candidates.append((cat_col, float(shares.max() - shares.min())))
-
-    candidates.sort(key=lambda c: c[1], reverse=True)
-    selected_cat_cols = [c for c, _ in candidates[:3]]
+    selected_cat_cols = _select_ranking_dimensions(df, cat_cols, rev_col)
 
     for cat_col in selected_cat_cols:
         grouped = (
@@ -632,6 +700,69 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
             "path": ranking_path, "family": "top_bottom_ranking",
             "score": round(min(100.0, spread), 1),
             "reason": f"{cat_col} revenue share spread={spread:.1f}pp",
+        })
+
+    return result, chart_candidates
+
+
+def _profit_breakdown_by_dimension(df, schema_blueprint, n=5):
+    """Same ranking treatment as `_top_bottom_rankings` but for profit instead
+    of revenue - kept as a separate stats key (`profit_breakdown`) rather than
+    reshaping `top_bottom`'s existing dict, so existing consumers of
+    `total_revenue`/`avg_revenue`/`revenue_share_pct` are unaffected."""
+    result = {}
+    chart_candidates = []
+
+    profit_col = _find_profit_col(df, schema_blueprint)
+    if not profit_col or not pd.api.types.is_numeric_dtype(df[profit_col]):
+        return result, chart_candidates
+
+    label = profit_col.replace("_", " ").strip().title()
+    slug = _slug(label)
+    cat_cols = _categorical_cols(df, schema_blueprint)
+    selected_cat_cols = _select_ranking_dimensions(df, cat_cols, profit_col)
+
+    for cat_col in selected_cat_cols:
+        grouped = (
+            df.groupby(cat_col)[profit_col]
+            .agg(["sum", "mean", "count"])
+            .reset_index()
+            .rename(columns={"sum": "total_profit", "mean": "avg_profit", "count": "records"})
+            .sort_values("total_profit", ascending=False)
+        )
+        total = grouped["total_profit"].sum()
+        grouped["profit_share_pct"] = (grouped["total_profit"] / total * 100).round(2) if total else 0.0
+
+        top_n = grouped.head(n)
+        bottom_n = grouped.tail(n)
+
+        result[cat_col] = {
+            "top": top_n.to_dict(orient="records"),
+            "bottom": bottom_n.to_dict(orient="records"),
+            "total_categories": len(grouped),
+        }
+
+        fig, ax = plt.subplots(figsize=(8, max(3, len(top_n) * 0.6 + 1)))
+        bars = ax.barh(
+            top_n[cat_col].astype(str),
+            top_n["total_profit"],
+            color=COLORS["bars"][:len(top_n)],
+            alpha=0.88,
+        )
+        for bar, pct in zip(bars, top_n["profit_share_pct"]):
+            ax.text(bar.get_width(), bar.get_y() + bar.get_height()/2,
+                    f"  {pct:.1f}%", va="center", fontsize=9)
+        ax.set_xlabel(f"Total {label}", fontsize=10)
+        ax.set_title(f"Top {n} {cat_col} by {label}", fontsize=13, fontweight="bold")
+        ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
+        ax.invert_yaxis()
+        fig.tight_layout()
+        chart_path = _save(fig, f"top_{n}_{cat_col.lower()}_{slug}")
+        spread = float(grouped["profit_share_pct"].max() - grouped["profit_share_pct"].min()) if not grouped.empty else 0.0
+        chart_candidates.append({
+            "path": chart_path, "family": "profit_breakdown",
+            "score": round(min(100.0, spread), 1),
+            "reason": f"{cat_col} profit share spread={spread:.1f}pp",
         })
 
     return result, chart_candidates
@@ -1108,6 +1239,297 @@ def _derived_metrics_charts(df):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 11 — CROSS-DIMENSIONAL ANALYSIS (docs/known_issues.md #3)
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic name-based column finders (not hardcoded exact column names) so
+# these analyses work on any dataset shaped like this one, not just the
+# specific fixture that motivated them. Word-boundary matching alone
+# (`_find_col`'s `\b{kw}\b` regex) doesn't work for underscore-joined column
+# names like "Discount_Percentage" - regex `\b` treats "_" as a word
+# character, so there's no boundary between "discount" and "_". These finders
+# tokenize on any non-alphanumeric separator instead.
+
+def _tokenize_col_name(col):
+    return re.findall(r"[a-z0-9]+", col.lower())
+
+
+def _find_numeric_col_by_phrases(df, schema_blueprint, phrases):
+    """First phrase (list of tokens) with a numeric column containing all its
+    tokens wins; phrases are tried in priority order."""
+    numeric_cols = _numeric_cols(df, schema_blueprint)
+    for phrase in phrases:
+        phrase_tokens = phrase.split()
+        for col in numeric_cols:
+            tokens = _tokenize_col_name(col)
+            if all(t in tokens for t in phrase_tokens):
+                return col
+    return None
+
+
+def _find_categorical_col_by_phrases(df, schema_blueprint, phrases):
+    """Exact (case-insensitive) column name match first - disambiguates e.g.
+    "Region" from "Customer_Region" - then a whole-token phrase match."""
+    cat_cols = _categorical_cols(df, schema_blueprint)
+    exact = {c.lower(): c for c in cat_cols}
+    for phrase in phrases:
+        if phrase.lower() in exact:
+            return exact[phrase.lower()]
+    for phrase in phrases:
+        phrase_tokens = phrase.split()
+        for col in cat_cols:
+            tokens = _tokenize_col_name(col)
+            if all(t in tokens for t in phrase_tokens):
+                return col
+    return None
+
+
+def _find_boolean_col_by_phrases(df, phrases):
+    for phrase in phrases:
+        phrase_tokens = phrase.split()
+        for col in df.columns:
+            if not pd.api.types.is_bool_dtype(df[col]):
+                continue
+            tokens = _tokenize_col_name(col)
+            if all(t in tokens for t in phrase_tokens):
+                return col
+    return None
+
+
+def _discount_vs_return_rate(df, schema_blueprint, quartiles=4):
+    """Return rate by discount-percentage quartile bucket."""
+    result = {}
+    chart_candidates = []
+
+    discount_col = _find_numeric_col_by_phrases(
+        df, schema_blueprint, ["discount percentage", "discount pct", "discount rate", "discount"]
+    )
+    returned_col = _find_boolean_col_by_phrases(df, ["returned", "is returned", "return flag"])
+    if not discount_col or not returned_col:
+        return result, chart_candidates
+
+    working = df[[discount_col, returned_col]].dropna()
+    if working.empty or working[discount_col].nunique() < 2:
+        return result, chart_candidates
+
+    try:
+        buckets = pd.qcut(working[discount_col], q=quartiles, duplicates="drop")
+    except ValueError:
+        return result, chart_candidates
+
+    grouped = working[returned_col].groupby(buckets, observed=True).agg(["mean", "count"])
+    if grouped.empty:
+        return result, chart_candidates
+
+    records = []
+    for interval, row in grouped.iterrows():
+        records.append({
+            "discount_range": f"{interval.left:.3g}-{interval.right:.3g}",
+            "return_rate_pct": round(float(row["mean"]) * 100, 2),
+            "records": int(row["count"]),
+        })
+
+    result = {
+        "discount_column": discount_col,
+        "returned_column": returned_col,
+        "buckets": records,
+    }
+
+    labels = [r["discount_range"] for r in records]
+    values = [r["return_rate_pct"] for r in records]
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(labels, values, color=COLORS["bars"][:len(records)], alpha=0.88)
+    ax.set_xlabel(f"{discount_col} (quartile bucket)", fontsize=10)
+    ax.set_ylabel("Return Rate (%)", fontsize=10)
+    ax.set_title("Return Rate by Discount Quartile", fontsize=13, fontweight="bold")
+    ax.tick_params(axis="x", labelsize=9)
+    fig.tight_layout()
+    chart_path = _save(fig, "return_rate_by_discount_quartile")
+    spread = float(max(values) - min(values)) if values else 0.0
+    chart_candidates.append({
+        "path": chart_path, "family": "discount_return_rate",
+        "score": round(min(100.0, spread * 4), 1),
+        "reason": f"return rate spread across discount quartiles={spread:.1f}pp",
+    })
+
+    return result, chart_candidates
+
+
+def _margin_by_category_over_time(df, schema_blueprint, max_categories=8):
+    """Average profit margin % per Product_Category-style column, by month."""
+    result = {}
+    chart_candidates = []
+
+    margin_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["profit margin", "margin pct", "margin"])
+    category_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["product category", "category"])
+    month_col = next((c for c in df.columns if c.endswith("_month")), None)
+    if not margin_col or not category_col or not month_col:
+        return result, chart_candidates
+
+    working = df[[category_col, month_col, margin_col]].dropna()
+    if working.empty:
+        return result, chart_candidates
+
+    grouped = working.groupby([category_col, month_col])[margin_col].mean().reset_index()
+    if grouped.empty:
+        return result, chart_candidates
+
+    categories = list(grouped[category_col].unique())
+    for cat in categories:
+        rows = (
+            grouped[grouped[category_col] == cat][[month_col, margin_col]]
+            .rename(columns={month_col: "month", margin_col: "avg_margin_pct"})
+            .round(2)
+        )
+        result[str(cat)] = rows.to_dict(orient="records")
+
+    plotted_categories = categories[:max_categories]
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    for color, cat in zip(COLORS["bars"], plotted_categories):
+        rows = result[str(cat)]
+        ax.plot([r["month"] for r in rows], [r["avg_margin_pct"] for r in rows],
+                marker="o", label=str(cat), color=color, linewidth=2)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Avg Profit Margin %")
+    ax.set_title(f"Profit Margin by {category_col} Over Time", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=8, ncol=2)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    fig.tight_layout()
+    chart_path = _save(fig, f"margin_by_{_slug(category_col)}_over_time")
+    chart_candidates.append({
+        "path": chart_path, "family": "category_margin_trend",
+        "score": 55.0,
+        "reason": f"margin trend across {len(plotted_categories)} {category_col} groups",
+    })
+
+    return result, chart_candidates
+
+
+def _discount_and_margin_by_rep(df, schema_blueprint, max_charted=15):
+    """Average discount % and profit margin % per Sales_Representative-style column."""
+    result = {}
+    chart_candidates = []
+
+    rep_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["sales representative", "representative"])
+    discount_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["discount percentage", "discount"])
+    margin_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["profit margin", "margin"])
+    if not rep_col or not discount_col or not margin_col:
+        return result, chart_candidates
+
+    nunique = df[rep_col].nunique(dropna=True)
+    if nunique < 2 or nunique > 30:
+        return result, chart_candidates
+
+    grouped = (
+        df.groupby(rep_col)[[discount_col, margin_col]]
+        .mean()
+        .rename(columns={discount_col: "avg_discount_pct", margin_col: "avg_margin_pct"})
+        .reset_index()
+        .round(2)
+        .sort_values("avg_margin_pct", ascending=False)
+    )
+    result = {"rep_column": rep_col, "records": grouped.to_dict(orient="records")}
+
+    top = grouped.head(max_charted)
+    fig, ax = plt.subplots(figsize=(9, max(3, len(top) * 0.35 + 1)))
+    ax.barh(top[rep_col].astype(str), top["avg_margin_pct"], color=COLORS["primary"], alpha=0.85)
+    ax.set_xlabel("Avg Profit Margin %")
+    ax.set_title(f"Avg Margin by {rep_col}", fontsize=13, fontweight="bold")
+    ax.invert_yaxis()
+    fig.tight_layout()
+    chart_path = _save(fig, f"margin_by_{_slug(rep_col)}")
+    spread = float(top["avg_margin_pct"].max() - top["avg_margin_pct"].min()) if not top.empty else 0.0
+    chart_candidates.append({
+        "path": chart_path, "family": "rep_discount_margin",
+        "score": round(min(100.0, spread * 3), 1),
+        "reason": f"avg margin spread across {rep_col}={spread:.1f}pp",
+    })
+
+    return result, chart_candidates
+
+
+def _avg_order_value_by_segment(df, schema_blueprint):
+    """Average order value (revenue per row) per Customer_Segment-style column."""
+    result = {}
+    chart_candidates = []
+
+    segment_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["customer segment", "segment"])
+    rev_col = _find_revenue_col(df, schema_blueprint)
+    if not segment_col or not rev_col:
+        return result, chart_candidates
+
+    nunique = df[segment_col].nunique(dropna=True)
+    if nunique < 2 or nunique > 20:
+        return result, chart_candidates
+
+    grouped = (
+        df.groupby(segment_col)[rev_col]
+        .mean()
+        .reset_index()
+        .rename(columns={rev_col: "avg_order_value"})
+        .round(2)
+        .sort_values("avg_order_value", ascending=False)
+    )
+    result = {"segment_column": segment_col, "revenue_column": rev_col, "records": grouped.to_dict(orient="records")}
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(grouped[segment_col].astype(str), grouped["avg_order_value"], color=COLORS["bars"][:len(grouped)], alpha=0.88)
+    ax.set_ylabel(f"Avg {_revenue_label(rev_col)}")
+    ax.set_title(f"Avg Order Value by {segment_col}", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    chart_path = _save(fig, f"avg_order_value_by_{_slug(segment_col)}")
+    mean_value = float(grouped["avg_order_value"].mean()) if not grouped.empty else 0.0
+    spread = float(grouped["avg_order_value"].max() - grouped["avg_order_value"].min()) if not grouped.empty else 0.0
+    chart_candidates.append({
+        "path": chart_path, "family": "segment_order_value",
+        "score": round(min(100.0, (spread / mean_value * 40) if mean_value else 0.0), 1),
+        "reason": f"avg order value spread across {segment_col}",
+    })
+
+    return result, chart_candidates
+
+
+def _shipping_cost_by_region(df, schema_blueprint):
+    """Average shipping cost per Region-style column."""
+    result = {}
+    chart_candidates = []
+
+    shipping_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["shipping cost", "shipping"])
+    region_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["region"])
+    if not shipping_col or not region_col:
+        return result, chart_candidates
+
+    nunique = df[region_col].nunique(dropna=True)
+    if nunique < 2 or nunique > 20:
+        return result, chart_candidates
+
+    grouped = (
+        df.groupby(region_col)[shipping_col]
+        .mean()
+        .reset_index()
+        .rename(columns={shipping_col: "avg_shipping_cost"})
+        .round(2)
+        .sort_values("avg_shipping_cost", ascending=False)
+    )
+    result = {"region_column": region_col, "shipping_column": shipping_col, "records": grouped.to_dict(orient="records")}
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(grouped[region_col].astype(str), grouped["avg_shipping_cost"], color=COLORS["bars"][:len(grouped)], alpha=0.88)
+    ax.set_ylabel("Avg Shipping Cost")
+    ax.set_title(f"Avg Shipping Cost by {region_col}", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    chart_path = _save(fig, f"avg_shipping_cost_by_{_slug(region_col)}")
+    mean_value = float(grouped["avg_shipping_cost"].mean()) if not grouped.empty else 0.0
+    spread = float(grouped["avg_shipping_cost"].max() - grouped["avg_shipping_cost"].min()) if not grouped.empty else 0.0
+    chart_candidates.append({
+        "path": chart_path, "family": "region_shipping_cost",
+        "score": round(min(100.0, (spread / mean_value * 40) if mean_value else 0.0), 1),
+        "reason": f"avg shipping cost spread across {region_col}",
+    })
+
+    return result, chart_candidates
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1116,6 +1538,7 @@ def _derived_metrics_charts(df):
 ANOMALY_QUALITY_TOLERANCE_PCT = 3.0
 ANOMALY_QUALITY_PENALTY_SCALE = 0.8
 ANOMALY_QUALITY_PENALTY_CAP = 25.0
+
 
 
 def _apply_anomaly_quality_penalty(data_quality, anomaly_summary):
@@ -1273,10 +1696,58 @@ def agent4_analysis(state: GraphState) -> GraphState:
         candidates = []
         print("[Agent 4] Step 10 — Derived metrics skipped (no derived metrics)")
 
+    if chart_plan["chart_families"]["profit_breakdown"]:
+        stats["profit_breakdown"], candidates = _profit_breakdown_by_dimension(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 11 — Profit breakdown done ({len(candidates)} charts)")
+    else:
+        stats["profit_breakdown"] = {}
+        print("[Agent 4] Step 11 — Profit breakdown skipped (no profit column or categorical dims)")
+
+    if chart_plan["chart_families"]["discount_return_rate"]:
+        stats["discount_return_rate"], candidates = _discount_vs_return_rate(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 12 — Discount vs return rate done ({len(candidates)} charts)")
+    else:
+        stats["discount_return_rate"] = {}
+        print("[Agent 4] Step 12 — Discount vs return rate skipped (no discount/returned columns)")
+
+    if chart_plan["chart_families"]["category_margin_trend"]:
+        stats["category_margin_trend"], candidates = _margin_by_category_over_time(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 13 — Margin by category over time done ({len(candidates)} charts)")
+    else:
+        stats["category_margin_trend"] = {}
+        print("[Agent 4] Step 13 — Margin by category over time skipped (missing margin/category/month columns)")
+
+    if chart_plan["chart_families"]["rep_discount_margin"]:
+        stats["rep_discount_margin"], candidates = _discount_and_margin_by_rep(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 14 — Discount/margin by rep done ({len(candidates)} charts)")
+    else:
+        stats["rep_discount_margin"] = {}
+        print("[Agent 4] Step 14 — Discount/margin by rep skipped (missing rep/discount/margin columns)")
+
+    if chart_plan["chart_families"]["segment_order_value"]:
+        stats["segment_order_value"], candidates = _avg_order_value_by_segment(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 15 — Avg order value by segment done ({len(candidates)} charts)")
+    else:
+        stats["segment_order_value"] = {}
+        print("[Agent 4] Step 15 — Avg order value by segment skipped (missing segment/revenue columns)")
+
+    if chart_plan["chart_families"]["region_shipping_cost"]:
+        stats["region_shipping_cost"], candidates = _shipping_cost_by_region(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 16 — Shipping cost by region done ({len(candidates)} charts)")
+    else:
+        stats["region_shipping_cost"] = {}
+        print("[Agent 4] Step 16 — Shipping cost by region skipped (missing shipping/region columns)")
+
     data_quality = _apply_anomaly_quality_penalty(state.get("data_quality"), stats.get("anomaly_summary", {}))
     if data_quality is not None:
         print(
-            f"[Agent 4] Step 11 — Quality score adjusted for anomalies: "
+            f"[Agent 4] Step 17 — Quality score adjusted for anomalies: "
             f"{data_quality.get('overall_quality_score_pre_anomaly')} -> {data_quality.get('overall_quality_score')} "
             f"(penalty={data_quality.get('anomaly_quality_penalty')}, flagged={data_quality.get('anomaly_flagged_row_pct')}%)"
         )

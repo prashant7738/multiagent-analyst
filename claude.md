@@ -8,7 +8,7 @@
 ## Architecture Overview
 
 ### Technology Stack
-- **LLM**: Groq API (llama-3.3-70b-versatile)
+- **LLM**: Groq API (qwen/qwen3.6-27b)
 - **Orchestration**: LangGraph (state-based DAG pipeline)
 - **Data**: Pandas, NumPy, SciPy
 - **Visualization**: Matplotlib

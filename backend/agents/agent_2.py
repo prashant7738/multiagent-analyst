@@ -226,7 +226,7 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
     raw_text = response.text.strip()
     return _parse_schema_blueprint_response(raw_text)
 
-GROQ_MODEL = "llama-3.3-70b-versatile" 
+GROQ_MODEL = "qwen/qwen3.6-27b"  # llama-3.3-70b-versatile deprecated by Groq 08/16/26 
 GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_MODEL_FALLBACKS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0

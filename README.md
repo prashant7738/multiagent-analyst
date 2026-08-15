@@ -11,7 +11,7 @@ This project demonstrates a sophisticated multi-agent architecture using state-b
 ## 🏗️ Architecture Overview
 
 ### Technology Stack
-- **LLM**: Groq API (llama-3.3-70b-versatile)
+- **LLM**: Groq API (qwen/qwen3.6-27b)
 - **Orchestration**: LangGraph (state-based DAG pipeline)
 - **Data Processing**: Pandas, NumPy, SciPy
 - **Visualization**: Matplotlib

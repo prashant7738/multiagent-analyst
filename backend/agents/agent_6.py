@@ -105,6 +105,15 @@ def _extract_excluded_columns_facts(stats):
     }
 
 
+def _extract_formulaic_pairs_facts(stats):
+    """Pairs excluded from Top Correlations because one column is a known
+    direct formula of the other (docs/known_issues.md #5), e.g. derived_profit
+    vs. its own revenue/cost inputs - distinct from the ID/leakage exclusions
+    above, so surfaced as its own appendix."""
+    correlation = stats.get("correlation", {}) or {}
+    return (correlation.get("formulaic_pairs", []) or [])[:TOP_CORRELATIONS_LIMIT]
+
+
 def _extract_growth_facts(stats):
     growth_rates = stats.get("growth_rates", {}) or {}
     facts = {}
@@ -136,28 +145,47 @@ def _extract_growth_facts(stats):
     return facts
 
 
+def _slice_top_bottom_rows(cat_col, data, limit=TOP_RANKING_LIMIT):
+    """Slice a ranking/profit-breakdown dict's top/bottom lists for display.
+
+    Agent 4's `top`/`bottom` lists are independently computed (head(n)/tail(n)
+    of the same descending-sorted groupby) and overlap whenever
+    `total_categories <= n` - in that case they're literally identical lists.
+    Independently truncating each to `limit` (as this used to do) then shows
+    the same top-ranked rows twice under "Top" and "Bottom" labels, and the
+    true worst performer never appears anywhere - a real category silently
+    missing despite the header's (correct) total_categories count
+    (docs/known_issues.md #4). Reversing `bottom` (so it reads worst-first)
+    and excluding any category already shown in `top` guarantees every
+    distinct category appears at least once whenever total_categories <= 2*limit.
+    """
+    top_rows = (data.get("top") or [])[:limit]
+    shown_keys = {row.get(cat_col) for row in top_rows}
+
+    bottom_sliced = []
+    for row in reversed(data.get("bottom") or []):
+        if row.get(cat_col) in shown_keys:
+            continue
+        bottom_sliced.append(row)
+        shown_keys.add(row.get(cat_col))
+        if len(bottom_sliced) >= limit:
+            break
+
+    return {
+        "top": top_rows,
+        "bottom": bottom_sliced,
+        "total_categories": data.get("total_categories"),
+    }
+
+
 def _extract_ranking_facts(stats):
     top_bottom = stats.get("top_bottom", {}) or {}
-    facts = {}
-    for cat_col, data in top_bottom.items():
-        facts[cat_col] = {
-            "top": (data.get("top") or [])[:TOP_RANKING_LIMIT],
-            "bottom": (data.get("bottom") or [])[:TOP_RANKING_LIMIT],
-            "total_categories": data.get("total_categories"),
-        }
-    return facts
+    return {cat_col: _slice_top_bottom_rows(cat_col, data) for cat_col, data in top_bottom.items()}
 
 
 def _extract_profit_facts(stats):
     profit_breakdown = stats.get("profit_breakdown", {}) or {}
-    facts = {}
-    for cat_col, data in profit_breakdown.items():
-        facts[cat_col] = {
-            "top": (data.get("top") or [])[:TOP_RANKING_LIMIT],
-            "bottom": (data.get("bottom") or [])[:TOP_RANKING_LIMIT],
-            "total_categories": data.get("total_categories"),
-        }
-    return facts
+    return {cat_col: _slice_top_bottom_rows(cat_col, data) for cat_col, data in profit_breakdown.items()}
 
 
 def _extract_cross_dimensional_facts(stats):
@@ -236,6 +264,7 @@ def _extract_insight_facts(state):
         "data_quality": _extract_quality_facts(state),
         "top_correlations": _extract_correlation_facts(stats),
         "excluded_columns": _extract_excluded_columns_facts(stats),
+        "formulaic_pairs": _extract_formulaic_pairs_facts(stats),
         "growth": _extract_growth_facts(stats),
         "rankings": _extract_ranking_facts(stats),
         "profit_breakdown": _extract_profit_facts(stats),

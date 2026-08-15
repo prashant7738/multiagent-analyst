@@ -377,6 +377,27 @@ def flag_leakage_columns(df, corr_matrix, name_patterns=None):
 # 2 — CORRELATION MATRIX
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_derivation_map(schema_blueprint):
+    """Agent 3's known revenue/discount/cost/profit formula relationships
+    (e.g. derived_profit = revenue - cost), recorded in
+    schema_blueprint['__metadata__']['derived_metric_sources'] at derivation
+    time. Used to exclude tautological pairs from "Top Correlations" by
+    explicit formula knowledge rather than a correlation-value cutoff
+    (docs/known_issues.md #5).
+    """
+    metadata = schema_blueprint.get("__metadata__")
+    if not isinstance(metadata, dict):
+        return {}
+    derivation_map = metadata.get("derived_metric_sources")
+    return derivation_map if isinstance(derivation_map, dict) else {}
+
+
+def _is_formulaic_pair(c1, c2, derivation_map):
+    """True if c1/c2 are directly related by a known formula (one is derived
+    from the other), not just incidentally correlated."""
+    return c2 in derivation_map.get(c1, []) or c1 in derivation_map.get(c2, [])
+
+
 def _correlation(df, schema_blueprint):
     # Use every analysis-eligible numeric column (per Agent 2's schema tags),
     # not a fixed name whitelist - that way this works on any dataset, not just
@@ -398,10 +419,12 @@ def _correlation(df, schema_blueprint):
     spearman = corr_df.corr(method="spearman").round(4)
 
     flagged_columns = flag_leakage_columns(df, pearson)
+    derivation_map = _get_derivation_map(schema_blueprint)
 
     strong_pairs = []
     max_abs_r = 0.0
     excluded_pairs = []
+    formulaic_pairs = []
     for i, c1 in enumerate(cols):
         for c2 in cols[i+1:]:
             r = pearson.loc[c1, c2]
@@ -413,7 +436,9 @@ def _correlation(df, schema_blueprint):
                     "direction": "positive" if r > 0 else "negative",
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
                 }
-                if c1 in flagged_columns or c2 in flagged_columns:
+                if _is_formulaic_pair(c1, c2, derivation_map):
+                    formulaic_pairs.append(pair)
+                elif c1 in flagged_columns or c2 in flagged_columns:
                     excluded_pairs.append(pair)
                 else:
                     strong_pairs.append(pair)
@@ -425,6 +450,7 @@ def _correlation(df, schema_blueprint):
         "max_abs_r":       round(max_abs_r, 4),
         "flagged_columns": sorted(flagged_columns & set(cols)),
         "excluded_pairs":  excluded_pairs,
+        "formulaic_pairs": formulaic_pairs,
     }
     chart_candidates = []
 

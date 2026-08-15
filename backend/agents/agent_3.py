@@ -1275,6 +1275,11 @@ def _is_numeric_col(df, col):
 def _derive_business_metrics(df, schema_blueprint=None):
     notes = []
     schema_blueprint = schema_blueprint or {}
+    # Records which source column(s) each derived_* metric is a direct formula
+    # of (e.g. derived_profit = rev_col - cost_col), so Agent 4 can exclude
+    # these known-formulaic pairs from "Top Correlations" instead of relying
+    # on a correlation-value cutoff (docs/known_issues.md #5).
+    derivation_map = {}
 
     # Prefer Agent 2's explicit financial_role tag over name-keyword guessing
     # so a customer/personal attribute like "Income" is never conflated with
@@ -1325,31 +1330,41 @@ def _derive_business_metrics(df, schema_blueprint=None):
         df["derived_profit"] = df[rev_col] - df[cost_col]
         df["derived_profit_margin_pct"] = (df["derived_profit"] / df[rev_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: profit and profit_margin_pct from [{rev_col}] - [{cost_col}]")
+        derivation_map["derived_profit"] = [rev_col, cost_col]
+        derivation_map["derived_profit_margin_pct"] = ["derived_profit", rev_col]
 
     if rev_col and unit_col:
         df["derived_revenue_per_unit"] = df[rev_col] / df[unit_col].replace(0, np.nan)
         notes.append(f"Derived: revenue_per_unit from [{rev_col}] / [{unit_col}]")
+        derivation_map["derived_revenue_per_unit"] = [rev_col, unit_col]
 
     if not rev_col and price_col and unit_col:
         df["derived_total_revenue"] = df[price_col] * df[unit_col]
         notes.append(f"Derived: total_revenue from [{price_col}] * [{unit_col}]")
+        derivation_map["derived_total_revenue"] = [price_col, unit_col]
 
     if rev_col and discount_col:
         df["derived_revenue_after_discount"] = df[rev_col] - df[discount_col]
         df["derived_discount_pct"] = (df[discount_col] / df[rev_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: revenue_after_discount and discount_pct from [{rev_col}] and [{discount_col}]")
+        derivation_map["derived_revenue_after_discount"] = [rev_col, discount_col]
+        derivation_map["derived_discount_pct"] = [discount_col, rev_col]
 
     if rev_col and budget_col:
         df["derived_budget_variance"] = df[rev_col] - df[budget_col]
         df["derived_budget_variance_pct"] = (df["derived_budget_variance"] / df[budget_col].replace(0, np.nan)) * 100
         notes.append(f"Derived: budget_variance and variance_pct from [{rev_col}] and [{budget_col}]")
+        derivation_map["derived_budget_variance"] = [rev_col, budget_col]
+        derivation_map["derived_budget_variance_pct"] = ["derived_budget_variance", budget_col]
 
     if cost_col and tax_col and ship_col:
         df["derived_total_cost"] = df[cost_col] + df[tax_col] + df[ship_col]
         notes.append(f"Derived: total_cost from [{cost_col}] + [{tax_col}] + [{ship_col}]")
+        derivation_map["derived_total_cost"] = [cost_col, tax_col, ship_col]
     elif cost_col and tax_col:
         df["derived_total_cost_with_tax"] = df[cost_col] + df[tax_col]
         notes.append(f"Derived: total_cost_with_tax from [{cost_col}] + [{tax_col}]")
+        derivation_map["derived_total_cost_with_tax"] = [cost_col, tax_col]
 
     # No explicit company revenue column exists (e.g. a customer/marketing
     # dataset with only per-category spend columns, like MntWines/MntFruits).
@@ -1371,11 +1386,12 @@ def _derive_business_metrics(df, schema_blueprint=None):
                 "(no company revenue column found; using per-category spend as an "
                 "honest proxy rather than treating a customer attribute like income as revenue)"
             )
+            derivation_map["derived_total_spend"] = list(spend_cols)
 
     if not notes:
         notes.append("Derived metrics: no matching column pairs found")
 
-    return df, notes
+    return df, notes, derivation_map
 
 
 
@@ -1737,11 +1753,16 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     # Derived metrics are computed only after upstream columns are finalized.
     before_step = df.copy()
-    df, notes = _derive_business_metrics(df, schema_blueprint)
+    df, notes, derivation_map = _derive_business_metrics(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
     if verbose:
         print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
+
+    if derivation_map:
+        metadata = schema_blueprint.setdefault("__metadata__", {})
+        if isinstance(metadata, dict):
+            metadata["derived_metric_sources"] = derivation_map
 
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)

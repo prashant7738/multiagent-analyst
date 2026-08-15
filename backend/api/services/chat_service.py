@@ -29,6 +29,7 @@ import pandas as pd
 from agents.agent_2 import (
     GEMINI_MODEL,
     GROQ_MODEL,
+    GROQ_REASONING_EFFORT,
     _get_groq_client,
     _call_gemini_json_with_failover,
     _parse_schema_blueprint_response,
@@ -259,7 +260,8 @@ def _call_llm_for_rag_chat(retrieved: dict[str, Any], question: str, history: li
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=512,
+            max_tokens=1024,
+            reasoning_effort=GROQ_REASONING_EFFORT,
         )
         raw_text = response.choices[0].message.content.strip()
         parsed = _parse_schema_blueprint_response(raw_text)

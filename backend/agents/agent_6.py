@@ -28,6 +28,7 @@ from agents.agent_1 import GraphState
 from agents.agent_2 import (
     GEMINI_MODEL,
     GROQ_MODEL,
+    GROQ_REASONING_EFFORT,
     _get_groq_client,
     _call_gemini_json_with_failover,
     _parse_schema_blueprint_response,
@@ -361,7 +362,8 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
                 {"role": "user", "content": user_content},
             ],
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=2048,
+            reasoning_effort=GROQ_REASONING_EFFORT,
         )
         raw_text = response.choices[0].message.content.strip()
         narrative = _parse_schema_blueprint_response(raw_text)
@@ -375,7 +377,7 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
             contents=user_content,
             system_instruction=INSIGHT_SYSTEM_PROMPT,
             temperature=0.2,
-            max_output_tokens=1024,
+            max_output_tokens=2048,
         )
         narrative["source"] = "gemini"
         return narrative

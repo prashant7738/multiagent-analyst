@@ -228,11 +228,15 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
 
 GROQ_MODEL = "qwen/qwen3.6-27b"  # llama-3.3-70b-versatile deprecated by Groq 08/16/26 
 GEMINI_MODEL = "gemini-flash-latest"
-GEMINI_MODEL_FALLBACKS = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
+# gemini-2.5-flash/-lite and gemini-2.0-flash 404 on this project; use current Gemini 3.x stable IDs instead
+GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
-LLM_BATCH_SIZE = 15
-LLM_SINGLE_CALL_THRESHOLD = 20
-LLM_MAX_TOKENS = 3000
+# qwen/qwen3.6-27b's on-demand tier caps at 8000 tokens/minute; a 15-column batch measured ~8429 tokens and 413'd
+LLM_BATCH_SIZE = 8
+LLM_SINGLE_CALL_THRESHOLD = 10
+# qwen3.6-27b is a reasoning model; without reasoning_effort=none it can burn the whole budget on <think> and return empty content
+LLM_MAX_TOKENS = 4000
+GROQ_REASONING_EFFORT = "none"
 
 _NAME_HINTS = [
     ("identifier", {"id", "identifier", "uuid", "key", "code"}),
@@ -793,6 +797,7 @@ def _call_llm_for_schema_blueprint(
             ],
             temperature=0.1,
             max_tokens=LLM_MAX_TOKENS,
+            reasoning_effort=GROQ_REASONING_EFFORT,
         )
         raw_text = response.choices[0].message.content.strip()
         return _parse_schema_blueprint_response(raw_text)
@@ -806,6 +811,10 @@ def _call_llm_for_schema_blueprint(
             temperature=0.1,
             max_output_tokens=LLM_MAX_TOKENS,
         )
+    except json.JSONDecodeError:
+        # preserve the original type so the caller's halving-retry (which only catches
+        # json.JSONDecodeError) can still split the batch and retry on malformed JSON
+        raise
     except Exception as gemini_error:
         raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
 

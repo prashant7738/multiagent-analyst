@@ -68,10 +68,15 @@
     <span class="badge bad">Validation: Failed</span>
   {% endif %}
 </p>
-{% if facts.data_quality.anomaly_quality_penalty and facts.data_quality.anomaly_quality_penalty > 0 %}
+{% if facts.data_quality.overall_quality_score_pre_anomaly is not none and (facts.data_quality.anomaly_quality_penalty or facts.data_quality.data_quality_issue_penalty) %}
 <p class="empty-note">
-  Includes a -{{ facts.data_quality.anomaly_quality_penalty }} point adjustment for statistical
-  anomalies found during analysis (pre-adjustment score: {{ facts.data_quality.overall_quality_score_pre_anomaly }}).
+  Adjusted from a pre-analysis score of {{ facts.data_quality.overall_quality_score_pre_anomaly }}:
+  &minus;{{ facts.data_quality.data_quality_issue_penalty or 0 }} points for structural data-quality issues
+  ({{ facts.data_quality.data_quality_issue_row_pct or 0 }}% of rows) and
+  &minus;{{ facts.data_quality.anomaly_quality_penalty or 0 }} points for statistical outliers
+  ({{ facts.data_quality.statistical_outlier_row_pct or 0 }}% of rows). Statistical outliers may be
+  legitimate long-tail values, so they are penalized only lightly; the score is driven mainly by
+  structural issues.
 </p>
 {% endif %}
 
@@ -105,6 +110,36 @@
 </ul>
 {% else %}
 <p class="empty-note">No key findings available.</p>
+{% endif %}
+
+{% if facts.data_quality_detail %}
+{% set dqd = facts.data_quality_detail %}
+<h2>Data Quality Detail</h2>
+<h3>Duplicate Handling</h3>
+<ul>
+  <li>Duplicates detected: {{ dqd.duplicates.exact_duplicates_detected }}</li>
+  {% if dqd.duplicates.near_duplicates_detected %}
+  <li>Near-duplicates detected: {{ dqd.duplicates.near_duplicates_detected }}</li>
+  {% endif %}
+  <li>Action: {{ dqd.duplicates.action }}</li>
+  {% if dqd.duplicates.near_duplicates_detected %}
+  <li>Near-duplicate action: {{ dqd.duplicates.near_duplicate_action }}</li>
+  {% endif %}
+</ul>
+<h3>Missing Values</h3>
+{% if dqd.has_missing %}
+<table>
+  <tr><th>Column</th><th>Missing Count</th><th>Missing %</th><th>Action</th></tr>
+  {% for row in dqd.missing_values %}
+  <tr>
+    <td>{{ row.column }}</td><td>{{ row.missing_count }}</td>
+    <td>{{ row.missing_pct }}%</td><td>{{ row.action }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="empty-note">No missing values detected in the source dataset.</p>
+{% endif %}
 {% endif %}
 
 {% if facts.top_correlations %}
@@ -259,15 +294,39 @@
 </table>
 {% endif %}
 
-{% if facts.anomalies and facts.anomalies.unique_flagged_rows %}
-<h2>Anomalies</h2>
+{% if (facts.anomalies and facts.anomalies.unique_flagged_rows) or (facts.anomalies and facts.anomalies.data_quality_issue_rows) %}
+<h2>Anomalies &amp; Data-Quality Issues</h2>
+{% if facts.anomalies.unique_flagged_rows %}
+<h3>Statistical Outliers</h3>
 <p>
   {{ facts.anomalies.unique_flagged_rows }} rows ({{ facts.anomalies.unique_flagged_row_pct }}%) flagged across
   {{ facts.anomalies.flagged_columns }} column(s). Each column uses a z-score threshold of
   {{ facts.anomalies.z_threshold }} on its raw or log-transformed values (log-transformed for
   right-skewed columns) or a wider IQR rule for skewed columns with non-positive values, so the
   method adapts to each column's distribution instead of assuming normality everywhere.
+  These are extreme values that may be entirely legitimate (e.g. a large but real transaction),
+  so they do not by themselves indicate a data-quality problem.
 </p>
+{% endif %}
+<h3>Structural Data-Quality Issues</h3>
+{% if facts.anomalies.data_quality_issue_rows %}
+<p>
+  {{ facts.anomalies.data_quality_issue_rows }} rows ({{ facts.anomalies.data_quality_issue_row_pct }}%)
+  violate structural/domain constraints (e.g. negative quantities, discount &gt; 100%, returns
+  exceeding the order). Unlike statistical outliers, these are genuine defects and drive the
+  Data Quality Score penalty.
+</p>
+{% if facts.anomalies.issues_by_rule %}
+<table>
+  <tr><th>Rule</th><th>Rows Flagged</th></tr>
+  {% for rule, count in facts.anomalies.issues_by_rule.items() %}
+  <tr><td>{{ rule }}</td><td>{{ count }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% else %}
+<p class="empty-note">No structural data-quality violations detected.</p>
+{% endif %}
 {% endif %}
 
 {% if narrative.risks_and_caveats %}
@@ -288,13 +347,13 @@
 </ul>
 {% endif %}
 
-{% if chart_paths %}
+{% if charts %}
 <h2>Visualizations</h2>
 <div class="chart-gallery">
-  {% for path in chart_paths %}
+  {% for chart in charts %}
   <div class="chart-item">
-    <img src="file://{{ path }}" alt="{{ path }}">
-    <p class="chart-caption">{{ path.split('/')[-1].rsplit('.', 1)[0].replace('_', ' ').title() }}</p>
+    <img src="{{ chart.src }}" alt="{{ chart.caption }}">
+    <p class="chart-caption">{{ chart.caption }}</p>
   </div>
   {% endfor %}
 </div>
@@ -302,12 +361,29 @@
 
 {% set grounding = narrative.claims_grounding %}
 {% if grounding and grounding.claims_checked %}
-<h2>Narrative Self-Check</h2>
+<h2>Internal Consistency Check</h2>
 <p>
-  {{ grounding.claims_grounded }} of {{ grounding.claims_checked }} numbers cited in the narrative
-  matched the computed facts above (confidence {{ grounding.confidence }}).
+  Internal consistency: {{ grounding.claims_grounded }} of {{ grounding.claims_checked }} narrative
+  figures match pipeline output (confidence {{ grounding.confidence }}).
   {% if grounding.claims_flagged %}
-    {{ grounding.claims_flagged }} number(s) could not be matched and should be double-checked.
+    {{ grounding.claims_flagged }} figure(s) could not be matched and should be double-checked.
+  {% endif %}
+  This only checks the narrative against the pipeline&rsquo;s own intermediate values &mdash; it does
+  not verify those values against the original source data.
+</p>
+{% set recon = facts.validation.ground_truth_reconciliation %}
+<p>
+  <strong>Ground-truth reconciliation (separate check):</strong>
+  {% if recon %}
+    pipeline output vs. the source dataset &mdash;
+    {{ "PASS" if recon.status == "pass" else ("WARN" if recon.status == "warn" else "FAIL") }}
+    ({{ recon.detail }}). Value-level ground truth is verified independently by the Phase&nbsp;1
+    reconciliation test harness (tests/test_ground_truth_reconciliation.py), which checks these
+    numbers against the raw source CSV.
+  {% else %}
+    verified independently by the Phase&nbsp;1 reconciliation test harness
+    (tests/test_ground_truth_reconciliation.py), which checks the pipeline&rsquo;s numbers against
+    the raw source CSV &mdash; a different scope from the internal consistency check above.
   {% endif %}
 </p>
 {% endif %}

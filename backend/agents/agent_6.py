@@ -17,6 +17,7 @@ statistics, charts, validation) into a single grounded document:
 """
 
 import json
+import base64
 import os
 import re
 from datetime import datetime, timezone
@@ -80,9 +81,133 @@ def _extract_quality_facts(state):
         "overall_quality_score": data_quality.get("overall_quality_score"),
         "overall_quality_score_pre_anomaly": data_quality.get("overall_quality_score_pre_anomaly"),
         "anomaly_quality_penalty": data_quality.get("anomaly_quality_penalty"),
-        "completeness_pct": data_quality.get("completeness_pct"),
-        "duplicates_removed": data_quality.get("duplicates_removed"),
+        "statistical_outlier_row_pct": data_quality.get("statistical_outlier_row_pct"),
+        "data_quality_issue_row_pct": data_quality.get("data_quality_issue_row_pct"),
+        "data_quality_issue_penalty": data_quality.get("data_quality_issue_penalty"),
+        # Real keys produced by agent_3._compute_enhanced_quality_score (the
+        # previously-read completeness_pct/duplicates_removed never existed).
+        "duplicate_rate_pct": data_quality.get("duplicate_rate_pct"),
+        "raw_missing_pct": data_quality.get("raw_missing_pct"),
+        "remaining_null_pct": data_quality.get("remaining_null_pct"),
     }
+
+
+# Human-readable labels for Agent 3's null_policy actions (agents.agent_3._impute).
+_NULL_ACTION_LABELS = {
+    "impute_mean": "mean imputation",
+    "impute_median": "median imputation",
+    "impute_mode": "mode imputation",
+    "impute_unknown_label": "constant value (Unknown)",
+    "impute_forward_fill": "forward fill",
+    "impute_knn": "model-based imputation (knn)",
+    "impute_iterative": "model-based imputation (iterative)",
+    "drop_rows": "rows dropped",
+    "drop_column": "column dropped",
+    "flag_only": "left as null",
+    "none": "left as null",
+}
+
+
+def _missing_value_action_label(meta, raw_missing, remaining_missing):
+    """Report the action the pipeline ACTUALLY took for a column's missing
+    values, not merely what the schema requested.
+
+    Agent 3 blocks imputation on currency/financial columns and silently skips
+    it when a strategy can't run, so the blueprint may say "impute_median"
+    while the nulls survive. We reconcile the intended null_policy action
+    against the real null reduction in cleaned_df so the report never claims an
+    imputation that didn't happen (docs/known_issues.md #8, Bug 3).
+    """
+    if raw_missing == 0:
+        return "none"
+
+    null_policy = meta.get("null_policy", {}) if isinstance(meta.get("null_policy"), dict) else {}
+    null_action = null_policy.get("action")
+    if null_action is None:
+        null_action = {
+            "mean": "impute_mean", "median": "impute_median", "mode": "impute_mode",
+            "drop": "drop_rows", "unknown_label": "impute_unknown_label",
+        }.get(meta.get("imputation_strategy", "none"), "none")
+
+    # Currency/financial imputation is blocked in agent_3._impute regardless of
+    # what the blueprint requested.
+    if meta.get("semantic_tag") in {"currency", "financial"} and str(null_action).startswith("impute_"):
+        return "left as null"
+
+    # Reconcile intent against reality: if imputation was requested but the
+    # column still carries all (or more of) its nulls, it didn't actually run.
+    if remaining_missing is not None and str(null_action).startswith("impute_") and remaining_missing >= raw_missing:
+        return "left as null"
+
+    return _NULL_ACTION_LABELS.get(null_action, "left as null")
+
+
+def _extract_data_quality_detail(state):
+    """Surface what the preprocessing pipeline actually did about duplicates and
+    missing values - previously computed internally but never reported
+    (docs/known_issues.md #7/#8, Bug 3).
+
+    Duplicate counts come from Agent 3's row_accounting ledger; missing-value
+    counts come from Agent 1's raw profile (pre-cleaning), with the per-column
+    action reconciled against cleaned_df so the report reflects reality.
+    """
+    column_ledger = state.get("column_ledger", {}) or {}
+    row_accounting = column_ledger.get("row_accounting", {}) if isinstance(column_ledger, dict) else {}
+    row_accounting = row_accounting or {}
+
+    exact_dups = int(row_accounting.get("exact_duplicates_removed", 0) or 0)
+    near_dups = int(row_accounting.get("rows_dropped_by_canonical_dedup", 0) or 0)
+
+    duplicates = {
+        "exact_duplicates_detected": exact_dups,
+        "exact_duplicates_removed": exact_dups,
+        "near_duplicates_detected": near_dups,
+        "near_duplicates_removed": near_dups,
+        # Agent 3 removes exact duplicates unconditionally (Step 0) and
+        # near-duplicates after category canonicalization (Step 3b).
+        "action": "duplicates removed" if exact_dups > 0 else "no exact duplicates detected",
+        "near_duplicate_action": (
+            "near-duplicates removed (post-canonicalization)" if near_dups > 0 else "none detected"
+        ),
+    }
+
+    raw_profile = state.get("raw_profile", {}) or {}
+    columns_profile = raw_profile.get("columns", {}) or {}
+    total_rows = (raw_profile.get("shape", {}) or {}).get("rows", 0) or 0
+    schema_blueprint = state.get("schema_blueprint", {}) or {}
+    cleaned_df = state.get("cleaned_df")
+
+    missing_rows = []
+    for col, prof in columns_profile.items():
+        raw_missing = int((prof or {}).get("missing_count", 0) or 0)
+        if raw_missing == 0:
+            continue
+        missing_pct = (prof or {}).get("missing_rate_pct")
+        if missing_pct is None:
+            missing_pct = round(raw_missing / max(total_rows, 1) * 100, 2)
+
+        remaining_missing = None
+        if cleaned_df is not None and col in getattr(cleaned_df, "columns", []):
+            remaining_missing = int(cleaned_df[col].isna().sum())
+
+        meta = schema_blueprint.get(col) if isinstance(schema_blueprint.get(col), dict) else {}
+        action = _missing_value_action_label(meta or {}, raw_missing, remaining_missing)
+
+        missing_rows.append({
+            "column": col,
+            "missing_count": raw_missing,
+            "missing_pct": missing_pct,
+            "action": action,
+        })
+
+    missing_rows.sort(key=lambda r: r["missing_count"], reverse=True)
+
+    return {
+        "duplicates": duplicates,
+        "missing_values": missing_rows,
+        "has_missing": bool(missing_rows),
+    }
+
 
 
 def _extract_correlation_facts(stats):
@@ -220,7 +345,14 @@ def _extract_normalization_facts(state):
 
 
 def _extract_anomaly_facts(stats):
-    return stats.get("anomaly_summary", {}) or {}
+    summary = dict(stats.get("anomaly_summary", {}) or {})
+    # Surface the structural data-quality issues alongside the statistical
+    # anomalies so the report can tell the two apart (Bug 4, Task B/C).
+    dq_issues = stats.get("data_quality_issues", {}) or {}
+    summary["data_quality_issue_rows"] = dq_issues.get("data_quality_issue_rows", 0)
+    summary["data_quality_issue_row_pct"] = dq_issues.get("data_quality_issue_row_pct", 0.0)
+    summary["issues_by_rule"] = dq_issues.get("issues_by_rule", {})
+    return summary
 
 
 def _extract_regression_facts(stats):
@@ -240,11 +372,18 @@ def _extract_regression_facts(stats):
 def _extract_validation_facts(state):
     validation_report = state.get("validation_report", {}) or {}
     semantic_agreement = validation_report.get("semantic_tagging_agreement", {}) or {}
+    # Agent 5's deterministic reconciliation of pipeline output against the
+    # source ledger/dataset - a different check from the narrative self-check,
+    # and the runtime analog of the Phase 1 ground-truth test harness
+    # (tests/test_ground_truth_reconciliation.py).
+    tier1_checks = validation_report.get("tier1_checks", {}) or {}
+    row_reconciliation = tier1_checks.get("row_reconciliation") if isinstance(tier1_checks, dict) else None
     return {
         "overall_validation_score": validation_report.get("overall_validation_score"),
         "passed": validation_report.get("passed"),
         "flagged_issue_count": len(validation_report.get("flagged_issues", []) or []),
         "cohen_kappa": semantic_agreement.get("cohen_kappa"),
+        "ground_truth_reconciliation": row_reconciliation,
     }
 
 
@@ -262,6 +401,7 @@ def _extract_insight_facts(state):
     return {
         "dataset": _extract_dataset_facts(state),
         "data_quality": _extract_quality_facts(state),
+        "data_quality_detail": _extract_data_quality_detail(state),
         "top_correlations": _extract_correlation_facts(stats),
         "excluded_columns": _extract_excluded_columns_facts(stats),
         "formulaic_pairs": _extract_formulaic_pairs_facts(stats),
@@ -619,17 +759,28 @@ def _fallback_narrative(insight_facts: dict) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_html(insight_facts, narrative, chart_paths, state):
-    # Chart paths are recorded relative to the process CWD (see agent_4.CHARTS_DIR).
-    # Resolve to absolute paths so `file://` URIs work regardless of the report's
-    # own output directory (used as WeasyPrint's base_url).
-    resolved_chart_paths = [str(Path(p).resolve()) for p in (chart_paths or []) if Path(p).exists()]
+    # Embed each chart as a base64 data URI rather than a file:// path, so the
+    # report is a single self-contained file that renders on any machine.
+    charts = []
+    for p in (chart_paths or []):
+        path = Path(p)
+        if not path.exists():
+            continue
+        try:
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError:
+            continue
+        charts.append({
+            "src": f"data:image/png;base64,{encoded}",
+            "caption": path.stem.replace("_", " ").title(),
+        })
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
     template = env.get_template(TEMPLATE_NAME)
     return template.render(
         facts=insight_facts,
         narrative=narrative,
-        chart_paths=resolved_chart_paths,
+        charts=charts,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         dataset_name=Path(state.get("csv_path", "dataset")).name,
     )

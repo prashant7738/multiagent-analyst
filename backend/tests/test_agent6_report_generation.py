@@ -126,6 +126,16 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         self.assertLessEqual(len(produced_files), 2)  # at most insight_report.html + insight_report.pdf
         self.assertIn("insight_report.html", names)
 
+    def test_report_renders_one_data_quality_detail_section(self):
+        state = _build_state()
+
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+            result = agent_6.agent6_insight_report_generator(state)
+
+        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        self.assertEqual(report_html.count("<h2>Data Quality Detail</h2>"), 1)
+
     def test_pdf_conversion_failure_falls_back_to_html_report(self):
         state = _build_state()
 

@@ -80,31 +80,6 @@
 </p>
 {% endif %}
 
-{% if facts.data_quality.duplicates or facts.data_quality.missing_values %}
-<h2>Data Quality Detail</h2>
-{% if facts.data_quality.duplicates %}
-<h3>Duplicate and Near-Duplicate Rows</h3>
-<table>
-  <tr><th>Exact Duplicates</th><th>Canonical Near-Duplicates</th><th>Rows Dropped for Missing Values</th><th>Action Taken</th></tr>
-  <tr>
-    <td>{{ facts.data_quality.duplicates.exact_count }}</td>
-    <td>{{ facts.data_quality.duplicates.near_duplicate_count }}</td>
-    <td>{{ facts.data_quality.duplicates.rows_dropped_for_missing_values }}</td>
-    <td>{{ facts.data_quality.duplicates.action }}</td>
-  </tr>
-</table>
-{% endif %}
-{% if facts.data_quality.missing_values %}
-<h3>Missing Values by Column</h3>
-<table>
-  <tr><th>Column</th><th>Missing Count</th><th>Missing %</th><th>Imputation / Action</th></tr>
-  {% for item in facts.data_quality.missing_values if item.count > 0 %}
-  <tr><td>{{ item.column }}</td><td>{{ item.count }}</td><td>{{ item.pct }}</td><td>{{ item.action }}</td></tr>
-  {% endfor %}
-</table>
-{% endif %}
-{% endif %}
-
 {% if narrative.plain_language_insights or narrative.bottom_line %}
 <div class="plain-language-box">
   <h2>In Plain English</h2>

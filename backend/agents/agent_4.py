@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from scipy import stats as scipy_stats
 from agents.agent_1 import GraphState
+from agents.agent_3 import _is_count_field
 from main import update_reliability
 
 warnings.filterwarnings("ignore")
@@ -900,70 +901,12 @@ def _seasonality(df, schema_blueprint):
 # flags a large chunk of the legitimate tail as "anomalous". Route skewed columns
 # through a transform (log1p) or a robust IQR rule instead.
 ANOMALY_SKEW_THRESHOLD = 1.0
-ANOMALY_IQR_MULTIPLIER = 3.0  # wider than the 1.5x used for clipping — this is a flag, not a clip
-
-
-def _detect_structural_quality_issues(df, schema_blueprint):
-    """Find structurally invalid values, separately from statistical outliers.
-
-    Long-tail values are reported as statistical outliers, while these rules
-    represent data-quality defects that should affect the quality score.
-    """
-    issues = {}
-
-    for col in _numeric_cols(df, schema_blueprint):
-        tokens = _tokenize_col_name(col)
-        numeric = pd.to_numeric(df[col], errors="coerce")
-        valid = numeric.notna()
-        invalid = pd.Series(False, index=df.index)
-        rule = None
-
-        if any(token in tokens for token in ("quantity", "qty", "units")):
-            invalid = valid & ((numeric < 0) | (np.floor(numeric) != numeric))
-            rule = "quantity must be a non-negative integer"
-        elif "discount" in tokens:
-            max_value = float(numeric[valid].max()) if valid.any() else 0.0
-            median_value = float(numeric[valid].median()) if valid.any() else 0.0
-            upper_bound = 1.0 if median_value <= 1.0 else 100.0
-            invalid = valid & ((numeric < 0) | (numeric > upper_bound))
-            rule = f"discount must be between 0 and {upper_bound}"
-        elif "return" in tokens and ("quantity" in tokens or "qty" in tokens):
-            invalid = valid & (numeric < 0)
-            rule = "return quantity must be non-negative"
-
-        count = int(invalid.sum())
-        if count:
-            issues[col] = {
-                "count": count,
-                "rule": rule,
-                "indices": df.index[invalid].tolist(),
-            }
-
-    quantity_col = next(
-        (col for col in _numeric_cols(df, schema_blueprint)
-         if any(token in _tokenize_col_name(col) for token in ("quantity", "qty"))
-         and "return" not in _tokenize_col_name(col)),
-        None,
-    )
-    return_quantity_col = next(
-        (col for col in _numeric_cols(df, schema_blueprint)
-         if "return" in _tokenize_col_name(col)
-         and any(token in _tokenize_col_name(col) for token in ("quantity", "qty"))),
-        None,
-    )
-    if quantity_col and return_quantity_col:
-        quantity = pd.to_numeric(df[quantity_col], errors="coerce")
-        return_quantity = pd.to_numeric(df[return_quantity_col], errors="coerce")
-        invalid = quantity.notna() & return_quantity.notna() & (return_quantity > quantity)
-        count = int(invalid.sum())
-        if count:
-            issues[f"{return_quantity_col}_vs_{quantity_col}"] = {
-                "count": count,
-                "rule": "return quantity must not exceed order quantity",
-                "indices": df.index[invalid].tolist(),
-            }
-
-    return issues
+# Tukey's "far out" fence (k=3.0), NOT the k=1.5 "outer fence" used for clipping
+# in agent_3. On a right-skewed column the 1.5x rule flags a large slice of the
+# legitimate long tail (the audit measured ~24% of rows, docs/known_issues.md #6);
+# 3.0 keeps this branch a *flag* (surfaced, never removed) while staying far
+# enough out to stop over-flagging. Overridable per-dataset via the env var.
+ANOMALY_IQR_MULTIPLIER = float(os.getenv("ANOMALY_IQR_MULTIPLIER", "3.0"))
 
 
 def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
@@ -1019,12 +962,6 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
                 "col_mean":        round(col_mean, 4),
                 "col_std":         round(col_std, 4),
             }
-    structural_issues = _detect_structural_quality_issues(df, schema_blueprint)
-    structural_indices = {
-        index
-        for issue in structural_issues.values()
-        for index in issue.get("indices", [])
-    }
     summary = {
         "z_threshold": z_threshold,
         "iqr_multiplier": ANOMALY_IQR_MULTIPLIER,
@@ -1034,11 +971,96 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
         "unique_flagged_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
         "statistical_outlier_rows": int(len(all_anomaly_indices)),
         "statistical_outlier_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
-        "structural_issues": structural_issues,
-        "structural_issue_rows": int(len(structural_indices)),
-        "structural_issue_row_pct": round((len(structural_indices) / max(len(df), 1)) * 100, 2),
     }
     return result, summary
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6b — STRUCTURAL DATA-QUALITY ISSUES (distinct from statistical outliers)
+# ─────────────────────────────────────────────────────────────────────────────
+# A statistical outlier (e.g. one very large but legitimate transaction) is NOT
+# a data-quality defect; a structural violation (negative quantity, discount
+# > 100%, returns exceeding the order) IS. These are counted separately so the
+# Data Quality Score can penalize genuine defects without punishing legitimate
+# long-tail values (docs/known_issues.md #6, Bug 4).
+
+# Agent 3 already computed these boolean validation flags on the true
+# (pre-scaling) values - reuse them instead of re-deriving thresholds on scaled
+# columns. See agent_3._validate_count_ranges / _validate_financial_constraints.
+_STRUCTURAL_FLAG_SUFFIXES = ("_range_failed", "_rate_failed", "_reconciliation_failed")
+
+
+def _detect_data_quality_issues(df, schema_blueprint):
+    """Flag rows that violate structural/domain constraints (not mere statistical
+    extremes). Returns the unique-row count and a per-rule breakdown."""
+    schema_blueprint = schema_blueprint or {}
+    issue_rows = set()
+    issues_by_rule = {}
+
+    def _record(mask, rule):
+        if mask is None:
+            return
+        idx = df.index[mask.fillna(False)].tolist()
+        if idx:
+            issues_by_rule[rule] = issues_by_rule.get(rule, 0) + len(idx)
+            issue_rows.update(idx)
+
+    def _num(col):
+        return pd.to_numeric(df[col], errors="coerce")
+
+    def _tokens(col):
+        return set(re.split(r"[^a-z0-9]+", col.lower()))
+
+    # 1. Agent 3's structural validation flags (count<0/non-int, tax-rate,
+    #    reconciliation mismatch, profit-margin out of range).
+    for col in df.columns:
+        if col.endswith(_STRUCTURAL_FLAG_SUFFIXES):
+            _record(_num(col).fillna(0) > 0, col)
+
+    # 2. Domain rules the Agent 3 flags don't already cover, evaluated on each
+    #    column's own values.
+    for col, meta in schema_blueprint.items():
+        if col in df.columns and _is_count_field(col, meta):
+            # negative quantity (skip if agent_3 already flagged this column)
+            if f"{col}_range_failed" not in df.columns:
+                _record(_num(col) < 0, f"{col} < 0")
+
+    for col in df.columns:
+        tokens = _tokens(col)
+        if "discount" in tokens:
+            d = _num(col)
+            if "amount" in tokens:
+                _record(d < 0, f"{col} < 0")
+            else:
+                # A discount rate/percentage: valid range is [0, 1] or [0, 100]
+                # depending on how it's stored. discount > 100% is structural.
+                vals = d.dropna()
+                upper = 1.0 if (len(vals) and vals.le(1.0).all() and vals.ge(0).all()) else 100.0
+                _record((d < 0) | (d > upper), f"{col} out of [0, {upper:g}]")
+
+    # returns exceeding the order quantity, or negative returns
+    return_col = next(
+        (c for c in df.columns if {"return", "returns", "returned"} & _tokens(c)
+         and ({"quantity", "qty", "count", "units"} & _tokens(c) or _tokens(c) <= {"returns", "return", "returned"})),
+        None,
+    )
+    order_col = next(
+        (c for c in df.columns if ({"order", "ordered"} & _tokens(c)) and ({"quantity", "qty", "units"} & _tokens(c))),
+        None,
+    )
+    if return_col is not None:
+        r = _num(return_col)
+        _record(r < 0, f"{return_col} < 0")
+        if order_col is not None and order_col != return_col:
+            _record(r > _num(order_col), f"{return_col} > {order_col}")
+
+    n = max(len(df), 1)
+    return {
+        "data_quality_issue_rows": len(issue_rows),
+        "data_quality_issue_row_pct": round(len(issue_rows) / n * 100, 2),
+        "issues_by_rule": issues_by_rule,
+        "rules_checked": sorted(issues_by_rule.keys()),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1638,38 +1660,63 @@ def _shipping_cost_by_region(df, schema_blueprint):
 # Anomaly rates below this are treated as expected noise in any real dataset
 # and don't further penalize the quality score computed by Agent 3.
 ANOMALY_QUALITY_TOLERANCE_PCT = 3.0
-ANOMALY_QUALITY_PENALTY_SCALE = 0.8
-ANOMALY_QUALITY_PENALTY_CAP = 25.0
+# Statistical outliers may be entirely legitimate long-tail values, so they move
+# the Data Quality Score only slightly (small scale, low cap). The score is
+# driven primarily by *structural* data-quality issues instead (Bug 4, Task C).
+ANOMALY_QUALITY_PENALTY_SCALE = 0.1
+ANOMALY_QUALITY_PENALTY_CAP = 5.0
+# Structural violations (negative quantities, discount > 100%, impossible
+# returns, reconciliation mismatches) are real defects and dominate the penalty.
+DQ_ISSUE_PENALTY_SCALE = 1.5
+DQ_ISSUE_PENALTY_CAP = 40.0
 
 
 
-def _apply_anomaly_quality_penalty(data_quality, anomaly_summary):
-    """Fold Agent 4's anomaly rate into Agent 3's quality score.
+def _apply_anomaly_quality_penalty(data_quality, anomaly_summary, dq_issue_summary=None):
+    """Fold Agent 4's findings into Agent 3's quality score.
 
     Agent 3 computes `overall_quality_score` before anomaly detection has even
-    run (it runs in Agent 4), so a dataset with a large fraction of rows
-    flagged as statistical outliers could still show a deceptively high
-    headline score. This applies a penalty proportional to how far the
-    unique-flagged-row rate exceeds a small tolerance band, and keeps the
-    pre-anomaly score around for auditability.
+    run (it runs in Agent 4). The adjustment here separates two very different
+    signals (docs/known_issues.md #6, Bug 4):
+
+    * statistical outliers  - possibly-legitimate extreme values; penalized
+      only lightly so a long-tailed-but-clean dataset isn't punished.
+    * structural data-quality issues - actual constraint violations; these
+      drive the bulk of the penalty.
+
+    The pre-adjustment score is kept around for auditability.
     """
     if not isinstance(data_quality, dict) or "overall_quality_score" not in data_quality:
         return data_quality
 
     data_quality = dict(data_quality)
     pre_anomaly_score = float(data_quality["overall_quality_score"])
-    flagged_pct = float(anomaly_summary.get("structural_issue_row_pct", 0.0) or 0.0)
+    stat_pct = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
+    dq_issue_summary = dq_issue_summary or {}
+    struct_pct = float(dq_issue_summary.get("data_quality_issue_row_pct", 0.0) or 0.0)
 
-    penalty = min(
+    statistical_penalty = min(
         ANOMALY_QUALITY_PENALTY_CAP,
-        max(0.0, flagged_pct - ANOMALY_QUALITY_TOLERANCE_PCT) * ANOMALY_QUALITY_PENALTY_SCALE,
+        max(0.0, stat_pct - ANOMALY_QUALITY_TOLERANCE_PCT) * ANOMALY_QUALITY_PENALTY_SCALE,
     )
-    adjusted_score = max(0.0, round(pre_anomaly_score - penalty, 2))
+    structural_penalty = min(
+        DQ_ISSUE_PENALTY_CAP,
+        struct_pct * DQ_ISSUE_PENALTY_SCALE,
+    )
+    total_penalty = round(statistical_penalty + structural_penalty, 2)
+    adjusted_score = max(0.0, round(pre_anomaly_score - total_penalty, 2))
 
     data_quality["overall_quality_score_pre_anomaly"] = round(pre_anomaly_score, 2)
-    data_quality["anomaly_flagged_row_pct"] = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
-    data_quality["structural_issue_row_pct"] = flagged_pct
-    data_quality["anomaly_quality_penalty"] = round(penalty, 2)
+    data_quality["statistical_outlier_row_pct"] = stat_pct
+    data_quality["data_quality_issue_row_pct"] = struct_pct
+    data_quality["statistical_outlier_penalty"] = round(statistical_penalty, 2)
+    data_quality["data_quality_issue_penalty"] = round(structural_penalty, 2)
+    data_quality["data_quality_issues_by_rule"] = dq_issue_summary.get("issues_by_rule", {})
+    # `anomaly_*` keys retain their historical meaning (statistical-outlier
+    # component only) for backward compatibility with existing report facts.
+    data_quality["anomaly_flagged_row_pct"] = stat_pct
+    data_quality["anomaly_quality_penalty"] = round(statistical_penalty, 2)
+    data_quality["total_quality_penalty"] = total_penalty
     data_quality["overall_quality_score"] = adjusted_score
     return data_quality
 
@@ -1761,6 +1808,16 @@ def agent4_analysis(state: GraphState) -> GraphState:
         }
         print("[Agent 4] Step 6 — Anomalies skipped (no numeric columns)")
 
+    # Structural data-quality issues are computed independently of the
+    # statistical anomaly pass so the two can penalize the score differently.
+    stats["data_quality_issues"] = _detect_data_quality_issues(df, schema_blueprint)
+    print(
+        f"[Agent 4] Step 6b — Structural data-quality issues: "
+        f"{stats['data_quality_issues']['data_quality_issue_rows']} rows "
+        f"({stats['data_quality_issues']['data_quality_issue_row_pct']}%) across "
+        f"{len(stats['data_quality_issues']['rules_checked'])} rule(s)"
+    )
+
     if chart_plan["chart_families"]["distributions"]:
         stats["distributions"], candidates = _category_distributions(df, schema_blueprint)
         all_chart_candidates.extend(candidates)
@@ -1847,14 +1904,18 @@ def agent4_analysis(state: GraphState) -> GraphState:
         stats["region_shipping_cost"] = {}
         print("[Agent 4] Step 16 — Shipping cost by region skipped (missing shipping/region columns)")
 
-    data_quality = _apply_anomaly_quality_penalty(state.get("data_quality"), stats.get("anomaly_summary", {}))
+    data_quality = _apply_anomaly_quality_penalty(
+        state.get("data_quality"),
+        stats.get("anomaly_summary", {}),
+        stats.get("data_quality_issues", {}),
+    )
     if data_quality is not None:
         print(
-            f"[Agent 4] Step 17 — Quality score adjusted for anomalies: "
+            f"[Agent 4] Step 17 — Quality score adjusted: "
             f"{data_quality.get('overall_quality_score_pre_anomaly')} -> {data_quality.get('overall_quality_score')} "
-            f"(penalty={data_quality.get('anomaly_quality_penalty')}, flagged={data_quality.get('anomaly_flagged_row_pct')}%)"
+            f"(structural={data_quality.get('data_quality_issue_penalty')}, "
+            f"statistical={data_quality.get('anomaly_quality_penalty')})"
         )
-
     # Rank all chart candidates across every family by informativeness score
     # and keep only the top MAX_CHARTS_PER_REPORT. Without this cap, a wide
     # dataset with many numeric/categorical columns produces dozens of charts

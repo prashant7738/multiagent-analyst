@@ -903,6 +903,69 @@ ANOMALY_SKEW_THRESHOLD = 1.0
 ANOMALY_IQR_MULTIPLIER = 3.0  # wider than the 1.5x used for clipping — this is a flag, not a clip
 
 
+def _detect_structural_quality_issues(df, schema_blueprint):
+    """Find structurally invalid values, separately from statistical outliers.
+
+    Long-tail values are reported as statistical outliers, while these rules
+    represent data-quality defects that should affect the quality score.
+    """
+    issues = {}
+
+    for col in _numeric_cols(df, schema_blueprint):
+        tokens = _tokenize_col_name(col)
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        valid = numeric.notna()
+        invalid = pd.Series(False, index=df.index)
+        rule = None
+
+        if any(token in tokens for token in ("quantity", "qty", "units")):
+            invalid = valid & ((numeric < 0) | (np.floor(numeric) != numeric))
+            rule = "quantity must be a non-negative integer"
+        elif "discount" in tokens:
+            max_value = float(numeric[valid].max()) if valid.any() else 0.0
+            median_value = float(numeric[valid].median()) if valid.any() else 0.0
+            upper_bound = 1.0 if median_value <= 1.0 else 100.0
+            invalid = valid & ((numeric < 0) | (numeric > upper_bound))
+            rule = f"discount must be between 0 and {upper_bound}"
+        elif "return" in tokens and ("quantity" in tokens or "qty" in tokens):
+            invalid = valid & (numeric < 0)
+            rule = "return quantity must be non-negative"
+
+        count = int(invalid.sum())
+        if count:
+            issues[col] = {
+                "count": count,
+                "rule": rule,
+                "indices": df.index[invalid].tolist(),
+            }
+
+    quantity_col = next(
+        (col for col in _numeric_cols(df, schema_blueprint)
+         if any(token in _tokenize_col_name(col) for token in ("quantity", "qty"))
+         and "return" not in _tokenize_col_name(col)),
+        None,
+    )
+    return_quantity_col = next(
+        (col for col in _numeric_cols(df, schema_blueprint)
+         if "return" in _tokenize_col_name(col)
+         and any(token in _tokenize_col_name(col) for token in ("quantity", "qty"))),
+        None,
+    )
+    if quantity_col and return_quantity_col:
+        quantity = pd.to_numeric(df[quantity_col], errors="coerce")
+        return_quantity = pd.to_numeric(df[return_quantity_col], errors="coerce")
+        invalid = quantity.notna() & return_quantity.notna() & (return_quantity > quantity)
+        count = int(invalid.sum())
+        if count:
+            issues[f"{return_quantity_col}_vs_{quantity_col}"] = {
+                "count": count,
+                "rule": "return quantity must not exceed order quantity",
+                "indices": df.index[invalid].tolist(),
+            }
+
+    return issues
+
+
 def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
     result = {}
     all_anomaly_indices = set()
@@ -947,6 +1010,7 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
             all_anomaly_indices.update(anomaly_indices)
             result[col] = {
                 "count":           len(anomaly_indices),
+                "classification": "statistical_outlier",
                 "method":          method,
                 "z_threshold":     z_threshold if method != "iqr" else None,
                 "skewness":        round(skewness, 4),
@@ -955,12 +1019,24 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
                 "col_mean":        round(col_mean, 4),
                 "col_std":         round(col_std, 4),
             }
+    structural_issues = _detect_structural_quality_issues(df, schema_blueprint)
+    structural_indices = {
+        index
+        for issue in structural_issues.values()
+        for index in issue.get("indices", [])
+    }
     summary = {
         "z_threshold": z_threshold,
+        "iqr_multiplier": ANOMALY_IQR_MULTIPLIER,
         "flagged_columns": len(result),
         "total_flagged_values": int(sum(v["count"] for v in result.values())),
         "unique_flagged_rows": int(len(all_anomaly_indices)),
         "unique_flagged_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
+        "statistical_outlier_rows": int(len(all_anomaly_indices)),
+        "statistical_outlier_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
+        "structural_issues": structural_issues,
+        "structural_issue_rows": int(len(structural_indices)),
+        "structural_issue_row_pct": round((len(structural_indices) / max(len(df), 1)) * 100, 2),
     }
     return result, summary
 
@@ -1582,7 +1658,7 @@ def _apply_anomaly_quality_penalty(data_quality, anomaly_summary):
 
     data_quality = dict(data_quality)
     pre_anomaly_score = float(data_quality["overall_quality_score"])
-    flagged_pct = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
+    flagged_pct = float(anomaly_summary.get("structural_issue_row_pct", 0.0) or 0.0)
 
     penalty = min(
         ANOMALY_QUALITY_PENALTY_CAP,
@@ -1591,7 +1667,8 @@ def _apply_anomaly_quality_penalty(data_quality, anomaly_summary):
     adjusted_score = max(0.0, round(pre_anomaly_score - penalty, 2))
 
     data_quality["overall_quality_score_pre_anomaly"] = round(pre_anomaly_score, 2)
-    data_quality["anomaly_flagged_row_pct"] = flagged_pct
+    data_quality["anomaly_flagged_row_pct"] = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
+    data_quality["structural_issue_row_pct"] = flagged_pct
     data_quality["anomaly_quality_penalty"] = round(penalty, 2)
     data_quality["overall_quality_score"] = adjusted_score
     return data_quality

@@ -76,12 +76,53 @@ def _extract_dataset_facts(state):
 
 def _extract_quality_facts(state):
     data_quality = state.get("data_quality", {}) or {}
+    raw_profile = state.get("raw_profile", {}) or {}
+    schema_blueprint = state.get("schema_blueprint", {}) or {}
+    column_profile = raw_profile.get("columns", {}) or {}
+    missing_values = []
+    for col, profile in column_profile.items():
+        if not isinstance(profile, dict):
+            continue
+        missing_count = int(profile.get("missing_count", 0) or 0)
+        missing_pct = profile.get(
+            "missing_rate_pct",
+            profile.get("missing_pct", profile.get("missing_percentage", 0.0)),
+        )
+        meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
+        null_policy = meta.get("null_policy", {}) if isinstance(meta, dict) else {}
+        action = null_policy.get("action") if isinstance(null_policy, dict) else None
+        if not action and isinstance(meta, dict):
+            action = meta.get("imputation_strategy", "none")
+        if action == "none":
+            action = "left as null"
+        missing_values.append({
+            "column": col,
+            "count": missing_count,
+            "pct": round(float(missing_pct or 0.0), 2),
+            "action": action or "left as null",
+        })
+
+    column_ledger = state.get("column_ledger", {}) or {}
+    row_accounting = column_ledger.get("row_accounting", {}) if isinstance(column_ledger, dict) else {}
+    exact_duplicates = int(row_accounting.get("exact_duplicates_removed", 0) or 0)
+    canonical_duplicates = int(row_accounting.get("rows_dropped_by_canonical_dedup", 0) or 0)
+    imputation_rows = int(row_accounting.get("rows_dropped_by_imputation", 0) or 0)
     return {
         "overall_quality_score": data_quality.get("overall_quality_score"),
         "overall_quality_score_pre_anomaly": data_quality.get("overall_quality_score_pre_anomaly"),
         "anomaly_quality_penalty": data_quality.get("anomaly_quality_penalty"),
-        "completeness_pct": data_quality.get("completeness_pct"),
-        "duplicates_removed": data_quality.get("duplicates_removed"),
+        "raw_completeness_pct": data_quality.get("raw_completeness_pct"),
+        "raw_missing_pct": data_quality.get("raw_missing_pct"),
+        "remaining_null_pct": data_quality.get("remaining_null_pct"),
+        "completeness_pct": data_quality.get("raw_completeness_pct"),
+        "duplicates": {
+            "exact_count": exact_duplicates,
+            "near_duplicate_count": canonical_duplicates,
+            "rows_dropped_for_missing_values": imputation_rows,
+            "action": "exact duplicates removed; canonical near-duplicates collapsed; missing-value rows dropped per policy",
+        },
+        "duplicates_removed": exact_duplicates + canonical_duplicates,
+        "missing_values": missing_values,
     }
 
 

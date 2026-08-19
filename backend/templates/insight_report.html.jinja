@@ -70,9 +70,34 @@
 </p>
 {% if facts.data_quality.anomaly_quality_penalty and facts.data_quality.anomaly_quality_penalty > 0 %}
 <p class="empty-note">
-  Includes a -{{ facts.data_quality.anomaly_quality_penalty }} point adjustment for statistical
-  anomalies found during analysis (pre-adjustment score: {{ facts.data_quality.overall_quality_score_pre_anomaly }}).
+  Includes a -{{ facts.data_quality.anomaly_quality_penalty }} point adjustment for structural
+  data-quality issues (pre-adjustment score: {{ facts.data_quality.overall_quality_score_pre_anomaly }}).
 </p>
+{% endif %}
+
+{% if facts.data_quality.duplicates or facts.data_quality.missing_values %}
+<h2>Data Quality Detail</h2>
+{% if facts.data_quality.duplicates %}
+<h3>Duplicate and Near-Duplicate Rows</h3>
+<table>
+  <tr><th>Exact Duplicates</th><th>Canonical Near-Duplicates</th><th>Rows Dropped for Missing Values</th><th>Action Taken</th></tr>
+  <tr>
+    <td>{{ facts.data_quality.duplicates.exact_count }}</td>
+    <td>{{ facts.data_quality.duplicates.near_duplicate_count }}</td>
+    <td>{{ facts.data_quality.duplicates.rows_dropped_for_missing_values }}</td>
+    <td>{{ facts.data_quality.duplicates.action }}</td>
+  </tr>
+</table>
+{% endif %}
+{% if facts.data_quality.missing_values %}
+<h3>Missing Values by Column</h3>
+<table>
+  <tr><th>Column</th><th>Missing Count</th><th>Missing %</th><th>Imputation / Action</th></tr>
+  {% for item in facts.data_quality.missing_values if item.count > 0 %}
+  <tr><td>{{ item.column }}</td><td>{{ item.count }}</td><td>{{ item.pct }}</td><td>{{ item.action }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
 {% endif %}
 
 {% if narrative.plain_language_insights or narrative.bottom_line %}
@@ -262,12 +287,19 @@
 {% if facts.anomalies and facts.anomalies.unique_flagged_rows %}
 <h2>Anomalies</h2>
 <p>
-  {{ facts.anomalies.unique_flagged_rows }} rows ({{ facts.anomalies.unique_flagged_row_pct }}%) flagged across
-  {{ facts.anomalies.flagged_columns }} column(s). Each column uses a z-score threshold of
+  {{ facts.anomalies.statistical_outlier_rows }} rows ({{ facts.anomalies.statistical_outlier_row_pct }}%) flagged as statistical outliers across
+  {{ facts.anomalies.flagged_columns }} column(s). These are extreme distributional values, not automatically data-quality errors.
+  Each column uses a z-score threshold of
   {{ facts.anomalies.z_threshold }} on its raw or log-transformed values (log-transformed for
   right-skewed columns) or a wider IQR rule for skewed columns with non-positive values, so the
   method adapts to each column's distribution instead of assuming normality everywhere.
 </p>
+{% if facts.anomalies.structural_issue_rows %}
+<p>
+  {{ facts.anomalies.structural_issue_rows }} rows ({{ facts.anomalies.structural_issue_row_pct }}%) contain structural data-quality issues,
+  such as invalid quantities, discounts, or return quantities. These issues drive the Data Quality Score penalty.
+</p>
+{% endif %}
 {% endif %}
 
 {% if narrative.risks_and_caveats %}

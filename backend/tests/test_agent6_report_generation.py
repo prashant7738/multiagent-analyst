@@ -193,7 +193,7 @@ class TestRawColumnCountGuard(unittest.TestCase):
 
         with patch.object(agent_6, "_extract_insight_facts", return_value=stale_facts), \
              patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
-             patch.object(agent_6, "_get_gemini_client", side_effect=RuntimeError("no gemini key")):
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
         # Never hard-fails - a report is still produced.

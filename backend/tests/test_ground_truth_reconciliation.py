@@ -18,10 +18,12 @@ bugs are fixed here. Run with:
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
+from agents import agent_2
 from agents.agent_1 import agent1_structural_profiler
 from agents.agent_2 import agent2_semantic_tagger
 from agents.agent_3 import agent3_preprocessor, _normalize_category_label
@@ -82,7 +84,17 @@ class GroundTruthReconciliationTestCase(unittest.TestCase):
 
         state = {"csv_path": str(CSV_PATH), "errors": []}
         state = agent1_structural_profiler(state)
-        state = agent2_semantic_tagger(state)
+        # Reconciliation only needs deterministic type/financial-role tagging (both
+        # covered by the metadata-only fallback) - force it so this test never makes
+        # a real Groq/Gemini call and can't hang on live rate limits.
+        _no_llm_keys = {
+            "GROQ_API_KEY": "", "GEMINI_API_KEY": "", "Gemini_API_Key": "", "GOOGLE_API_KEY": "",
+            "GEMINI_API_KEYS": "", "GEMINI_API_KEY_1": "", "GEMINI_API_KEY_2": "",
+            "GEMINI_API_KEY_3": "", "GEMINI_API_KEY_4": "", "GEMINI_API_KEY_5": "",
+        }
+        with patch.object(agent_2, "client", None), patch.object(agent_2, "gemini_client", None), \
+                patch.dict(agent_2.os.environ, _no_llm_keys, clear=False):
+            state = agent2_semantic_tagger(state)
         state = agent3_preprocessor(state)
         state = agent4_analysis(state)
 

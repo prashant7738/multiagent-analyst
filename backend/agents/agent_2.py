@@ -235,8 +235,14 @@ MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 LLM_BATCH_SIZE = 8
 LLM_SINGLE_CALL_THRESHOLD = 10
 # qwen3.6-27b is a reasoning model; without reasoning_effort=none it can burn the whole budget on <think> and return empty content
-LLM_MAX_TOKENS = 4000
+# lowered from 4000: an 8-column JSON batch never needs that much completion budget, and the reserved max_tokens
+# eats into the same 8000 TPM ceiling that causes repeated 429s across sequential batches
+LLM_MAX_TOKENS = 2000
 GROQ_REASONING_EFFORT = "none"
+
+# On-disk cache so re-running the pipeline on an unchanged CSV skips the Groq/Gemini calls entirely.
+SCHEMA_CACHE_DIR = os.path.join("outputs", ".schema_cache")
+_SCHEMA_CACHE_VERSION = "v1"
 
 _NAME_HINTS = [
     ("identifier", {"id", "identifier", "uuid", "key", "code"}),
@@ -732,6 +738,37 @@ def _build_llm_prompt(df: pd.DataFrame, inferred_types: dict, raw_profile: dict,
 def _split_columns_into_batches(columns: list[str], batch_size: int) -> list[list[str]]:
     """Split a column list into deterministic batches for LLM requests."""
     return [columns[index:index + batch_size] for index in range(0, len(columns), batch_size)]
+
+
+def _schema_cache_key(df: pd.DataFrame, inferred_types: dict, raw_profile: dict) -> str:
+    """Hash the exact LLM input payload so an unchanged dataset skips the LLM entirely."""
+    prompt_payload = _build_llm_prompt(df, inferred_types, raw_profile)
+    # \x1f (unit separator) keeps the joined fields unambiguous before hashing.
+    fingerprint = "\x1f".join([_SCHEMA_CACHE_VERSION, GROQ_MODEL, str(LLM_BATCH_SIZE), SEMANTIC_SYSTEM_PROMPT, prompt_payload])
+    return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+
+
+def _load_schema_cache(cache_key: str) -> dict | None:
+    """Return a previously cached LLM schema blueprint, or None on any cache miss/error."""
+    path = os.path.join(SCHEMA_CACHE_DIR, f"{cache_key}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as cache_file:
+            return json.load(cache_file)
+    except Exception:
+        return None
+
+
+def _save_schema_cache(cache_key: str, schema_blueprint: dict) -> None:
+    """Best-effort cache write; failures must never break the pipeline."""
+    try:
+        os.makedirs(SCHEMA_CACHE_DIR, exist_ok=True)
+        path = os.path.join(SCHEMA_CACHE_DIR, f"{cache_key}.json")
+        with open(path, "w", encoding="utf-8") as cache_file:
+            json.dump(schema_blueprint, cache_file)
+    except Exception:
+        pass
 
 
 def _parse_schema_blueprint_response(raw_text: str) -> dict:
@@ -1444,11 +1481,17 @@ def agent2_semantic_tagger(state: dict) -> dict:
 
     try:
         columns = list(df.columns)
-        column_batches = [columns] if len(columns) <= LLM_SINGLE_CALL_THRESHOLD else _split_columns_into_batches(columns, LLM_BATCH_SIZE)
-        schema_blueprint = {}
-        for batch_columns in column_batches:
-            batch_blueprint = _call_llm_for_schema_blueprint_with_retry(df, inferred_types, raw_profile, batch_columns)
-            _merge_schema_blueprints(schema_blueprint, batch_blueprint)
+        cache_key = _schema_cache_key(df, inferred_types, raw_profile)
+        schema_blueprint = _load_schema_cache(cache_key)
+        if schema_blueprint is not None:
+            print("[Agent 2] Reusing cached LLM schema blueprint for this exact dataset (no API calls needed)")
+        else:
+            column_batches = [columns] if len(columns) <= LLM_SINGLE_CALL_THRESHOLD else _split_columns_into_batches(columns, LLM_BATCH_SIZE)
+            schema_blueprint = {}
+            for batch_columns in column_batches:
+                batch_blueprint = _call_llm_for_schema_blueprint_with_retry(df, inferred_types, raw_profile, batch_columns)
+                _merge_schema_blueprints(schema_blueprint, batch_blueprint)
+            _save_schema_cache(cache_key, schema_blueprint)
 
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
         data_quality_signals = _assess_data_quality_signals(df, raw_profile)

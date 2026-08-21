@@ -608,9 +608,26 @@ Return ONLY a JSON object with exactly these keys:
 """
 
 
+_MAX_LIST_ITEMS_FOR_PROMPT = 8
+
+
+def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT):
+    """Recursively cap list lengths so unbounded facts (e.g. per-category monthly
+    trend series) can't blow the narrative prompt past Groq's per-request TPM cap."""
+    if isinstance(node, dict):
+        return {key: _truncate_lists_for_prompt(value, max_items) for key, value in node.items()}
+    if isinstance(node, list):
+        truncated = [_truncate_lists_for_prompt(item, max_items) for item in node[:max_items]]
+        if len(node) > max_items:
+            truncated.append(f"...{len(node) - max_items} more rows omitted for brevity")
+        return truncated
+    return node
+
+
 def _call_llm_for_narrative(insight_facts: dict) -> dict:
     """Ask Groq for the narrative, falling back to Gemini on provider failure."""
-    user_content = f"Write the report narrative for these facts:\n{json.dumps(insight_facts, indent=2, default=str)}"
+    prompt_facts = _truncate_lists_for_prompt(insight_facts)
+    user_content = f"Write the report narrative for these facts:\n{json.dumps(prompt_facts, indent=2, default=str)}"
 
     try:
         response = _get_groq_client().chat.completions.create(

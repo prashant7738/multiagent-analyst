@@ -31,8 +31,10 @@ def should_continue_after_agent2(state: GraphState) -> str:
 
 
 def should_continue_after_agent3(state: GraphState) -> str:
-    if state.get("errors") and any("Agent3" in e for e in state["errors"]):
-        return "end"
+    # Agent 3 also appends non-fatal "Agent3: ..." warnings (e.g. derived-metric
+    # divergence) that must NOT abort the pipeline - cleaned_df is None only on
+    # genuine failure (see agent_3._early_exit_with_error), so that's the sole
+    # fatal signal here; don't blanket-match "Agent3" in errors.
     if state.get("cleaned_df") is None:
         return "end"
     return "agent4"

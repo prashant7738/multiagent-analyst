@@ -3,7 +3,31 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pipeline import _write_run_diagnostics
+import pandas as pd
+
+from pipeline import _write_run_diagnostics, should_continue_after_agent3
+
+
+class TestShouldContinueAfterAgent3(unittest.TestCase):
+    """Agent 3 appends non-fatal 'Agent3: ...' warnings (e.g. derived-metric
+    divergence) to state["errors"] without touching cleaned_df - these must not
+    abort the pipeline before Agent 4/5/6 run."""
+
+    def test_continues_to_agent4_despite_non_fatal_agent3_warning(self):
+        state = {
+            "cleaned_df": pd.DataFrame({"a": [1, 2, 3]}),
+            "errors": [
+                "Agent3: DERIVED METRIC DIVERGENCE - [derived_profit] vs [Total Profit] "
+                "(r=0.882, MAPE=239.05%) - review the derivation formula/source columns."
+            ],
+        }
+
+        self.assertEqual(should_continue_after_agent3(state), "agent4")
+
+    def test_ends_when_cleaned_df_is_none(self):
+        state = {"cleaned_df": None, "errors": ["Agent3: No DataFrame in state. Agent 1 or 2 failed."]}
+
+        self.assertEqual(should_continue_after_agent3(state), "end")
 
 
 class TestPipelineDiagnostics(unittest.TestCase):

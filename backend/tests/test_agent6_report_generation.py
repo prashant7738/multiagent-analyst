@@ -188,6 +188,46 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         self.assertNotIn("report_path", result)
 
 
+class TestTruncateListsForPrompt(unittest.TestCase):
+    """example_rows (agent_4._detect_data_quality_issues) holds full raw-dataframe
+    rows - on a wide one-hot-encoded dataset these blow the narrative prompt past
+    Groq's TPM cap even after list-length truncation, since they're nested inside
+    a dict (rule_details), not a bare list. The narrative never cites individual
+    example rows, so they must be dropped from the prompt copy entirely."""
+
+    def test_example_rows_are_dropped_from_prompt_copy(self):
+        wide_row = {f"col_{i}": i for i in range(80)}
+        insight_facts = {
+            "anomalies": {
+                "rule_details": {
+                    "Quantity < 0": {
+                        "count": 5,
+                        "pct": 1.2,
+                        "review_required": False,
+                        "example_rows": [wide_row, wide_row],
+                    },
+                },
+            },
+        }
+
+        prompt_facts = agent_6._truncate_lists_for_prompt(insight_facts)
+
+        rule_detail = prompt_facts["anomalies"]["rule_details"]["Quantity < 0"]
+        self.assertNotIn("example_rows", rule_detail)
+        self.assertEqual(rule_detail["count"], 5)
+        self.assertEqual(rule_detail["pct"], 1.2)
+        # original facts (used for HTML rendering/grounding) must stay untouched
+        self.assertIn("example_rows", insight_facts["anomalies"]["rule_details"]["Quantity < 0"])
+
+    def test_other_lists_still_truncated_to_max_items(self):
+        insight_facts = {"top_correlations": [{"col1": f"a{i}", "col2": "b"} for i in range(20)]}
+
+        prompt_facts = agent_6._truncate_lists_for_prompt(insight_facts)
+
+        self.assertEqual(len(prompt_facts["top_correlations"]), agent_6._MAX_LIST_ITEMS_FOR_PROMPT + 1)
+        self.assertTrue(str(prompt_facts["top_correlations"][-1]).endswith("omitted for brevity"))
+
+
 class TestRawColumnCountGuard(unittest.TestCase):
     """Guards against the executive summary silently reporting a post-transform
     column count as if it were the raw dataset's shape (Fix 2)."""

@@ -746,13 +746,25 @@ Return ONLY a JSON object with exactly these keys:
 
 
 _MAX_LIST_ITEMS_FOR_PROMPT = 8
+# `rule_details.<rule>.example_rows` (agent_4._detect_data_quality_issues) holds full
+# raw-dataframe rows for manual inspection in the HTML report - on a one-hot-encoded
+# dataset that's dozens of columns per example row, and being a dict-of-dicts (not a
+# bare list) it isn't shrunk by the list-length cap below. The narrative never cites
+# individual example rows (only counts/pct), so it's dropped from the LLM prompt copy
+# entirely - this was the actual cause of a 17863-token 413 on Groq even after list
+# truncation, and the same bloat also risks tripping Gemini's output-token budget.
+_PROMPT_EXCLUDED_KEYS = {"example_rows"}
 
 
 def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT):
     """Recursively cap list lengths so unbounded facts (e.g. per-category monthly
     trend series) can't blow the narrative prompt past Groq's per-request TPM cap."""
     if isinstance(node, dict):
-        return {key: _truncate_lists_for_prompt(value, max_items) for key, value in node.items()}
+        return {
+            key: _truncate_lists_for_prompt(value, max_items)
+            for key, value in node.items()
+            if key not in _PROMPT_EXCLUDED_KEYS
+        }
     if isinstance(node, list):
         truncated = [_truncate_lists_for_prompt(item, max_items) for item in node[:max_items]]
         if len(node) > max_items:

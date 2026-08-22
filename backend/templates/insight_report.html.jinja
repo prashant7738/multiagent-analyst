@@ -238,7 +238,8 @@
 {% endif %}
 
 {% set xdim = facts.cross_dimensional %}
-{% if xdim and (xdim.discount_return_rate.buckets or xdim.rep_discount_margin.records or xdim.segment_order_value.records or xdim.region_shipping_cost.records or xdim.category_margin_trend or xdim.shipping_lead_time.distribution) %}
+{% set lead_time = xdim.get('shipping_lead_time', {}) if xdim else {} %}
+{% if xdim and (xdim.discount_return_rate.buckets or xdim.rep_discount_margin.records or xdim.segment_order_value.records or xdim.region_shipping_cost.records or xdim.category_margin_trend or lead_time.get('distribution')) %}
 <h2>Cross-Dimensional Analysis</h2>
 
 {% if xdim.discount_return_rate.buckets %}
@@ -280,10 +281,10 @@
   {% endfor %}
 </table>
 {% endif %}
-{% if xdim.shipping_lead_time.distribution %}
+{% if lead_time.get('distribution') %}
 <h3>Shipping Lead Time</h3>
-<p>Orders took {{ xdim.shipping_lead_time.distribution.mean_days }} days on average to ship, with a median of {{ xdim.shipping_lead_time.distribution.median_days }} days and a range of {{ xdim.shipping_lead_time.distribution.min_days }} to {{ xdim.shipping_lead_time.distribution.max_days }} days.</p>
-{% for dimension, data in xdim.shipping_lead_time.by_dimension.items() %}
+<p>Orders took {{ lead_time.distribution.mean_days }} days on average to ship, with a median of {{ lead_time.distribution.median_days }} days and a range of {{ lead_time.distribution.min_days }} to {{ lead_time.distribution.max_days }} days.</p>
+{% for dimension, data in lead_time.get('by_dimension', {}).items() %}
 <h4>Lead Time by {{ dimension }}</h4>
 <table>
   <tr><th>{{ dimension }}</th><th>Mean Days</th><th>Median Days</th><th>Orders</th></tr>

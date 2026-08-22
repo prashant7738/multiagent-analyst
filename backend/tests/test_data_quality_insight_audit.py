@@ -140,6 +140,21 @@ class TestChartEmbedding(unittest.TestCase):
             encoded = html.split("data:image/png;base64,", 1)[1].split('"', 1)[0]
             self.assertLess(len(base64.b64decode(encoded)), chart.stat().st_size)
 
+    def test_render_html_accepts_legacy_facts_without_lead_time(self):
+        state = {"csv_path": "data.csv", "data_quality": {"overall_quality_score": 100}, "errors": []}
+        facts = agent_6._extract_insight_facts(state)
+        facts["cross_dimensional"].pop("shipping_lead_time", None)
+        narrative = {
+            "executive_summary": "",
+            "key_findings": [],
+            "plain_language_insights": [],
+            "bottom_line": "",
+            "risks_and_caveats": [],
+            "recommendations": [],
+        }
+
+        agent_6._render_html(facts, narrative, [], state)
+
 
 if __name__ == "__main__":
     unittest.main()

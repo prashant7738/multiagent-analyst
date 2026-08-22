@@ -28,6 +28,24 @@ class TestStructuralRules(unittest.TestCase):
 
         self.assertEqual(result["data_quality_issue_rows"], 1)
 
+    def test_clean_count_column_is_not_percentile_clipped_by_tag_alone(self):
+        # A uniformly-distributed "count" column has zero genuine outliers (per
+        # Agent 1's own IQR-based distribution_analysis below), so outlier
+        # clipping must not manufacture a ~5% flag purely because semantic_tag
+        # is "count"/"currency"/"percentage" - that would silently mutate real,
+        # valid values (e.g. Units Sold 2..10000) on ANY dataset with such a tag.
+        series = pd.Series(range(1, 10001))
+        meta = {"semantic_tag": "count", "intended_type": "int", "scaling_allowed": True}
+        profile = {"distribution_analysis": {"distribution_type": "normal", "has_significant_outliers": False}}
+        context = {"risk_assessment": "low"}
+
+        clipped, clipped_count, bounds = agent_3._adaptive_outlier_clipping(
+            series, meta, {}, profile=profile, data_quality_context=context
+        )
+
+        self.assertEqual(clipped_count, 0)
+        self.assertEqual(bounds["method"], "iqr")
+
 
 class TestDerivedLeadTimeAndCorrelation(unittest.TestCase):
     def test_derived_revenue_per_unit_uses_raw_sources_and_stays_formulaic(self):
@@ -101,9 +119,28 @@ class TestReportAuditability(unittest.TestCase):
                           "unique_flagged_rows": 100, "unique_flagged_row_pct": 10.0},
         }
 
-        bullets, _ = agent_6._plain_language_fallback(facts)
+        bullets, bottom_line = agent_6._plain_language_fallback(facts)
 
         self.assertIn("structural", bullets[0].lower())
+        # The headline "bottom line" sentence must ALSO lead with whichever issue
+        # category costs the most quality-score points, not unconditionally with
+        # statistical outliers - a fixed template order here would still tell the
+        # user to "focus on 100 unusual records" even though the 4-row structural
+        # issue is the one actually costing more points (12 vs 1).
+        self.assertIn("structural", bottom_line.lower())
+
+    def test_bottom_line_falls_back_to_statistical_outliers_when_larger(self):
+        facts = {
+            "data_quality": {"overall_quality_score": 95, "data_quality_issue_penalty": 0.5,
+                             "anomaly_quality_penalty": 4},
+            "anomalies": {"data_quality_issue_rows": 2, "data_quality_issue_row_pct": 0.2,
+                          "issues_by_rule": {}, "rule_details": {},
+                          "unique_flagged_rows": 63, "unique_flagged_row_pct": 0.63},
+        }
+
+        _, bottom_line = agent_6._plain_language_fallback(facts)
+
+        self.assertIn("63 unusual records", bottom_line)
 
     def test_recommendation_business_impact_is_present_in_anomaly_facts(self):
         facts = {

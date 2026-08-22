@@ -735,7 +735,18 @@ def _plain_language_fallback(insight_facts: dict):
     if not bullets:
         bullets.append("Nothing unusual stood out in this dataset - no red flags, no standout winners or losers.")
 
-    if anomalies.get("unique_flagged_rows"):
+    # The headline "bottom line" must lead with whichever issue category actually
+    # costs the most Data Quality Score points, not a fixed template order - a
+    # structural defect that docks 7.5 points is more urgent than 63 statistical
+    # outliers that dock 0, even though both produce an "unusual records" bullet
+    # above. Rank the two anomaly categories by their actual point-impact.
+    if structural_penalty > 0 and structural_penalty >= statistical_penalty and anomalies.get("data_quality_issue_rows"):
+        bottom_line = (
+            f"Focus first on the {anomalies.get('data_quality_issue_rows')} records with structural data "
+            f"issues - they cost {structural_penalty} quality points, more than any other issue, and should "
+            f"be resolved before acting on the results."
+        )
+    elif anomalies.get("unique_flagged_rows"):
         bottom_line = (
             f"Focus first on the {anomalies.get('unique_flagged_rows')} unusual records - "
             f"fixing or explaining those will make every other number in this report more trustworthy."

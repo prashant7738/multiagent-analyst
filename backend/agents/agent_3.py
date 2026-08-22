@@ -1061,13 +1061,18 @@ def _adaptive_outlier_clipping(series, meta, config, profile=None, data_quality_
     profile = profile or {}
     distribution = profile.get("distribution_analysis", {}) if isinstance(profile.get("distribution_analysis"), dict) else {}
     risk_assessment = str((data_quality_context or {}).get("risk_assessment", "low"))
-    semantic_tag = str(meta.get("semantic_tag", "unknown"))
 
+    # Percentile-mode bounds must be justified by actual evidence of skew/outliers
+    # (Agent 1's own distribution analysis) or an elevated data-quality risk tier -
+    # NEVER by semantic_tag alone. A blanket "currency/percentage/count columns
+    # always use percentile clipping" rule manufactures a fake ~5% outlier rate on
+    # ANY dataset with such a column, clean or dirty, purely by construction (e.g.
+    # a uniformly-distributed "count" column with zero real outliers per Agent 1's
+    # own IQR check was still being clipped at the 2.5/97.5 percentile bounds).
     use_percentile = bool(
         distribution.get("has_significant_outliers")
         or distribution.get("distribution_type") in {"right_skewed", "left_skewed"}
         or risk_assessment in {"critical", "high"}
-        or semantic_tag in {"currency", "percentage", "count"}
     )
 
     if use_percentile:

@@ -112,6 +112,7 @@ def _extract_quality_facts(state):
         "raw_completeness_pct": data_quality.get("raw_completeness_pct"),
         "raw_missing_pct": data_quality.get("raw_missing_pct"),
         "remaining_null_pct": data_quality.get("remaining_null_pct"),
+        "rule_manifest": data_quality.get("rule_manifest") or state.get("rule_manifest", {}),
         "completeness_pct": data_quality.get("raw_completeness_pct"),
         "duplicates": {
             "exact_count": exact_duplicates,
@@ -395,6 +396,9 @@ def _extract_anomaly_facts(stats):
     summary["review_required"] = bool(dq_issues.get("review_required"))
     summary["issues_by_rule"] = dq_issues.get("issues_by_rule", {})
     summary["rule_details"] = dq_issues.get("rule_details", {})
+    summary["prioritized_anomalies"] = summary.get("prioritized_anomalies", [])
+    summary["business_impact_total"] = summary.get("business_impact_total", 0.0)
+    summary["rule_manifest"] = summary.get("rule_manifest") or dq_issues.get("rule_manifest", {})
     return summary
 
 
@@ -779,11 +783,30 @@ def _fallback_narrative(insight_facts: dict) -> dict:
             f"treat findings as directional rather than precise."
         )
 
-    recommendations = [
-        "Review the flagged anomalies for data-entry errors or genuine outlier events.",
-        "Investigate the strongest correlation pairs for causal or business-process explanations.",
-        "Re-run this pipeline as new data arrives to track whether trends persist.",
-    ]
+    recommendations = []
+    rankings = insight_facts.get("rankings") or {}
+    for dimension, data in rankings.items():
+        weakest = (data.get("bottom") or [None])[0]
+        if weakest and weakest.get(dimension) is not None:
+            recommendations.append(
+                f"Investigate '{weakest[dimension]}' in {dimension}, the weakest result in the report, "
+                f"and test a targeted recovery action."
+            )
+            break
+    anomalies = insight_facts.get("anomalies") or {}
+    prioritized = anomalies.get("prioritized_anomalies") or []
+    if prioritized:
+        first = prioritized[0]
+        recommendations.append(
+            f"Review {first['column']} first: its flagged records represent about "
+            f"{first['business_impact']} in estimated business impact."
+        )
+    correlations = insight_facts.get("top_correlations") or []
+    if correlations:
+        pair = correlations[0]
+        recommendations.append(f"Investigate the {pair['col1']}-{pair['col2']} relationship in the operating process.")
+    recommendations.append("Re-run this pipeline as new data arrives to track whether the findings persist.")
+    recommendations = recommendations[:5]
 
     plain_language_insights, bottom_line = _plain_language_fallback(insight_facts)
 
@@ -796,6 +819,32 @@ def _fallback_narrative(insight_facts: dict) -> dict:
         "recommendations": recommendations,
         "source": "fallback",
     }
+
+
+def _ground_recommendations(insight_facts, narrative):
+    """Keep model recommendations tied to at least one reported finding."""
+    fallback = _fallback_narrative(insight_facts).get("recommendations", [])
+    anchors = set()
+    for dimension, data in (insight_facts.get("rankings") or {}).items():
+        weakest = (data.get("bottom") or [None])[0]
+        if weakest and weakest.get(dimension) is not None:
+            anchors.add(str(weakest[dimension]).casefold())
+    for item in (insight_facts.get("anomalies") or {}).get("prioritized_anomalies", []):
+        if item.get("column"):
+            anchors.add(str(item["column"]).casefold())
+    for pair in insight_facts.get("top_correlations") or []:
+        anchors.update(str(pair.get(key)).casefold() for key in ("col1", "col2") if pair.get(key))
+
+    grounded = [
+        recommendation for recommendation in (narrative.get("recommendations", []) or [])
+        if any(anchor in str(recommendation).casefold() for anchor in anchors)
+    ]
+    for recommendation in fallback:
+        if len(grounded) >= 5:
+            break
+        if recommendation not in grounded:
+            grounded.append(recommendation)
+    return grounded[:5]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -905,6 +954,8 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         print(f"[Agent 6] LLM narrative generation failed, using deterministic fallback: {llm_error}")
         narrative = _fallback_narrative(insight_facts)
         narrative_source = "fallback"
+
+    narrative["recommendations"] = _ground_recommendations(insight_facts, narrative)
 
     claims_grounding = _check_narrative_grounding(insight_facts, narrative)
     narrative["claims_grounding"] = claims_grounding

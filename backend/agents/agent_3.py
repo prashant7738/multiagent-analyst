@@ -7,6 +7,7 @@ import pandas as pd
 
 from agents.agent_1 import GraphState
 from main import update_reliability
+from agents.rule_definitions import rule_manifest
 
 
 NULL_STRINGS = {
@@ -1635,6 +1636,9 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         f"Duplicate removal (exact-row): expected={expected_duplicates}, actual={actual_duplicates}, "
         f"rows_after={len(df)}"
     )
+    preprocessing_log.append(
+        f"Rule definitions: version={rule_manifest()['version']} hash={rule_manifest()['hash']}"
+    )
     if duplicate_samples:
         preprocessing_log.append(f"Duplicate key samples: {duplicate_samples}")
 
@@ -1781,6 +1785,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         preprocessing_config,
         data_quality_context,
     )
+    data_quality["rule_manifest"] = rule_manifest()
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
         f"(raw_missing={data_quality['raw_missing_pct']}%, "
@@ -1888,5 +1893,6 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
             "validation_failures": ledger.validation_failures,
             "row_accounting": row_accounting,
         },
+        "rule_manifest": rule_manifest(),
         "errors": errors,
     }

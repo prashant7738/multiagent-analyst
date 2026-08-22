@@ -10,6 +10,7 @@ import matplotlib.ticker as mticker
 from scipy import stats as scipy_stats
 from agents.agent_1 import GraphState
 from agents.agent_3 import _is_count_field
+from agents.rule_definitions import rule_manifest
 from main import update_reliability
 
 warnings.filterwarnings("ignore")
@@ -909,9 +910,16 @@ ANOMALY_SKEW_THRESHOLD = 1.0
 ANOMALY_IQR_MULTIPLIER = float(os.getenv("ANOMALY_IQR_MULTIPLIER", "3.0"))
 
 
+def _impact_columns(df):
+    tokens_by_col = {col: set(re.split(r"[^a-z0-9]+", col.lower())) for col in df.columns}
+    preferred = {"revenue", "sales", "amount", "total", "value", "price"}
+    return [col for col, tokens in tokens_by_col.items() if tokens & preferred]
+
+
 def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
     result = {}
     all_anomaly_indices = set()
+    impact_cols = _impact_columns(df)
     for col in _numeric_cols(df, schema_blueprint):
         s = df[col].dropna()
         if len(s) < 4:
@@ -962,6 +970,19 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
                 "col_mean":        round(col_mean, 4),
                 "col_std":         round(col_std, 4),
             }
+            impact_values = df.loc[anomaly_indices, impact_cols].apply(pd.to_numeric, errors="coerce") if impact_cols else df.loc[anomaly_indices, [col]].apply(pd.to_numeric, errors="coerce")
+            result[col]["business_impact"] = round(float(impact_values.abs().sum().sum()), 2)
+
+    prioritized = []
+    for col, details in result.items():
+        prioritized.append({
+            "column": col,
+            "count": details["count"],
+            "business_impact": details["business_impact"],
+            "method": details["method"],
+            "anomaly_indices": details["anomaly_indices"],
+        })
+    prioritized.sort(key=lambda item: item["business_impact"], reverse=True)
     summary = {
         "z_threshold": z_threshold,
         "iqr_multiplier": ANOMALY_IQR_MULTIPLIER,
@@ -971,6 +992,10 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
         "unique_flagged_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
         "statistical_outlier_rows": int(len(all_anomaly_indices)),
         "statistical_outlier_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
+        "prioritized_anomalies": prioritized,
+        "business_impact_total": round(sum(item["business_impact"] for item in prioritized), 2),
+        "business_impact_columns": impact_cols,
+        "rule_manifest": rule_manifest(),
     }
     return result, summary
 
@@ -1056,14 +1081,19 @@ def _detect_data_quality_issues(df, schema_blueprint):
 
     for col in df.columns:
         tokens = _tokens(col)
-        if "discount" in tokens:
+        meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
+        if meta.get("semantic_tag") == "percentage" and col not in {
+            key.split(" out of ")[0] for key in issues_by_rule
+        }:
+            lower, upper = _percentage_bounds(_num(col), meta)
+            _record((_num(col) < lower) | (_num(col) > upper), f"{col} out of [{lower:g}, {upper:g}]")
+        if "discount" in tokens and meta.get("semantic_tag") != "percentage":
             d = _num(col)
             if "amount" in tokens:
                 _record(d < 0, f"{col} < 0")
             else:
-                meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
                 lower, upper = _percentage_bounds(d, meta)
-                if meta.get("semantic_tag") not in {"percentage", "discount"} and upper == 1.0:
+                if not meta.get("unit_scale") and meta.get("semantic_tag") not in {"percentage", "discount"} and upper == 1.0:
                     upper = 100.0
                 _record((d < lower) | (d > upper), f"{col} out of [{lower:g}, {upper:g}]")
 
@@ -1093,6 +1123,7 @@ def _detect_data_quality_issues(df, schema_blueprint):
         "issues_by_rule": issues_by_rule,
         "rule_details": rule_details,
         "rules_checked": sorted(issues_by_rule.keys()),
+        "rule_manifest": rule_manifest(),
     }
 
 
@@ -1834,10 +1865,14 @@ def agent4_analysis(state: GraphState) -> GraphState:
         stats["anomalies"] = {}
         stats["anomaly_summary"] = {
             "z_threshold": ANOMALY_Z_THRESHOLD,
+            "iqr_multiplier": ANOMALY_IQR_MULTIPLIER,
             "flagged_columns": 0,
             "total_flagged_values": 0,
             "unique_flagged_rows": 0,
             "unique_flagged_row_pct": 0.0,
+            "prioritized_anomalies": [],
+            "business_impact_total": 0.0,
+            "rule_manifest": rule_manifest(),
         }
         print("[Agent 4] Step 6 — Anomalies skipped (no numeric columns)")
 

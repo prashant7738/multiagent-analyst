@@ -70,7 +70,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
     def test_falls_back_to_deterministic_narrative_when_llm_unavailable(self):
         state = _build_state()
 
-        with patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
         self.assertEqual(result["insight_narrative"]["source"], "fallback")
@@ -80,7 +81,28 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         self.assertGreater(report_file.stat().st_size, 0)
         self.assertEqual(result["errors"], [])
 
-    def test_uses_gemini_for_narrative_without_calling_groq(self):
+    def test_uses_groq_for_narrative_when_available(self):
+        state = _build_state()
+        fake_response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "executive_summary": "Revenue and cost are strongly correlated.",
+                "key_findings": [],
+                "risks_and_caveats": [],
+                "recommendations": [],
+            })))]
+        )
+        fake_groq_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: fake_response))
+        )
+
+        with patch.object(agent_6, "_get_groq_client", return_value=fake_groq_client), \
+             patch.object(agent_6, "_call_gemini_json_with_failover") as gemini_call:
+            result = agent_6.agent6_insight_report_generator(state)
+
+        self.assertEqual(result["insight_narrative"]["source"], "groq")
+        gemini_call.assert_not_called()
+
+    def test_falls_back_to_gemini_when_groq_unavailable(self):
         state = _build_state()
         fake_narrative = {
             "executive_summary": "Revenue and cost are strongly correlated.",
@@ -89,7 +111,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
             "recommendations": [],
         }
 
-        with patch.object(agent_6, "_call_gemini_json_with_failover", return_value=fake_narrative) as gemini_call:
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", return_value=fake_narrative) as gemini_call:
             result = agent_6.agent6_insight_report_generator(state)
 
         self.assertEqual(result["insight_narrative"]["source"], "gemini")
@@ -104,7 +127,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
             "risks_and_caveats": [],
             "recommendations": ["Investigate the revenue-cost relationship."],
         }
-        with patch.object(agent_6, "_call_gemini_json_with_failover", return_value=fake_narrative):
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", return_value=fake_narrative):
             result = agent_6.agent6_insight_report_generator(state)
 
         facts = result["insight_facts"]
@@ -123,7 +147,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
     def test_report_is_overwritten_not_duplicated_on_repeat_runs(self):
         state = _build_state()
 
-        with patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             agent_6.agent6_insight_report_generator(state)
             agent_6.agent6_insight_report_generator(state)
 
@@ -135,7 +160,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
     def test_report_renders_one_data_quality_detail_section(self):
         state = _build_state()
 
-        with patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
         report_html = Path(result["report_path"]).read_text(encoding="utf-8")
@@ -144,7 +170,8 @@ class TestAgent6ReportGeneration(unittest.TestCase):
     def test_pdf_conversion_failure_falls_back_to_html_report(self):
         state = _build_state()
 
-        with patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")), \
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")), \
              patch("weasyprint.HTML", side_effect=RuntimeError("simulated missing system libs")):
             result = agent_6.agent6_insight_report_generator(state)
 
@@ -205,7 +232,9 @@ class TestRawColumnCountGuard(unittest.TestCase):
         stale_facts = agent_6._extract_insight_facts(state)
         stale_facts["dataset"]["raw_cols"] = 112
 
-        with patch.object(agent_6, "_extract_insight_facts", return_value=stale_facts), patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+        with patch.object(agent_6, "_extract_insight_facts", return_value=stale_facts), \
+             patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
         # Never hard-fails - a report is still produced.

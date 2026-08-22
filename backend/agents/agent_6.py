@@ -73,6 +73,119 @@ def _extract_dataset_facts(state):
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 1c — SHAPE-CHANGE TRANSPARENCY (why row/column counts differ from the raw file)
+# ─────────────────────────────────────────────────────────────────────────────
+# Every category below is driven by columns/log entries the pipeline actually
+# produced (schema_blueprint per-column notes, column suffixes, row_accounting
+# ledger) - never a per-dataset hardcoded explanation - so it generalizes to
+# any CSV regardless of what transforms actually ran on it.
+_DATE_FEATURE_SUFFIXES = (
+    "_year", "_month", "_quarter", "_day", "_day_of_week", "_is_weekend", "_week_of_year",
+)
+_AUDIT_TRAIL_SUFFIXES = ("_raw", "_scaled", "_was_clipped")
+_VALIDATION_FLAG_SUFFIXES = ("_range_failed", "_rate_failed", "_reconciliation_failed", "_parse_failed")
+
+
+def _categorize_added_column(col, schema_blueprint):
+    meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
+    note = meta.get("notes", "") if isinstance(meta, dict) else ""
+    if isinstance(note, str) and ("one-hot encoded from" in note or "+Other encoded from" in note):
+        source = note.split(" from ", 1)[-1].split(" (")[0].strip()
+        return "one_hot_encoding", source
+    if isinstance(note, str) and "ordinal encoded into" in note:
+        return "ordinal_encoding", None
+    if col.startswith("derived_"):
+        return "derived_metric", None
+    if col.endswith(_DATE_FEATURE_SUFFIXES):
+        for suffix in _DATE_FEATURE_SUFFIXES:
+            if col.endswith(suffix):
+                return "date_feature_extraction", col[: -len(suffix)]
+    if col.endswith(_AUDIT_TRAIL_SUFFIXES):
+        return "audit_trail", None
+    if col.endswith(_VALIDATION_FLAG_SUFFIXES):
+        return "validation_flag", None
+    return "other", None
+
+
+_SHAPE_EXPLANATION_LABELS = {
+    "one_hot_encoding": "one-hot/category encoding of",
+    "ordinal_encoding": "ordinal encoding of categorical columns",
+    "derived_metric": "derived business metrics computed from existing columns",
+    "date_feature_extraction": "date-part features (year/month/quarter/etc.) extracted from",
+    "audit_trail": "internal audit-trail columns (raw/scaled/clip-flag copies) kept for transparency",
+    "validation_flag": "structural validation flag columns",
+    "other": "additional columns",
+}
+
+
+def _extract_shape_explanation(state):
+    """Explain WHY the cleaned shape differs from the raw file's shape, sourced
+    from the actual columns the pipeline added/removed and Agent 3's
+    row_accounting ledger - not written per-dataset."""
+    raw_shape = state.get("raw_shape") or {}
+    if not raw_shape:
+        raw_shape = (state.get("raw_profile", {}) or {}).get("shape", {}) or {}
+    raw_cols = raw_shape.get("cols")
+    raw_rows = raw_shape.get("rows")
+    cleaned_df = state.get("cleaned_df")
+    if cleaned_df is None:
+        return {}
+
+    raw_profile = state.get("raw_profile", {}) or {}
+    raw_col_names = set((raw_profile.get("columns", {}) or {}).keys())
+    schema_blueprint = state.get("schema_blueprint", {}) or {}
+    cleaned_cols = int(cleaned_df.shape[1])
+    cleaned_rows = int(cleaned_df.shape[0])
+
+    added_cols = [c for c in cleaned_df.columns if raw_col_names and c not in raw_col_names]
+    removed_cols = [c for c in raw_col_names if c not in cleaned_df.columns]
+
+    groups = {}
+    sources_by_group = {}
+    for col in added_cols:
+        group, source = _categorize_added_column(col, schema_blueprint)
+        groups.setdefault(group, []).append(col)
+        if source:
+            sources_by_group.setdefault(group, set()).add(source)
+
+    column_explanations = []
+    for group, cols in groups.items():
+        label = _SHAPE_EXPLANATION_LABELS.get(group, group)
+        sources = sorted(sources_by_group.get(group, set()))
+        if sources:
+            column_explanations.append(f"{len(cols)} column(s) added via {label} {', '.join(sources)}")
+        else:
+            column_explanations.append(f"{len(cols)} column(s) added: {label}")
+    if removed_cols:
+        column_explanations.append(f"{len(removed_cols)} column(s) dropped: {', '.join(sorted(removed_cols))}")
+
+    column_ledger = state.get("column_ledger", {}) or {}
+    row_accounting = column_ledger.get("row_accounting", {}) if isinstance(column_ledger, dict) else {}
+    row_accounting = row_accounting or {}
+    row_explanations = []
+    exact = int(row_accounting.get("exact_duplicates_removed", 0) or 0)
+    canonical = int(row_accounting.get("rows_dropped_by_canonical_dedup", 0) or 0)
+    imputation_drop = int(row_accounting.get("rows_dropped_by_imputation", 0) or 0)
+    if exact:
+        row_explanations.append(f"{exact} row(s) removed as exact duplicates")
+    if canonical:
+        row_explanations.append(f"{canonical} row(s) removed as near-duplicates after category normalization")
+    if imputation_drop:
+        row_explanations.append(f"{imputation_drop} row(s) dropped per missing-value/identifier policy")
+
+    return {
+        "raw_rows": raw_rows,
+        "raw_cols": raw_cols,
+        "cleaned_rows": cleaned_rows,
+        "cleaned_cols": cleaned_cols,
+        "column_delta": (cleaned_cols - raw_cols) if raw_cols is not None else None,
+        "row_delta": (cleaned_rows - raw_rows) if raw_rows is not None else None,
+        "column_explanations": column_explanations,
+        "row_explanations": row_explanations,
+    }
+
+
 def _extract_quality_facts(state):
     data_quality = state.get("data_quality", {}) or {}
     raw_profile = state.get("raw_profile", {}) or {}
@@ -131,6 +244,13 @@ def _extract_quality_facts(state):
         "duplicate_rate_pct": data_quality.get("duplicate_rate_pct"),
         "raw_missing_pct": data_quality.get("raw_missing_pct"),
         "remaining_null_pct": data_quality.get("remaining_null_pct"),
+        # docs known-issue: derived metrics (profit, margin, per-unit, etc.) must
+        # agree with any equivalent ground-truth column already in the source
+        # data - see agent_3._reconcile_derived_metrics. Only diverged records
+        # are surfaced here; the full audit trail also lives in preprocessing_log.
+        "derived_metric_reconciliation": [
+            r for r in (data_quality.get("derived_metric_reconciliation") or []) if r.get("diverged")
+        ],
     }
 
 
@@ -452,6 +572,7 @@ def _extract_insight_facts(state):
     stats = state.get("stats", {}) or {}
     return {
         "dataset": _extract_dataset_facts(state),
+        "shape_explanation": _extract_shape_explanation(state),
         "data_quality": _extract_quality_facts(state),
         "data_quality_detail": _extract_data_quality_detail(state),
         "top_correlations": _extract_correlation_facts(stats),
@@ -977,6 +1098,61 @@ def _validate_raw_column_count(insight_facts: dict, raw_shape: dict | None) -> N
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TABLE CELL POPULATION GUARANTEE
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic post-generation validation over every report table: no required
+# field may be None/blank in any row. Declared once per table shape here (not
+# per dataset) - every table in insight_report.html.jinja backed by a list of
+# dicts is covered so a silently-empty cell fails loudly instead of shipping.
+_REQUIRED_TABLE_FIELDS = {
+    "top_correlations": ("col1", "col2", "pearson_r", "strength", "direction"),
+    "formulaic_pairs": ("col1", "col2", "pearson_r", "strength", "direction"),
+    "significant_trends": ("column", "trend", "r_squared", "p_value"),
+    "category_normalization": ("column", "raw", "canonical", "row_count"),
+}
+
+
+def _validate_no_empty_required_cells(insight_facts: dict) -> None:
+    """Fail loudly (AssertionError naming the table/column) if any required
+    table cell would render empty, rather than silently shipping a report
+    with gaps. Optional columns (anything not listed here, or fields that are
+    legitimately allowed to be absent, e.g. review-only example rows) are not
+    checked."""
+    problems = []
+
+    for table_name, required_fields in _REQUIRED_TABLE_FIELDS.items():
+        rows = insight_facts.get(table_name) or []
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            for field in required_fields:
+                value = row.get(field)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    problems.append(f"{table_name}[{i}].{field}")
+
+    dqd = insight_facts.get("data_quality_detail") or {}
+    for i, row in enumerate(dqd.get("missing_values") or []):
+        for field in ("column", "missing_count", "missing_pct", "action"):
+            if row.get(field) is None or (isinstance(row.get(field), str) and not row.get(field).strip()):
+                problems.append(f"data_quality_detail.missing_values[{i}].{field}")
+
+    for section_name, value_field, share_field in (
+        ("rankings", "total_revenue", "revenue_share_pct"),
+        ("profit_breakdown", "total_profit", "profit_share_pct"),
+    ):
+        section = insight_facts.get(section_name) or {}
+        for cat_col, data in section.items():
+            for label in ("top", "bottom"):
+                for i, row in enumerate(data.get(label) or []):
+                    for field in (cat_col, value_field, share_field):
+                        if row.get(field) is None:
+                            problems.append(f"{section_name}.{cat_col}.{label}[{i}].{field}")
+
+    if problems:
+        raise AssertionError(f"Report table(s) have empty required cell(s): {problems}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -998,6 +1174,11 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         _validate_raw_column_count(insight_facts, state.get("raw_shape"))
     except AssertionError as shape_error:
         errors.append(f"Agent6: {shape_error}")
+
+    try:
+        _validate_no_empty_required_cells(insight_facts)
+    except AssertionError as table_error:
+        errors.append(f"Agent6: {table_error}")
 
     narrative_source = "llm"
     try:

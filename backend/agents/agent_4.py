@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import warnings
 import numpy as np
 import pandas as pd
@@ -38,11 +39,74 @@ COLORS = {
                   "#0891B2", "#DB2777", "#65A30D", "#EA580C", "#4F46E5"],
 }
 
+# Hard cap on chart output dimensions, enforced once at the single save
+# chokepoint below - applies to EVERY chart family regardless of how many
+# x-axis categories/time periods drove its figsize, so no per-chart-type cap
+# logic is needed for the dimension guarantee itself.
+CHART_SAVE_DPI = 150
+MAX_CHART_DIM_PX = 1600
+MAX_CHART_DIM_INCHES = MAX_CHART_DIM_PX / CHART_SAVE_DPI
+# Beyond this many x-axis ticks, labels overlap into illegible mush - thin them
+# to an evenly-spaced readable subset instead of drawing all of them.
+MAX_XTICK_LABELS = 40
+# Beyond this many time-series periods (months/quarters), a bar-per-period
+# chart is illegible even after tick thinning - roll the chart up to a
+# coarser grain (e.g. monthly -> yearly) instead.
+MAX_TIME_SERIES_CHART_POINTS = 40
+
+
+def _cap_chart_dimensions(fig):
+    """Clamp a figure's physical size so the saved PNG never exceeds
+    MAX_CHART_DIM_PX per side, independent of how densely-populated the data
+    behind it is (500 months, 1000 categories, etc.)."""
+    width, height = fig.get_size_inches()
+    capped_width = min(width, MAX_CHART_DIM_INCHES)
+    capped_height = min(height, MAX_CHART_DIM_INCHES)
+    if (capped_width, capped_height) != (width, height):
+        fig.set_size_inches(capped_width, capped_height)
+
+
+def _thin_axis_tick_labels(ax, max_labels=MAX_XTICK_LABELS):
+    """Keep at most `max_labels` evenly-spaced x-axis labels visible (and
+    rotate them for legibility) instead of drawing one per category/period -
+    a single generic pass applied to every axis in every chart, so any chart
+    type with a dense category/time axis degrades gracefully."""
+    labels = ax.get_xticklabels()
+    n = len(labels)
+    if n <= max_labels:
+        return
+    step = math.ceil(n / max_labels)
+    for i, label in enumerate(labels):
+        label.set_visible(i % step == 0)
+    for label in ax.get_xticklabels():
+        if label.get_visible():
+            label.set_rotation(90)
+            label.set_fontsize(7)
+
+
 def _save(fig, name):
     path = os.path.join(CHARTS_DIR, f"{name}.png")
     if os.path.exists(path):
         os.remove(path)
-    fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
+    for ax in fig.get_axes():
+        _thin_axis_tick_labels(ax)
+    _cap_chart_dimensions(fig)
+    # `bbox_inches="tight"` pads the saved extent beyond fig.get_size_inches()
+    # (rotated labels/legends spill outside the axes, plus savefig's own
+    # default pad_inches) - measure the real tight-bbox extent, add that same
+    # pad, and pick a dpi (with a small safety margin for rounding) that keeps
+    # the FINAL saved pixel dimensions within the cap.
+    pad_inches = 0.1
+    fig.canvas.draw()
+    try:
+        bbox = fig.get_tightbbox(fig.canvas.get_renderer())
+        extent_inches = max(bbox.width, bbox.height, 1e-6) + 2 * pad_inches
+    except Exception:
+        width, height = fig.get_size_inches()
+        extent_inches = max(width, height, 1e-6) + 2 * pad_inches
+    safe_max_px = MAX_CHART_DIM_PX - 10  # margin for sub-pixel rounding in the renderer
+    dpi = min(CHART_SAVE_DPI, safe_max_px / extent_inches)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", pad_inches=pad_inches, facecolor="white")
     plt.close(fig)
     return path
 
@@ -562,29 +626,44 @@ def _growth_rates(df, schema_blueprint):
         result["monthly"] = monthly.dropna().to_dict(orient="records")
 
         if len(monthly) >= 2 and _has_meaningful_variation(monthly[rev_col]):
-            fig, ax = plt.subplots(figsize=(max(8, len(monthly)), 4))
-            ax.bar(monthly["label"], monthly[rev_col],
+            # A monthly bar per period is illegible once there are dozens of
+            # periods (e.g. a multi-decade dataset) - roll the CHART (not the
+            # underlying `result["monthly"]` stats, which stay full-fidelity)
+            # up to a yearly grain instead of drawing hundreds of bars.
+            if len(monthly) > MAX_TIME_SERIES_CHART_POINTS:
+                chart_data = monthly.groupby(year_col, as_index=False)[rev_col].sum()
+                chart_data["label"] = chart_data[year_col].astype(str)
+                chart_data["growth_pct"] = chart_data[rev_col].pct_change() * 100
+                x_axis_label, period_word, growth_word = "Year", "Yearly", "YoY"
+                title_suffix = f" (aggregated to yearly grain; {len(monthly)} months total)"
+            else:
+                chart_data = monthly.rename(columns={"mom_growth_pct": "growth_pct"})
+                x_axis_label, period_word, growth_word = "Month", "Monthly", "MoM"
+                title_suffix = ""
+
+            fig, ax = plt.subplots(figsize=(max(8, len(chart_data)), 4))
+            ax.bar(chart_data["label"], chart_data[rev_col],
                    color=COLORS["primary"], alpha=0.85, label=label)
             ax2 = ax.twinx()
-            valid = monthly.dropna(subset=["mom_growth_pct"])
-            ax2.plot(valid["label"], valid["mom_growth_pct"],
-                     color=COLORS["accent"], marker="o", linewidth=2, label="MoM Growth %")
+            valid = chart_data.dropna(subset=["growth_pct"])
+            ax2.plot(valid["label"], valid["growth_pct"],
+                     color=COLORS["accent"], marker="o", linewidth=2, label=f"{growth_word} Growth %")
             ax2.axhline(0, color="gray", linewidth=0.8, linestyle="--")
-            ax.set_xlabel("Month", fontsize=10)
+            ax.set_xlabel(x_axis_label, fontsize=10)
             ax.set_ylabel(label, fontsize=10)
-            ax2.set_ylabel("MoM Growth %", fontsize=10)
-            ax.set_title(f"Monthly {label} & MoM Growth", fontsize=13, fontweight="bold")
+            ax2.set_ylabel(f"{growth_word} Growth %", fontsize=10)
+            ax.set_title(f"{period_word} {label} & {growth_word} Growth{title_suffix}", fontsize=13, fontweight="bold")
             plt.xticks(rotation=45, ha="right")
             lines1, labels1 = ax.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             ax.legend(lines1+lines2, labels1+labels2, loc="upper left", fontsize=9)
             fig.tight_layout()
             growth_path = _save(fig, f"monthly_{slug}_growth")
-            max_swing = float(valid["mom_growth_pct"].abs().max()) if not valid.empty else 0.0
+            max_swing = float(valid["growth_pct"].abs().max()) if not valid.empty else 0.0
             chart_candidates.append({
                 "path": growth_path, "family": "growth_rates_monthly",
                 "score": round(min(100.0, max_swing), 1),
-                "reason": f"max MoM swing={max_swing:.1f}%",
+                "reason": f"max {growth_word} swing={max_swing:.1f}%",
             })
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
@@ -603,13 +682,20 @@ def _growth_rates(df, schema_blueprint):
         result["quarterly"] = quarterly.dropna().to_dict(orient="records")
 
         if len(quarterly) >= 2 and _has_meaningful_variation(quarterly[rev_col]):
-            fig, ax = plt.subplots(figsize=(max(6, len(quarterly)+2), 4))
-            bars = ax.bar(quarterly["label"], quarterly[rev_col],
+            if len(quarterly) > MAX_TIME_SERIES_CHART_POINTS:
+                chart_data = quarterly.groupby(year_col, as_index=False)[rev_col].sum()
+                chart_data["label"] = chart_data[year_col].astype(str)
+                title = f"Yearly {label} (aggregated from {len(quarterly)} quarters)"
+            else:
+                chart_data = quarterly
+                title = f"Quarterly {label}"
+            fig, ax = plt.subplots(figsize=(max(6, len(chart_data)+2), 4))
+            bars = ax.bar(chart_data["label"], chart_data[rev_col],
                           color=COLORS["secondary"], alpha=0.85)
-            for bar, val in zip(bars, quarterly[rev_col]):
+            for bar, val in zip(bars, chart_data[rev_col]):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
                         f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
-            ax.set_title(f"Quarterly {label}", fontsize=13, fontweight="bold")
+            ax.set_title(title, fontsize=13, fontweight="bold")
             ax.set_ylabel(label)
             ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
             fig.tight_layout()
@@ -1151,6 +1237,15 @@ def _detect_data_quality_issues(df, schema_blueprint):
 # 7 — CATEGORY DISTRIBUTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Above this many distinct categories, a one-bar-per-category chart is
+# illegible regardless of the physical size cap - collapse the long tail into
+# a single "Other" bucket instead (chosen per chart type: category charts get
+# top-N+Other; time-series charts get coarser-grain aggregation, see
+# _growth_rates below). Not a skip - the reader should still see a chart.
+CATEGORY_CHART_MAX_BARS = 15
+CATEGORY_CHART_TOP_N = 14
+
+
 def _category_distributions(df, schema_blueprint):
     result = {}
     chart_candidates = []
@@ -1162,32 +1257,40 @@ def _category_distributions(df, schema_blueprint):
         dist.columns = [col, "count", "pct"]
         result[col] = dist.to_dict(orient="records")
 
-        if len(counts) <= 15:
-            # Use explicit Python str() to avoid pandas 3.x StringDtype / pd.NA
-            # values reaching matplotlib's category converter as floats.
-            x_labels = [str(v) for v in counts.index]
-            fig, ax = plt.subplots(figsize=(max(6, len(counts)), 4))
-            bars = ax.bar(
-                x_labels, counts.values,
-                color=COLORS["bars"][:len(counts)], alpha=0.88
-            )
-            for bar, p in zip(bars, pct.values):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                        f"{p:.1f}%", ha="center", va="bottom", fontsize=9)
-            ax.set_title(f"Distribution of {col}", fontsize=13, fontweight="bold")
-            ax.set_ylabel("Count", fontsize=10)
-            plt.xticks(rotation=30, ha="right")
-            fig.tight_layout()
-            dist_path = _save(fig, f"dist_{col.lower()}")
-            # A distribution that's far from uniform (one category dominating
-            # or a long tail) is more worth showing than a near-even split.
-            uniform_pct = 100.0 / len(counts)
-            imbalance = float(pct.max()) - uniform_pct
-            chart_candidates.append({
-                "path": dist_path, "family": "category_distribution",
-                "score": round(max(15.0, min(100.0, imbalance)), 1),
-                "reason": f"{col} top share={pct.max():.1f}% vs uniform={uniform_pct:.1f}%",
-            })
+        if len(counts) <= CATEGORY_CHART_MAX_BARS:
+            chart_counts = counts
+        else:
+            top = counts.nlargest(CATEGORY_CHART_TOP_N)
+            other_total = counts.sum() - top.sum()
+            chart_counts = pd.concat([top, pd.Series({"Other": other_total})])
+        chart_pct = (chart_counts / len(df) * 100).round(2)
+
+        # Use explicit Python str() to avoid pandas 3.x StringDtype / pd.NA
+        # values reaching matplotlib's category converter as floats.
+        x_labels = [str(v) for v in chart_counts.index]
+        fig, ax = plt.subplots(figsize=(max(6, len(chart_counts)), 4))
+        bar_colors = [COLORS["bars"][i % len(COLORS["bars"])] for i in range(len(chart_counts))]
+        bars = ax.bar(x_labels, chart_counts.values, color=bar_colors, alpha=0.88)
+        for bar, p in zip(bars, chart_pct.values):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                    f"{p:.1f}%", ha="center", va="bottom", fontsize=9)
+        title = f"Distribution of {col}"
+        if len(chart_counts) < len(counts):
+            title += f" (top {CATEGORY_CHART_TOP_N} + Other, {len(counts)} categories total)"
+        ax.set_title(title, fontsize=13, fontweight="bold")
+        ax.set_ylabel("Count", fontsize=10)
+        plt.xticks(rotation=30, ha="right")
+        fig.tight_layout()
+        dist_path = _save(fig, f"dist_{col.lower()}")
+        # A distribution that's far from uniform (one category dominating
+        # or a long tail) is more worth showing than a near-even split.
+        uniform_pct = 100.0 / len(counts)
+        imbalance = float(pct.max()) - uniform_pct
+        chart_candidates.append({
+            "path": dist_path, "family": "category_distribution",
+            "score": round(max(15.0, min(100.0, imbalance)), 1),
+            "reason": f"{col} top share={pct.max():.1f}% vs uniform={uniform_pct:.1f}%",
+        })
 
     return result, chart_candidates
 

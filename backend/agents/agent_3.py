@@ -1435,6 +1435,108 @@ def _derive_business_metrics(df, schema_blueprint=None):
     return df, notes, derivation_map
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 3d — DERIVED METRIC / GROUND-TRUTH RECONCILIATION
+# ─────────────────────────────────────────────────────────────────────────────
+# A derived_* column is a formula over other columns; if the source data
+# ALREADY has a column representing the same concept, the two must actually
+# agree. This is a dataset-agnostic check driven entirely by `derivation_map`
+# (already built above) and column-name-token overlap - never hardcoded to a
+# specific column pair - so it fires for any dataset/derivation.
+RECONCILIATION_MIN_CORR = 0.99
+RECONCILIATION_MAX_MAPE_PCT = 1.0
+RECONCILIATION_MIN_PAIRS = 5
+_RECONCILIATION_STOPWORDS = {"derived", "pct", "percent", "percentage", "per", "with", "to", "of", "the", "a", "amount"}
+_RECONCILIATION_EXCLUDE_SUFFIXES = (
+    "_raw", "_scaled", "_was_clipped",
+    "_range_failed", "_rate_failed", "_reconciliation_failed", "_parse_failed",
+)
+
+
+def _concept_tokens(col_name):
+    tokens = set(re.split(r"[^a-z0-9]+", str(col_name).lower())) - _RECONCILIATION_STOPWORDS
+    return {t for t in tokens if t}
+
+
+def _find_reconciliation_match(df, derived_col, source_cols, concept_cache):
+    """Find an existing non-derived column whose name fully covers the derived
+    column's concept tokens (e.g. concept {"profit","margin"} matches a column
+    named "Profit_Margin") - conservative full-coverage matching to avoid
+    false positives against unrelated but partially-overlapping names."""
+    concept = _concept_tokens(derived_col)
+    if not concept:
+        return None
+    excluded = set(source_cols or []) | {derived_col}
+    for col in df.columns:
+        if col in excluded or col.startswith("derived_") or col.endswith(_RECONCILIATION_EXCLUDE_SUFFIXES):
+            continue
+        if not _is_numeric_col(df, col):
+            continue
+        candidate_tokens = concept_cache.setdefault(col, _concept_tokens(col))
+        if concept and concept <= candidate_tokens:
+            return col
+    return None
+
+
+def _reconcile_derived_metrics(df, derivation_map):
+    """For every derived_* metric, check whether the raw data already contains
+    an equivalent ground-truth column (matched by name-token overlap, not a
+    hardcoded pair) and, if so, verify the derived formula actually agrees
+    with it (Pearson r and mean absolute % difference). A silent divergence
+    here means the derivation formula or its source-column resolution is
+    wrong for THIS dataset, not merely "two unrelated numbers"."""
+    notes = []
+    divergences = []
+    concept_cache = {}
+    for derived_col, source_cols in (derivation_map or {}).items():
+        if derived_col not in df.columns:
+            continue
+        match_col = _find_reconciliation_match(df, derived_col, source_cols, concept_cache)
+        if not match_col:
+            continue
+
+        derived_vals = pd.to_numeric(df[derived_col], errors="coerce")
+        match_vals = pd.to_numeric(df[match_col], errors="coerce")
+        valid = derived_vals.notna() & match_vals.notna()
+        if int(valid.sum()) < RECONCILIATION_MIN_PAIRS:
+            continue
+
+        d_v, m_v = derived_vals[valid], match_vals[valid]
+        corr = float(d_v.corr(m_v)) if d_v.std() > 0 and m_v.std() > 0 else None
+
+        nonzero = valid & (match_vals.abs() > 1e-9)
+        mape = None
+        if int(nonzero.sum()) >= RECONCILIATION_MIN_PAIRS:
+            mape = float(
+                (derived_vals[nonzero] - match_vals[nonzero]).abs().div(match_vals[nonzero].abs()).mean() * 100
+            )
+
+        diverged = (corr is not None and corr < RECONCILIATION_MIN_CORR) or (
+            mape is not None and mape > RECONCILIATION_MAX_MAPE_PCT
+        )
+        record = {
+            "derived_column": derived_col,
+            "matched_source_column": match_col,
+            "correlation": None if corr is None else round(corr, 4),
+            "mape_pct": None if mape is None else round(mape, 2),
+            "n": int(valid.sum()),
+            "diverged": diverged,
+        }
+        if diverged:
+            msg = (
+                f"DERIVED METRIC DIVERGENCE: [{derived_col}] disagrees with existing column "
+                f"[{match_col}] (r={record['correlation']}, MAPE={record['mape_pct']}% on n={record['n']} rows) - "
+                "the derivation formula or its source-column resolution is likely wrong for this dataset."
+            )
+            notes.append(msg)
+            divergences.append(record)
+        else:
+            notes.append(
+                f"Reconciliation OK: [{derived_col}] agrees with existing column [{match_col}] "
+                f"(r={record['correlation']}, MAPE={record['mape_pct']}%)"
+            )
+    return notes, divergences
+
 
 def _validate_count_ranges(df, schema_blueprint, ledger=None):
     notes = []
@@ -1753,6 +1855,20 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     if verbose:
         print(f"[Agent 3] Step 3c - Business metrics derived ({len(notes)} metrics)")
 
+    recon_notes, derived_divergences = _reconcile_derived_metrics(df, derivation_map)
+    preprocessing_log.extend(recon_notes)
+    if derived_divergences:
+        for divergence in derived_divergences:
+            errors.append(
+                f"Agent3: DERIVED METRIC DIVERGENCE - [{divergence['derived_column']}] vs "
+                f"[{divergence['matched_source_column']}] (r={divergence['correlation']}, "
+                f"MAPE={divergence['mape_pct']}%) - review the derivation formula/source columns."
+            )
+        if verbose:
+            print(f"[Agent 3] Step 3d - Reconciliation flagged {len(derived_divergences)} divergence(s)")
+    elif verbose:
+        print(f"[Agent 3] Step 3d - Reconciliation checked ({len(recon_notes)} note(s), 0 divergences)")
+
     df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
     preprocessing_log.extend(count_validation_notes)
     validation_summary["checks"] += count_validation["checks"]
@@ -1825,6 +1941,8 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         data_quality_context,
     )
     data_quality["rule_manifest"] = rule_manifest()
+    data_quality["derived_metric_reconciliation"] = derived_divergences
+
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "
         f"(raw_missing={data_quality['raw_missing_pct']}%, "

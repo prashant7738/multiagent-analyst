@@ -103,6 +103,28 @@
 <h2>Executive Summary</h2>
 <p>{{ narrative.executive_summary }}</p>
 
+{% set shape = facts.shape_explanation %}
+{% if shape and shape.raw_cols is not none %}
+<h2>Dataset Overview</h2>
+<p>
+  Source file: {{ shape.raw_rows }} rows &times; {{ shape.raw_cols }} columns.
+  After preprocessing: {{ shape.cleaned_rows }} rows &times; {{ shape.cleaned_cols }} columns.
+</p>
+{% if shape.column_delta or shape.row_delta %}
+<p class="empty-note">
+  The pipeline transforms the dataset's shape - this is expected, not an error. Here is exactly why the
+  numbers above differ from the raw file, generated from the pipeline's own transformation log:
+</p>
+<ul>
+  {% for note in shape.column_explanations %}
+  <li>{{ note }}</li>
+  {% endfor %}
+  {% for note in shape.row_explanations %}
+  <li>{{ note }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endif %}
 
 <h2>Key Findings</h2>
 {% if narrative.key_findings %}
@@ -113,6 +135,25 @@
 </ul>
 {% else %}
 <p class="empty-note">No key findings available.</p>
+{% endif %}
+
+{% if facts.data_quality.derived_metric_reconciliation %}
+<h2>⚠ Derived Metric Divergence</h2>
+<p class="empty-note">
+  The source data already contains a column matching one of the pipeline's derived business metrics, but
+  the two disagree beyond tolerance (r &lt; 0.99 or mean absolute % difference &gt; 1%). This means the
+  derivation formula or its source-column resolution is likely wrong for this dataset - treat the
+  affected derived metric as unreliable until reviewed.
+</p>
+<table>
+  <tr><th>Derived Column</th><th>Matched Source Column</th><th>Correlation (r)</th><th>MAPE %</th><th>Rows Compared</th></tr>
+  {% for item in facts.data_quality.derived_metric_reconciliation %}
+  <tr>
+    <td>{{ item.derived_column }}</td><td>{{ item.matched_source_column }}</td>
+    <td>{{ item.correlation }}</td><td>{{ item.mape_pct }}</td><td>{{ item.n }}</td>
+  </tr>
+  {% endfor %}
+</table>
 {% endif %}
 
 {% if facts.data_quality_detail %}

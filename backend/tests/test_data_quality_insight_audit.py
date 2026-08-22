@@ -21,6 +21,22 @@ class TestStructuralRules(unittest.TestCase):
         self.assertEqual(result["data_quality_issue_rows"], 0)
         self.assertNotIn("Units Sold_range_failed", result["issues_by_rule"])
 
+    def test_wide_variance_valid_column_raises_zero_structural_flags(self):
+        # A column that is 100% valid (non-negative integers, no type/domain
+        # violations) but has wide NATURAL variance must never be flagged as a
+        # structural defect - only a genuine percentile/z-score/IQR-based
+        # STATISTICAL check is allowed to react to distributional spread, and
+        # none of those feed _detect_data_quality_issues (docs task #1).
+        rng = np.random.default_rng(42)
+        values = rng.integers(1, 100_001, size=5000)
+        df = pd.DataFrame({"quantity": values})
+        schema = {"quantity": {"semantic_tag": "count", "intended_type": "int"}}
+
+        result = agent_4._detect_data_quality_issues(df, schema)
+
+        self.assertEqual(result["data_quality_issue_rows"], 0)
+        self.assertEqual(result["issues_by_rule"], {})
+
     def test_unconfigured_percentage_rule_uses_fixed_percent_bounds(self):
         df = pd.DataFrame({"discount_pct": [0.0, 25.0, 100.0, 101.0]})
 

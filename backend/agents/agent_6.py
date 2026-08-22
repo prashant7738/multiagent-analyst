@@ -42,7 +42,11 @@ TOP_RANKING_LIMIT = 3
 TOP_REGRESSION_LIMIT = 5
 MIN_TREND_SAMPLE_SIZE = 10       # matches agents.agent_5; trends below this aren't cited as fact
 CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the known value)
-AGENT6_MAX_OUTPUT_TOKENS = 1200
+# Gemini 3.x models spend part of this budget on internal "thinking" tokens before
+# emitting the JSON body; 1200 was too tight and routinely truncated the response
+# mid-JSON (silent fallback to the deterministic narrative). Bumped with headroom
+# for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
+AGENT6_MAX_OUTPUT_TOKENS = 4096
 
 
 def _verbose_logging_enabled():
@@ -1042,6 +1046,9 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         })
 
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+    # Non-JSON-native values (pd.Timestamp, numpy scalars, etc.) can end up in
+    # facts/example_rows; fall back to str() instead of letting |tojson raise.
+    env.policies["json.dumps_kwargs"] = {"default": str}
     template = env.get_template(TEMPLATE_NAME)
     return template.render(
         facts=insight_facts,

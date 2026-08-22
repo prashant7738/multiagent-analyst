@@ -223,8 +223,21 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
         temperature=temperature,
         max_output_tokens=max_output_tokens,
     )
-    raw_text = response.text.strip()
-    return _parse_schema_blueprint_response(raw_text)
+    raw_text = (response.text or "").strip()
+    try:
+        return _parse_schema_blueprint_response(raw_text)
+    except json.JSONDecodeError:
+        # Thinking-enabled Gemini models (3.x) spend part of max_output_tokens on
+        # internal reasoning; if that exhausts the budget the JSON body arrives
+        # truncated. Surface finish_reason/length so this is diagnosable at a glance
+        # instead of a bare "No valid JSON block found".
+        finish_reason = None
+        try:
+            finish_reason = response.candidates[0].finish_reason
+        except Exception:
+            pass
+        print(f"[Gemini] JSON parse failed: finish_reason={finish_reason} raw_len={len(raw_text)} preview={raw_text[:200]!r}")
+        raise
 
 GROQ_MODEL = "qwen/qwen3.6-27b"  # llama-3.3-70b-versatile deprecated by Groq 08/16/26 
 GEMINI_MODEL = "gemini-flash-latest"

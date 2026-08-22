@@ -1335,6 +1335,13 @@ def _derive_business_metrics(df, schema_blueprint=None):
     )
     ship_col = _find_col(df, ["shipping", "freight", "delivery_cost", "logistics"])
 
+    date_columns = {
+        re.sub(r"[^a-z0-9]+", "_", str(col).lower()).strip("_"): col
+        for col in df.columns
+    }
+    order_date_col = date_columns.get("order_date")
+    ship_date_col = date_columns.get("ship_date")
+
     rev_col = rev_col if _is_numeric_col(df, rev_col) else None
     cost_col = cost_col if _is_numeric_col(df, cost_col) else None
     unit_col = unit_col if _is_numeric_col(df, unit_col) else None
@@ -1359,6 +1366,13 @@ def _derive_business_metrics(df, schema_blueprint=None):
         df["derived_revenue_per_unit"] = df[rev_col] / df[unit_col].replace(0, np.nan)
         notes.append(f"Derived: revenue_per_unit from [{rev_col}] / [{unit_col}]")
         derivation_map["derived_revenue_per_unit"] = [rev_col, unit_col]
+
+    if order_date_col and ship_date_col:
+        order_dates = pd.to_datetime(df[order_date_col], errors="coerce", format="mixed")
+        ship_dates = pd.to_datetime(df[ship_date_col], errors="coerce", format="mixed")
+        df["derived_days_to_ship"] = (ship_dates - order_dates).dt.total_seconds() / 86400
+        notes.append(f"Derived: days_to_ship from [{order_date_col}] - [{ship_date_col}]")
+        derivation_map["derived_days_to_ship"] = [order_date_col, ship_date_col]
 
     if not rev_col and price_col and unit_col:
         df["derived_total_revenue"] = df[price_col] * df[unit_col]
@@ -1728,6 +1742,23 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
         print(f"[Agent 3] Step 3b - Canonical dedup done ({canonical_duplicates} rows removed)")
 
     before_step = df.copy()
+    df, notes, derivation_map = _derive_business_metrics(df, schema_blueprint)
+    preprocessing_log.extend(notes)
+    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3c"))
+    if verbose:
+        print(f"[Agent 3] Step 3c - Business metrics derived ({len(notes)} metrics)")
+
+    df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
+    preprocessing_log.extend(count_validation_notes)
+    validation_summary["checks"] += count_validation["checks"]
+    validation_summary["failed_rows"] += count_validation["failed_rows"]
+
+    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df, preprocessing_config, ledger)
+    preprocessing_log.extend(financial_validation_notes)
+    validation_summary["checks"] += financial_validation["checks"]
+    validation_summary["failed_rows"] += financial_validation["failed_rows"]
+
+    before_step = df.copy()
     df, notes = _impute(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 4"))
@@ -1776,28 +1807,10 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     if verbose:
         print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
-    # Derived metrics are computed only after upstream columns are finalized.
-    before_step = df.copy()
-    df, notes, derivation_map = _derive_business_metrics(df, schema_blueprint)
-    preprocessing_log.extend(notes)
-    preprocessing_log.extend(_log_null_diff(before_step, df, "Step 9"))
-    if verbose:
-        print(f"[Agent 3] Step 9 - Business metrics derived ({len(notes)} metrics)")
-
     if derivation_map:
         metadata = schema_blueprint.setdefault("__metadata__", {})
         if isinstance(metadata, dict):
             metadata["derived_metric_sources"] = derivation_map
-
-    df, count_validation_notes, count_validation = _validate_count_ranges(df, schema_blueprint, ledger)
-    preprocessing_log.extend(count_validation_notes)
-    validation_summary["checks"] += count_validation["checks"]
-    validation_summary["failed_rows"] += count_validation["failed_rows"]
-
-    df, financial_validation_notes, financial_validation = _validate_financial_constraints(df, preprocessing_config, ledger)
-    preprocessing_log.extend(financial_validation_notes)
-    validation_summary["checks"] += financial_validation["checks"]
-    validation_summary["failed_rows"] += financial_validation["failed_rows"]
 
     data_quality = _compute_enhanced_quality_score(
         df_raw,

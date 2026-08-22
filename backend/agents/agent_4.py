@@ -232,6 +232,7 @@ def _build_chart_plan(df, schema_blueprint):
     segment_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["customer segment", "segment"])
     region_col = _find_categorical_col_by_phrases(df, schema_blueprint, ["region"])
     shipping_col = _find_numeric_col_by_phrases(df, schema_blueprint, ["shipping cost", "shipping"])
+    lead_time_col = "derived_days_to_ship" if "derived_days_to_ship" in df.columns else None
 
     if revenue_col and has_time_axis and categorical_cols:
         dataset_type = "sales_timeseries"
@@ -274,6 +275,7 @@ def _build_chart_plan(df, schema_blueprint):
             "rep_discount_margin": bool(rep_col and discount_col and margin_col),
             "segment_order_value": bool(segment_col and revenue_col),
             "region_shipping_cost": bool(shipping_col and region_col),
+            "shipping_lead_time": bool(lead_time_col),
         },
     }
 
@@ -400,6 +402,22 @@ def _is_formulaic_pair(c1, c2, derivation_map):
     return c2 in derivation_map.get(c1, []) or c1 in derivation_map.get(c2, [])
 
 
+def _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
+    """Catch exact identities where the derived formula is indirect.
+
+    For example, revenue_per_unit = total_revenue / units and total_revenue =
+    unit_price * units, so revenue_per_unit is exactly unit_price even though
+    Unit Price is not listed as a direct source in the derivation map.
+    """
+    if not (c1.startswith("derived_") or c2.startswith("derived_")):
+        return False
+    if not derivation_map.get(c1) and not derivation_map.get(c2):
+        return False
+    left = pd.to_numeric(corr_df[c1], errors="coerce")
+    right = pd.to_numeric(corr_df[c2], errors="coerce")
+    return bool(len(left) >= 3 and np.isclose(left, right, rtol=1e-9, atol=1e-9).all())
+
+
 def _correlation(df, schema_blueprint):
     # Use every analysis-eligible numeric column (per Agent 2's schema tags),
     # not a fixed name whitelist - that way this works on any dataset, not just
@@ -438,7 +456,7 @@ def _correlation(df, schema_blueprint):
                     "direction": "positive" if r > 0 else "negative",
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
                 }
-                if _is_formulaic_pair(c1, c2, derivation_map):
+                if _is_formulaic_pair(c1, c2, derivation_map) or _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
                     formulaic_pairs.append(pair)
                 elif c1 in flagged_columns or c2 in flagged_columns:
                     excluded_pairs.append(pair)
@@ -1017,18 +1035,14 @@ STRUCTURAL_RULE_REVIEW_PCT = 90.0
 
 
 def _percentage_bounds(values, meta=None):
-    """Infer ratio versus percent units from the dominant observed scale."""
+    """Return externally defined bounds; never infer them from the data."""
     meta = meta or {}
     configured_scale = meta.get("unit_scale")
     if configured_scale == "ratio":
         return 0.0, 1.0
     if configured_scale == "percent":
         return 0.0, 100.0
-    values = pd.to_numeric(values, errors="coerce").dropna()
-    if values.empty:
-        return 0.0, 1.0
-    reference = float(values.quantile(0.95))
-    return (0.0, 1.0) if reference <= 1.0 else (0.0, 100.0)
+    return 0.0, 100.0
 
 
 def _detect_data_quality_issues(df, schema_blueprint):
@@ -1723,6 +1737,63 @@ def _shipping_cost_by_region(df, schema_blueprint):
     return result, chart_candidates
 
 
+def _shipping_lead_time_analysis(df, schema_blueprint):
+    lead_time_col = "derived_days_to_ship"
+    if lead_time_col not in df.columns:
+        return {}, []
+
+    lead_time = pd.to_numeric(df[lead_time_col], errors="coerce")
+    valid = lead_time.dropna()
+    if valid.empty:
+        return {}, []
+
+    result = {
+        "column": lead_time_col,
+        "distribution": {
+            "count": int(valid.size),
+            "mean_days": round(float(valid.mean()), 2),
+            "median_days": round(float(valid.median()), 2),
+            "min_days": round(float(valid.min()), 2),
+            "max_days": round(float(valid.max()), 2),
+        },
+        "by_dimension": {},
+    }
+    chart_candidates = []
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.hist(valid, bins=min(20, max(5, valid.nunique())), color=COLORS["primary"], alpha=0.88)
+    ax.set_xlabel("Days to Ship")
+    ax.set_ylabel("Orders")
+    ax.set_title("Shipping Lead-Time Distribution", fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    chart_path = _save(fig, "shipping_lead_time_distribution")
+    chart_candidates.append({
+        "path": chart_path,
+        "family": "shipping_lead_time",
+        "score": round(min(100.0, max(15.0, float(valid.std()) * 10)), 1),
+        "reason": "shipping lead-time distribution",
+    })
+
+    for dimension in _categorical_cols(df, schema_blueprint):
+        if dimension not in df.columns or not 2 <= df[dimension].nunique(dropna=True) <= 20:
+            continue
+        grouped = (
+            pd.DataFrame({dimension: df[dimension], lead_time_col: lead_time})
+            .dropna()
+            .groupby(dimension)[lead_time_col]
+            .agg(["mean", "median", "count"])
+            .reset_index()
+            .rename(columns={"mean": "mean_days", "median": "median_days", "count": "orders"})
+            .sort_values("mean_days", ascending=False)
+        )
+        result["by_dimension"][dimension] = {
+            "top": grouped.head(5).to_dict(orient="records"),
+            "bottom": grouped.tail(5).to_dict(orient="records"),
+        }
+
+    return result, chart_candidates
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN AGENT FUNCTION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1977,6 +2048,14 @@ def agent4_analysis(state: GraphState) -> GraphState:
     else:
         stats["region_shipping_cost"] = {}
         print("[Agent 4] Step 16 — Shipping cost by region skipped (missing shipping/region columns)")
+
+    if chart_plan["chart_families"]["shipping_lead_time"]:
+        stats["shipping_lead_time"], candidates = _shipping_lead_time_analysis(df, schema_blueprint)
+        all_chart_candidates.extend(candidates)
+        print(f"[Agent 4] Step 17 — Shipping lead-time analysis done ({len(candidates)} charts)")
+    else:
+        stats["shipping_lead_time"] = {}
+        print("[Agent 4] Step 17 — Shipping lead-time analysis skipped (missing derived lead-time metric)")
 
     data_quality = _apply_anomaly_quality_penalty(
         state.get("data_quality"),

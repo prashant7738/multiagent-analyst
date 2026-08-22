@@ -18,6 +18,7 @@ statistics, charts, validation) into a single grounded document:
 
 import json
 import base64
+from io import BytesIO
 import os
 import re
 from datetime import datetime, timezone
@@ -365,6 +366,7 @@ def _extract_cross_dimensional_facts(stats):
         "rep_discount_margin": stats.get("rep_discount_margin", {}) or {},
         "segment_order_value": stats.get("segment_order_value", {}) or {},
         "region_shipping_cost": stats.get("region_shipping_cost", {}) or {},
+        "shipping_lead_time": stats.get("shipping_lead_time", {}) or {},
     }
 
 
@@ -654,6 +656,22 @@ def _plain_language_fallback(insight_facts: dict):
     "bottom line" sentence. Built straight from the facts JSON - no LLM involved."""
     bullets = []
 
+    anomalies = insight_facts.get("anomalies") or {}
+    quality = insight_facts.get("data_quality") or {}
+    structural_penalty = float(quality.get("data_quality_issue_penalty", 0) or 0)
+    statistical_penalty = float(quality.get("anomaly_quality_penalty", 0) or 0)
+    if structural_penalty > statistical_penalty and anomalies.get("data_quality_issue_rows"):
+        bullets.append(
+            f"{anomalies['data_quality_issue_rows']} records contain structural data issues, costing "
+            f"{structural_penalty} quality points - resolve these before acting on the results."
+        )
+    elif anomalies.get("unique_flagged_rows"):
+        bullets.append(
+            f"About {anomalies.get('unique_flagged_row_pct')}% of your records "
+            f"({anomalies.get('unique_flagged_rows')} rows) look unusual compared to the rest - "
+            f"these are worth a manual check for data-entry mistakes or one-off events."
+        )
+
     for cat_col, data in (insight_facts.get("rankings") or {}).items():
         top = (data.get("top") or [None])[0]
         if top:
@@ -697,15 +715,13 @@ def _plain_language_fallback(insight_facts: dict):
             f"warning sign for the other."
         )
 
-    anomalies = insight_facts.get("anomalies") or {}
-    if anomalies.get("unique_flagged_rows"):
+    if anomalies.get("unique_flagged_rows") and structural_penalty <= statistical_penalty:
         bullets.append(
             f"About {anomalies.get('unique_flagged_row_pct')}% of your records "
             f"({anomalies.get('unique_flagged_rows')} rows) look unusual compared to the rest - "
             f"these are worth a manual check for data-entry mistakes or one-off events."
         )
 
-    quality = insight_facts.get("data_quality") or {}
     score = quality.get("overall_quality_score")
     if score is not None:
         if score >= 80:
@@ -836,9 +852,28 @@ def _ground_recommendations(insight_facts, narrative):
     for pair in insight_facts.get("top_correlations") or []:
         anchors.update(str(pair.get(key)).casefold() for key in ("col1", "col2") if pair.get(key))
 
+    anomaly_impacts = {
+        round(float(item["business_impact"]), 2)
+        for item in (insight_facts.get("anomalies") or {}).get("prioritized_anomalies", [])
+        if item.get("business_impact") is not None
+    }
+
+    def _recommendation_is_traceable(recommendation):
+        text = str(recommendation)
+        numeric_claims = _extract_numeric_claims(text)
+        mentions_money = "$" in text or any(word in text.casefold() for word in ("impact", "revenue", "cost"))
+        if not mentions_money or not numeric_claims:
+            return True
+        return any(
+            any(abs(claim - impact) <= max(CLAIM_GROUNDING_TOLERANCE, abs(impact) * 0.05)
+                for impact in anomaly_impacts)
+            for claim in numeric_claims
+        )
+
     grounded = [
         recommendation for recommendation in (narrative.get("recommendations", []) or [])
         if any(anchor in str(recommendation).casefold() for anchor in anchors)
+        and _recommendation_is_traceable(recommendation)
     ]
     for recommendation in fallback:
         if len(grounded) >= 5:
@@ -861,7 +896,12 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         if not path.exists():
             continue
         try:
-            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            from PIL import Image
+            with Image.open(path) as image:
+                image.thumbnail((1400, 900), Image.Resampling.LANCZOS)
+                compressed = BytesIO()
+                image.convert("RGB").save(compressed, format="PNG", optimize=True, compress_level=9)
+            encoded = base64.b64encode(compressed.getvalue()).decode("ascii")
         except OSError:
             continue
         charts.append({

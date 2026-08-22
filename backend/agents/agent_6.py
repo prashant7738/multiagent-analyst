@@ -391,7 +391,10 @@ def _extract_anomaly_facts(stats):
     dq_issues = stats.get("data_quality_issues", {}) or {}
     summary["data_quality_issue_rows"] = dq_issues.get("data_quality_issue_rows", 0)
     summary["data_quality_issue_row_pct"] = dq_issues.get("data_quality_issue_row_pct", 0.0)
+    summary["confident_issue_row_pct"] = dq_issues.get("confident_issue_row_pct", summary["data_quality_issue_row_pct"])
+    summary["review_required"] = bool(dq_issues.get("review_required"))
     summary["issues_by_rule"] = dq_issues.get("issues_by_rule", {})
+    summary["rule_details"] = dq_issues.get("rule_details", {})
     return summary
 
 
@@ -420,6 +423,8 @@ def _extract_validation_facts(state):
     row_reconciliation = tier1_checks.get("row_reconciliation") if isinstance(tier1_checks, dict) else None
     return {
         "overall_validation_score": validation_report.get("overall_validation_score"),
+        "confidence_in_score": validation_report.get("confidence_in_score"),
+        "rule_review_required": validation_report.get("rule_review_required", False),
         "passed": validation_report.get("passed"),
         "flagged_issue_count": len(validation_report.get("flagged_issues", []) or []),
         "cohen_kappa": semantic_agreement.get("cohen_kappa"),

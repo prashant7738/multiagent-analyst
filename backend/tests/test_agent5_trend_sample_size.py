@@ -1,10 +1,20 @@
 import unittest
 
 from agents import agent_5
-from agents.agent_5 import ValidationLedger, _check_trend_sample_sufficiency
+from agents.agent_5 import ValidationLedger, _check_trend_sample_sufficiency, _validation_confidence
 
 
 class TestAgent5TrendSampleSufficiency(unittest.TestCase):
+    def test_reviewed_rule_reduces_confidence_separately_from_score(self):
+        confidence = _validation_confidence(
+            validation_score=100.0,
+            review_required=True,
+            insufficient_trends=[],
+        )
+
+        self.assertLess(confidence, 1.0)
+        self.assertGreater(confidence, 0.0)
+
     def test_flags_significant_trend_with_too_few_points(self):
         state = {
             "stats": {

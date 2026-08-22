@@ -988,6 +988,22 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
 # (pre-scaling) values - reuse them instead of re-deriving thresholds on scaled
 # columns. See agent_3._validate_count_ranges / _validate_financial_constraints.
 _STRUCTURAL_FLAG_SUFFIXES = ("_range_failed", "_rate_failed", "_reconciliation_failed")
+STRUCTURAL_RULE_REVIEW_PCT = 90.0
+
+
+def _percentage_bounds(values, meta=None):
+    """Infer ratio versus percent units from the dominant observed scale."""
+    meta = meta or {}
+    configured_scale = meta.get("unit_scale")
+    if configured_scale == "ratio":
+        return 0.0, 1.0
+    if configured_scale == "percent":
+        return 0.0, 100.0
+    values = pd.to_numeric(values, errors="coerce").dropna()
+    if values.empty:
+        return 0.0, 1.0
+    reference = float(values.quantile(0.95))
+    return (0.0, 1.0) if reference <= 1.0 else (0.0, 100.0)
 
 
 def _detect_data_quality_issues(df, schema_blueprint):
@@ -996,14 +1012,27 @@ def _detect_data_quality_issues(df, schema_blueprint):
     schema_blueprint = schema_blueprint or {}
     issue_rows = set()
     issues_by_rule = {}
+    rule_details = {}
+    reviewed_rows = set()
 
     def _record(mask, rule):
         if mask is None:
             return
         idx = df.index[mask.fillna(False)].tolist()
         if idx:
+            pct = round(len(idx) / max(len(df), 1) * 100, 2)
+            examples = df.loc[idx[:5]].copy().where(lambda values: values.notna(), None).to_dict(orient="records")
+            review_required = pct > STRUCTURAL_RULE_REVIEW_PCT
             issues_by_rule[rule] = issues_by_rule.get(rule, 0) + len(idx)
+            rule_details[rule] = {
+                "count": len(idx),
+                "pct": pct,
+                "review_required": review_required,
+                "example_rows": examples,
+            }
             issue_rows.update(idx)
+            if review_required:
+                reviewed_rows.update(idx)
 
     def _num(col):
         return pd.to_numeric(df[col], errors="coerce")
@@ -1032,11 +1061,11 @@ def _detect_data_quality_issues(df, schema_blueprint):
             if "amount" in tokens:
                 _record(d < 0, f"{col} < 0")
             else:
-                # A discount rate/percentage: valid range is [0, 1] or [0, 100]
-                # depending on how it's stored. discount > 100% is structural.
-                vals = d.dropna()
-                upper = 1.0 if (len(vals) and vals.le(1.0).all() and vals.ge(0).all()) else 100.0
-                _record((d < 0) | (d > upper), f"{col} out of [0, {upper:g}]")
+                meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
+                lower, upper = _percentage_bounds(d, meta)
+                if meta.get("semantic_tag") not in {"percentage", "discount"} and upper == 1.0:
+                    upper = 100.0
+                _record((d < lower) | (d > upper), f"{col} out of [{lower:g}, {upper:g}]")
 
     # returns exceeding the order quantity, or negative returns
     return_col = next(
@@ -1058,7 +1087,11 @@ def _detect_data_quality_issues(df, schema_blueprint):
     return {
         "data_quality_issue_rows": len(issue_rows),
         "data_quality_issue_row_pct": round(len(issue_rows) / n * 100, 2),
+        "confident_issue_rows": len(issue_rows - reviewed_rows),
+        "confident_issue_row_pct": round(len(issue_rows - reviewed_rows) / n * 100, 2),
+        "review_required": bool(rule_details and any(item["review_required"] for item in rule_details.values())),
         "issues_by_rule": issues_by_rule,
+        "rule_details": rule_details,
         "rules_checked": sorted(issues_by_rule.keys()),
     }
 
@@ -1693,7 +1726,7 @@ def _apply_anomaly_quality_penalty(data_quality, anomaly_summary, dq_issue_summa
     pre_anomaly_score = float(data_quality["overall_quality_score"])
     stat_pct = float(anomaly_summary.get("unique_flagged_row_pct", 0.0) or 0.0)
     dq_issue_summary = dq_issue_summary or {}
-    struct_pct = float(dq_issue_summary.get("data_quality_issue_row_pct", 0.0) or 0.0)
+    struct_pct = float(dq_issue_summary.get("confident_issue_row_pct", dq_issue_summary.get("data_quality_issue_row_pct", 0.0)) or 0.0)
 
     statistical_penalty = min(
         ANOMALY_QUALITY_PENALTY_CAP,

@@ -1329,6 +1329,15 @@ def _enrich_missingness_metadata(df: pd.DataFrame, raw_profile: dict, schema_blu
             else:
                 meta["intended_type"] = inferred_type
 
+        if meta.get("semantic_tag") == "percentage":
+            values = pd.to_numeric(df[col], errors="coerce").dropna()
+            scale = "ratio" if not values.empty and float(values.quantile(0.95)) <= 1.0 else "percent"
+            meta["unit_scale"] = scale
+            meta["validation_bounds"] = {"lower": 0.0, "upper": 1.0 if scale == "ratio" else 100.0}
+        elif meta.get("semantic_tag") == "count":
+            meta["unit_scale"] = "items"
+            meta["validation_bounds"] = {"lower": 0.0, "integer": True}
+
         # Deterministic - runs regardless of LLM success so the distinction
         # between company revenue and personal/customer income always exists.
         financial_role = _derive_financial_role(col, str(meta.get("semantic_tag", "unknown")), inferred_type)

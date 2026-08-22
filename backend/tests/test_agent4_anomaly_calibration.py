@@ -25,6 +25,27 @@ class TestIqrMultiplierConfig(unittest.TestCase):
 
 
 class TestStructuralIssueClassification(unittest.TestCase):
+    def test_dominant_structural_rule_is_reviewed_with_examples(self):
+        df = pd.DataFrame({
+            "discount_rate": [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 50.0],
+            "quantity_range_failed": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        })
+        schema = {
+            "discount_rate": {
+                "semantic_tag": "percentage",
+                "intended_type": "float",
+            },
+        }
+
+        result = agent_4._detect_data_quality_issues(df, schema)
+
+        self.assertTrue(result["review_required"])
+        self.assertNotIn("discount_rate out of [0, 100]", result["issues_by_rule"])
+        self.assertIn("quantity_range_failed", result["issues_by_rule"])
+        detail = result["rule_details"]["quantity_range_failed"]
+        self.assertTrue(detail["review_required"])
+        self.assertEqual(len(detail["example_rows"]), 5)
+
     def test_legitimate_long_tail_outlier_is_not_a_structural_issue(self):
         # One huge but legitimate revenue value: a statistical outlier, not a
         # structural defect.

@@ -52,6 +52,15 @@ MAX_VALIDATION_FAIL_PCT = 15.0   # business-rule failure tolerance
 MIN_TREND_SAMPLE_SIZE = 10       # trends below this many points aren't trustworthy even if p < 0.05
 
 
+def _validation_confidence(validation_score, review_required=False, insufficient_trends=None):
+    """Estimate confidence in validation decisions separately from their score."""
+    confidence = max(0.0, min(1.0, float(validation_score) / 100.0))
+    if review_required:
+        confidence *= 0.5
+    confidence -= min(0.25, 0.05 * len(insufficient_trends or []))
+    return round(max(0.0, confidence), 3)
+
+
 def _verbose_logging_enabled():
     val = os.getenv("PIPELINE_VERBOSE", "0").strip().lower()
     return val in {"1", "true", "yes", "on"}
@@ -342,7 +351,10 @@ def agent5_output_validator(state: GraphState) -> GraphState:
     _check_stats_numeric_sanity(state, ledger)
     _check_chart_artifact_integrity(state, ledger)
     _check_business_rule_validation(state, ledger)
-    _check_trend_sample_sufficiency(state, ledger)
+    insufficient_trends = _check_trend_sample_sufficiency(state, ledger)
+
+    dq_summary = (state.get("stats", {}) or {}).get("data_quality_issues", {}) or {}
+    review_required = bool(dq_summary.get("review_required"))
 
     semantic_agreement = _validate_semantic_tagging_agreement(state, ledger)
 
@@ -378,7 +390,14 @@ def agent5_output_validator(state: GraphState) -> GraphState:
         for issue in ledger.issues[:5]:
             print(f"[Agent 5]   - [{issue['severity']}] {issue['check']}: {issue['detail']}")
 
-    confidence = round(overall_validation_score / 100.0, 3)
+    validation_confidence = _validation_confidence(
+        overall_validation_score,
+        review_required=review_required,
+        insufficient_trends=insufficient_trends,
+    )
+    validation_report["confidence_in_score"] = validation_confidence
+    validation_report["rule_review_required"] = review_required
+    confidence = validation_confidence
     state_with_reliability = update_reliability(
         state,
         "agent5",

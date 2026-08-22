@@ -68,6 +68,9 @@
     <span class="badge bad">Validation: Failed</span>
   {% endif %}
 </p>
+{% if facts.validation.confidence_in_score is not none %}
+<p class="empty-note">Confidence in validation score: {{ facts.validation.confidence_in_score * 100 }}%{% if facts.validation.rule_review_required %}; one or more rules need human review{% endif %}.</p>
+{% endif %}
 {% if facts.data_quality.overall_quality_score_pre_anomaly is not none and (facts.data_quality.anomaly_quality_penalty or facts.data_quality.data_quality_issue_penalty) %}
 <p class="empty-note">
   Adjusted from a pre-analysis score of {{ facts.data_quality.overall_quality_score_pre_anomaly }}:
@@ -319,9 +322,13 @@
 </p>
 {% if facts.anomalies.issues_by_rule %}
 <table>
-  <tr><th>Rule</th><th>Rows Flagged</th></tr>
+  <tr><th>Rule</th><th>Rows Flagged</th><th>Review</th></tr>
   {% for rule, count in facts.anomalies.issues_by_rule.items() %}
-  <tr><td>{{ rule }}</td><td>{{ count }}</td></tr>
+  {% set detail = facts.anomalies.rule_details.get(rule, {}) %}
+  <tr><td>{{ rule }}</td><td>{{ count }}</td><td>{% if detail.review_required %}Human review required{% else %}Automatic check{% endif %}</td></tr>
+  {% if detail.review_required and detail.example_rows %}
+  <tr><td colspan="3"><strong>Example rows:</strong> {{ detail.example_rows | tojson }}</td></tr>
+  {% endif %}
   {% endfor %}
 </table>
 {% endif %}

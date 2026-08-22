@@ -251,6 +251,33 @@ def _check_business_rule_validation(state, ledger, max_fail_pct=MAX_VALIDATION_F
     )
 
 
+def _check_category_normalization_safety(state, ledger):
+    """Reject normalization that changes material or independently common values."""
+    merges_by_column = state.get("category_normalization", {}) or {}
+    raw_df = state.get("_df_cache")
+    unsafe = []
+    total_rows = max(len(raw_df), 1) if raw_df is not None else 1
+
+    for col, merges in merges_by_column.items():
+        raw_counts = raw_df[col].astype("string").value_counts() if raw_df is not None and col in raw_df else {}
+        canonical_counts = raw_counts
+        for merge in merges or []:
+            raw = merge.get("raw")
+            canonical = merge.get("canonical")
+            changed_pct = float(merge.get("row_count", 0)) / total_rows * 100
+            raw_pct = float(raw_counts.get(raw, merge.get("row_count", 0))) / total_rows * 100
+            canonical_pct = float(canonical_counts.get(canonical, 0)) / total_rows * 100
+            if changed_pct > 5.0 or (raw_pct > 1.0 and canonical_pct > 1.0):
+                unsafe.append(
+                    f"{col}: {raw!r}->{canonical!r} changes {changed_pct:.2f}% of rows or merges two frequent values"
+                )
+
+    ledger.record(
+        "category_normalization_safety", not unsafe,
+        "; ".join(unsafe[:5]) if unsafe else "all applied category merges are low-impact",
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TIER 2 — Cohen's kappa: LLM semantic tagging vs heuristic type sniffing
 # ─────────────────────────────────────────────────────────────────────────────
@@ -351,6 +378,7 @@ def agent5_output_validator(state: GraphState) -> GraphState:
     _check_stats_numeric_sanity(state, ledger)
     _check_chart_artifact_integrity(state, ledger)
     _check_business_rule_validation(state, ledger)
+    _check_category_normalization_safety(state, ledger)
     insufficient_trends = _check_trend_sample_sufficiency(state, ledger)
 
     dq_summary = (state.get("stats", {}) or {}).get("data_quality_issues", {}) or {}

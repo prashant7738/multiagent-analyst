@@ -28,7 +28,7 @@ class TestBuildCanonicalCategoryMap(unittest.TestCase):
         # "Completed" doesn't case-fold to "Complete" (they're genuinely different
         # strings) - this is exactly the docs/known_issues.md #2 example: case
         # folding alone leaves them as separate categories.
-        counts = pd.Series(["Complete", "Complete", "Completed", "Cancelled", "Cancelled", "Canceled"]).value_counts()
+        counts = pd.Series(["Complete"] * 100 + ["Completed"] + ["Cancelled"] * 100 + ["Canceled"]).value_counts()
         mapping, merges, flagged = _build_canonical_category_map(counts)
 
         self.assertEqual(mapping["Completed"], "Complete")
@@ -87,9 +87,37 @@ class TestBuildCanonicalCategoryMap(unittest.TestCase):
 
 
 class TestFuzzyCanonicalizeCategories(unittest.TestCase):
+    def test_keeps_independently_valid_countries_separate(self):
+        countries = ["Brunei", "Burundi", "Slovakia", "Slovenia", "Ireland", "Iceland", "Australia", "Austria"]
+        df = pd.DataFrame({"Country": countries * 10})
+        schema_blueprint = {"Country": {"semantic_tag": "geographic", "intended_type": "string"}}
+
+        result_df, _, normalization_applied = _fuzzy_canonicalize_categories(df, schema_blueprint)
+
+        self.assertEqual(result_df["Country"].tolist(), df["Country"].tolist())
+        self.assertEqual(normalization_applied, {})
+
+    def test_does_not_fuzzy_merge_binary_categories(self):
+        df = pd.DataFrame({"Sales Channel": ["Offline"] * 49 + ["Online"] * 51})
+        schema_blueprint = {"Sales Channel": {"semantic_tag": "categorical_label", "intended_type": "string"}}
+
+        result_df, _, normalization_applied = _fuzzy_canonicalize_categories(df, schema_blueprint)
+
+        self.assertEqual(result_df["Sales Channel"].value_counts().to_dict(), {"Online": 51, "Offline": 49})
+        self.assertEqual(normalization_applied, {})
+
+    def test_only_merges_a_rare_typo_into_a_dominant_category(self):
+        df = pd.DataFrame({"Status": ["Complete"] * 99 + ["Complet"] + ["Cancelled", "Shipped"]})
+        schema_blueprint = {"Status": {"semantic_tag": "categorical_label", "intended_type": "string"}}
+
+        result_df, _, normalization_applied = _fuzzy_canonicalize_categories(df, schema_blueprint)
+
+        self.assertEqual(result_df["Status"].value_counts().to_dict(), {"Complete": 100, "Cancelled": 1, "Shipped": 1})
+        self.assertEqual(normalization_applied["Status"][0]["raw"], "Complet")
+
     def test_merges_column_tagged_categorical_label(self):
         df = pd.DataFrame({
-            "Order_Status": ["Complete", "Complete", "Completed", "Cancelled", "Canceled", "Shipped"],
+            "Order_Status": ["Complete"] * 100 + ["Completed"] + ["Cancelled"] * 100 + ["Canceled"] + ["Shipped"],
         })
         schema_blueprint = {
             "Order_Status": {"semantic_tag": "categorical_label", "intended_type": "string"},
@@ -98,8 +126,8 @@ class TestFuzzyCanonicalizeCategories(unittest.TestCase):
         result_df, notes, normalization_applied = _fuzzy_canonicalize_categories(df, schema_blueprint)
 
         self.assertEqual(
-            result_df["Order_Status"].tolist(),
-            ["Complete", "Complete", "Complete", "Cancelled", "Cancelled", "Shipped"],
+            result_df["Order_Status"].value_counts().to_dict(),
+            {"Complete": 101, "Cancelled": 101, "Shipped": 1},
         )
         self.assertIn("Order_Status", normalization_applied)
         raws = {m["raw"] for m in normalization_applied["Order_Status"]}

@@ -396,6 +396,7 @@ def _extract_anomaly_facts(stats):
     summary["review_required"] = bool(dq_issues.get("review_required"))
     summary["issues_by_rule"] = dq_issues.get("issues_by_rule", {})
     summary["rule_details"] = dq_issues.get("rule_details", {})
+    summary["rules_checked"] = dq_issues.get("rules_checked", [])
     summary["prioritized_anomalies"] = summary.get("prioritized_anomalies", [])
     summary["business_impact_total"] = summary.get("business_impact_total", 0.0)
     summary["rule_manifest"] = summary.get("rule_manifest") or dq_issues.get("rule_manifest", {})

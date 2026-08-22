@@ -288,7 +288,7 @@
 
 {% if facts.category_normalization %}
 <h2>Normalization Applied</h2>
-<p class="empty-note">Near-duplicate category spellings merged during preprocessing (case/separator folding, then fuzzy match at edit distance &le; 2).</p>
+<p class="empty-note">Only low-impact category spelling variants were merged after case/separator folding; closed-set geographic and low-cardinality values were preserved.</p>
 <table>
   <tr><th>Column</th><th>Raw Value</th><th>Canonical Value</th><th>Row Count</th></tr>
   {% for row in facts.category_normalization %}
@@ -316,9 +316,8 @@
 {% if facts.anomalies.data_quality_issue_rows %}
 <p>
   {{ facts.anomalies.data_quality_issue_rows }} rows ({{ facts.anomalies.data_quality_issue_row_pct }}%)
-  violate structural/domain constraints (e.g. negative quantities, discount &gt; 100%, returns
-  exceeding the order). Unlike statistical outliers, these are genuine defects and drive the
-  Data Quality Score penalty.
+  violate the structural checks performed on this dataset{% if facts.anomalies.rules_checked %}: {{ facts.anomalies.rules_checked | join(', ') }}{% endif %}.
+  Unlike statistical outliers, these are genuine defects and drive the Data Quality Score penalty.
 </p>
 {% if facts.anomalies.issues_by_rule %}
 <table>

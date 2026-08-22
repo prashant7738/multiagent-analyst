@@ -257,6 +257,11 @@ def _normalize_category_label(value):
 # letter).
 FUZZY_MATCH_MAX_DISTANCE = 2
 FUZZY_MATCH_MIN_LENGTH = 6
+FUZZY_REVIEW_ROW_PCT = 5.0
+FUZZY_RARE_VALUE_PCT = 1.0
+LOW_CARDINALITY_MAX = 3
+
+GEOGRAPHIC_COLUMN_TOKENS = {"country", "countries", "nation", "state", "province"}
 
 
 def _levenshtein_distance(a, b):
@@ -303,15 +308,26 @@ def _build_canonical_category_map(value_counts):
             manual review rather than guessed at.
     """
     labels = list(value_counts.index)
+    total_count = int(value_counts.sum())
+    low_cardinality = len(labels) <= LOW_CARDINALITY_MAX
     canonical_for = {}
     clusters = []
 
     def _fuzzy_eligible(a, b):
+        if low_cardinality:
+            return False
         if min(len(a), len(b)) < FUZZY_MATCH_MIN_LENGTH:
             return False
         if a[0].lower() != b[0].lower():
             return False
-        return _levenshtein_distance(a, b) <= FUZZY_MATCH_MAX_DISTANCE
+        distance = _levenshtein_distance(a, b)
+        if distance > FUZZY_MATCH_MAX_DISTANCE:
+            return False
+        source_count = int(value_counts[b])
+        canonical_count = int(value_counts[a])
+        source_pct = source_count / max(total_count, 1) * 100
+        canonical_pct = canonical_count / max(total_count, 1) * 100
+        return source_pct <= FUZZY_RARE_VALUE_PCT and canonical_pct > source_pct and source_pct <= FUZZY_REVIEW_ROW_PCT
 
     for label in labels:
         if label in canonical_for:
@@ -387,6 +403,11 @@ def _fuzzy_canonicalize_categories(df, schema_blueprint):
         semantic_tag = meta.get("semantic_tag")
         should_canonicalize = semantic_tag in {"categorical_label", "geographic"} or encoding_strategy.get("method") in {"one_hot", "ordinal"}
         if not should_canonicalize:
+            continue
+
+        column_tokens = set(re.split(r"[^a-z0-9]+", col.casefold()))
+        if semantic_tag == "geographic" or column_tokens & GEOGRAPHIC_COLUMN_TOKENS:
+            notes.append(f"{col}: fuzzy category normalization disabled for closed geographic vocabulary; left as-is")
             continue
 
         series = df[col].dropna()

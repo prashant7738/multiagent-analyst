@@ -1039,6 +1039,7 @@ def _detect_data_quality_issues(df, schema_blueprint):
     issues_by_rule = {}
     rule_details = {}
     reviewed_rows = set()
+    rules_checked = set()
 
     def _record(mask, rule):
         if mask is None:
@@ -1075,6 +1076,7 @@ def _detect_data_quality_issues(df, schema_blueprint):
     #    column's own values.
     for col, meta in schema_blueprint.items():
         if col in df.columns and _is_count_field(col, meta):
+            rules_checked.add(f"{col} non-negative count")
             # negative quantity (skip if agent_3 already flagged this column)
             if f"{col}_range_failed" not in df.columns:
                 _record(_num(col) < 0, f"{col} < 0")
@@ -1085,9 +1087,11 @@ def _detect_data_quality_issues(df, schema_blueprint):
         if meta.get("semantic_tag") == "percentage" and col not in {
             key.split(" out of ")[0] for key in issues_by_rule
         }:
+            rules_checked.add(f"{col} percentage bounds")
             lower, upper = _percentage_bounds(_num(col), meta)
             _record((_num(col) < lower) | (_num(col) > upper), f"{col} out of [{lower:g}, {upper:g}]")
         if "discount" in tokens and meta.get("semantic_tag") != "percentage":
+            rules_checked.add(f"{col} discount bounds")
             d = _num(col)
             if "amount" in tokens:
                 _record(d < 0, f"{col} < 0")
@@ -1108,9 +1112,11 @@ def _detect_data_quality_issues(df, schema_blueprint):
         None,
     )
     if return_col is not None:
+        rules_checked.add(f"{return_col} non-negative")
         r = _num(return_col)
         _record(r < 0, f"{return_col} < 0")
         if order_col is not None and order_col != return_col:
+            rules_checked.add(f"{return_col} <= {order_col}")
             _record(r > _num(order_col), f"{return_col} > {order_col}")
 
     n = max(len(df), 1)
@@ -1122,7 +1128,7 @@ def _detect_data_quality_issues(df, schema_blueprint):
         "review_required": bool(rule_details and any(item["review_required"] for item in rule_details.values())),
         "issues_by_rule": issues_by_rule,
         "rule_details": rule_details,
-        "rules_checked": sorted(issues_by_rule.keys()),
+        "rules_checked": sorted(rules_checked | set(issues_by_rule)),
         "rule_manifest": rule_manifest(),
     }
 

@@ -27,10 +27,6 @@ from jinja2 import Environment, FileSystemLoader
 
 from agents.agent_1 import GraphState
 from agents.agent_2 import (
-    GEMINI_MODEL,
-    GROQ_MODEL,
-    GROQ_REASONING_EFFORT,
-    _get_groq_client,
     _call_gemini_json_with_failover,
     _parse_schema_blueprint_response,
 )
@@ -45,6 +41,7 @@ TOP_RANKING_LIMIT = 3
 TOP_REGRESSION_LIMIT = 5
 MIN_TREND_SAMPLE_SIZE = 10       # matches agents.agent_5; trends below this aren't cited as fact
 CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the known value)
+AGENT6_MAX_OUTPUT_TOKENS = 1200
 
 
 def _verbose_logging_enabled():
@@ -554,7 +551,7 @@ def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2 — LLM NARRATIVE GENERATION (Groq -> Gemini fallback)
+# 2 — LLM NARRATIVE GENERATION (Gemini)
 # ─────────────────────────────────────────────────────────────────────────────
 
 INSIGHT_SYSTEM_PROMPT = """You are a senior data analyst writing the narrative section of an \
@@ -625,39 +622,21 @@ def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT
 
 
 def _call_llm_for_narrative(insight_facts: dict) -> dict:
-    """Ask Groq for the narrative, falling back to Gemini on provider failure."""
+    """Ask Gemini for the narrative; callers provide the deterministic fallback."""
     prompt_facts = _truncate_lists_for_prompt(insight_facts)
     user_content = f"Write the report narrative for these facts:\n{json.dumps(prompt_facts, indent=2, default=str)}"
-
-    try:
-        response = _get_groq_client().chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": INSIGHT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.2,
-            max_tokens=2048,
-            reasoning_effort=GROQ_REASONING_EFFORT,
-        )
-        raw_text = response.choices[0].message.content.strip()
-        narrative = _parse_schema_blueprint_response(raw_text)
-        narrative["source"] = "groq"
-        return narrative
-    except Exception as groq_error:
-        print(f"[Agent 6] Groq unavailable; trying Gemini: {groq_error}")
 
     try:
         narrative = _call_gemini_json_with_failover(
             contents=user_content,
             system_instruction=INSIGHT_SYSTEM_PROMPT,
             temperature=0.2,
-            max_output_tokens=2048,
+            max_output_tokens=AGENT6_MAX_OUTPUT_TOKENS,
         )
         narrative["source"] = "gemini"
         return narrative
     except Exception as gemini_error:
-        raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
+        raise RuntimeError(f"Gemini call failed: {gemini_error}") from gemini_error
 
 
 def _plain_language_fallback(insight_facts: dict):

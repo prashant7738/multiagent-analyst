@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
+import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -48,7 +49,8 @@ def _get_pipeline():
     return build_pipeline()
 
 
-def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None) -> dict[str, Any]:
+def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None,
+                   run_id: str | None = None) -> dict[str, Any]:
     """Construct the GraphState seed exactly as pipeline.py does."""
     runtime_config = dict(runtime_config or {})
     return {
@@ -66,6 +68,8 @@ def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None) 
         "dataset_domain": "",
         "data_quality": {},
         "column_ledger": {},
+        "run_id": run_id or uuid.uuid4().hex[:12],
+        "chart_specs": [],
         "stats": {},
         "chart_paths": [],
         "validation_report": {},
@@ -164,7 +168,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[s
         pipeline = _get_pipeline()
         emitter.agent_running("agent1")
 
-        final_state: dict[str, Any] = _initial_state(csv_path, runtime_config)
+        final_state: dict[str, Any] = _initial_state(csv_path, runtime_config, run_id=job_id)
         for snapshot in pipeline.stream(final_state, stream_mode="values"):
             final_state = snapshot
             emitter.observe(snapshot)

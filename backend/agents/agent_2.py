@@ -15,6 +15,14 @@ import numpy as np
 
 from groq import Groq
 
+from agents.key_indicator import (
+    drain_capture,
+    llm_entry,
+    record as record_key_use,
+    start_capture,
+    usage_fragment,
+)
+
 client = None
 gemini_client = None
 _gemini_client_cache = {}
@@ -162,7 +170,9 @@ def _gemini_model_candidates() -> list[str]:
     return candidates
 
 
-def _call_gemini_with_failover(*, contents, system_instruction: str, temperature: float, max_output_tokens: int):
+def _call_gemini_with_failover(*, contents, system_instruction: str, temperature: float,
+                               max_output_tokens: int, agent_label: str = "Agent 2",
+                               purpose: str = ""):
     """Call Gemini, trying each configured key and model until one succeeds.
 
     This keeps multi-key deployments working without asking the caller to know
@@ -170,6 +180,9 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
     single-client path still works for tests and existing deployments. If the
     primary model has been retired (404), the next candidate model is tried
     for the same keys instead of failing outright.
+
+    Every successful attempt is recorded via agents.key_indicator so API-key
+    usage stays visible per agent (console + frontend result payload).
     """
     keys = _get_configured_gemini_api_keys()
     global _gemini_rotation_index
@@ -178,7 +191,7 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
     if keys and _has_explicit_multi_gemini_key_config():
         start = _gemini_rotation_index % len(keys)
         ordered_keys = keys[start:] + keys[:start]
-        print(f"[Agent 2] Gemini key diagnostics: {_describe_configured_gemini_keys()}")
+        print(f"[{agent_label}] Gemini key diagnostics: {_describe_configured_gemini_keys()}")
     elif keys:
         ordered_keys = [None] if gemini_client is not None else [keys[0]]
     elif gemini_client is not None:
@@ -194,7 +207,7 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
             try:
                 client_obj = gemini_client if api_key is None else _get_gemini_client_for_key(api_key)
                 if api_key is not None:
-                    print(f"[Agent 2] Trying Gemini key fingerprint={_mask_gemini_key(api_key)} model={model_name}")
+                    print(f"[{agent_label}] Trying Gemini key fingerprint={_mask_gemini_key(api_key)} model={model_name}")
                 response = client_obj.models.generate_content(
                     model=model_name,
                     contents=contents,
@@ -206,22 +219,34 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
                 )
                 if keys:
                     _gemini_rotation_index = (start + offset + 1) % len(keys)
+                effective_key = api_key if api_key is not None else (
+                    os.getenv("GEMINI_API_KEY") or os.getenv("Gemini_API_Key")
+                    or os.getenv("GOOGLE_API_KEY") or ""
+                )
+                record_key_use(
+                    agent_label, "Gemini", key=effective_key,
+                    purpose=purpose or "LLM call", model=model_name,
+                )
                 return response
             except Exception as exc:  # noqa: BLE001 - try the next key/model
                 last_error = exc
                 if _is_model_unavailable_error(exc):
-                    print(f"[Agent 2] Gemini model '{model_name}' unavailable, trying next model")
+                    print(f"[{agent_label}] Gemini model '{model_name}' unavailable, trying next model")
                     break
 
-    raise RuntimeError(f"Gemini calls failed across {total_attempts} attempt(s): {last_error}") from last_error
+    raise RuntimeError(f"Gemini calls failed across {total_attempts} attempt(s): {last_error}")
 
 
-def _call_gemini_json_with_failover(*, contents, system_instruction: str, temperature: float, max_output_tokens: int) -> dict:
+def _call_gemini_json_with_failover(*, contents, system_instruction: str, temperature: float,
+                                    max_output_tokens: int, agent_label: str = "Agent 2",
+                                    purpose: str = "") -> dict:
     response = _call_gemini_with_failover(
         contents=contents,
         system_instruction=system_instruction,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
+        agent_label=agent_label,
+        purpose=purpose,
     )
     raw_text = (response.text or "").strip()
     try:
@@ -849,6 +874,10 @@ def _call_llm_for_schema_blueprint(
             max_tokens=LLM_MAX_TOKENS,
             reasoning_effort=GROQ_REASONING_EFFORT,
         )
+        record_key_use(
+            "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
+            purpose="schema blueprint", model=GROQ_MODEL,
+        )
         raw_text = response.choices[0].message.content.strip()
         return _parse_schema_blueprint_response(raw_text)
     except Exception as groq_error:
@@ -860,6 +889,8 @@ def _call_llm_for_schema_blueprint(
             system_instruction=SEMANTIC_SYSTEM_PROMPT,
             temperature=0.1,
             max_output_tokens=LLM_MAX_TOKENS,
+            agent_label="Agent 2",
+            purpose="schema blueprint (Gemini fallback)",
         )
     except json.JSONDecodeError:
         # preserve the original type so the caller's halving-retry (which only catches
@@ -1500,6 +1531,7 @@ def agent2_semantic_tagger(state: dict) -> dict:
     print(f"[Agent 2] Type sniffing summary: {type_counts}")
 
     # Step 2: request semantic tags in batches when the schema is large.
+    start_capture()  # track every API key used from here until the node returns
 
     try:
         columns = list(df.columns)
@@ -1561,8 +1593,16 @@ def agent2_semantic_tagger(state: dict) -> dict:
             excluded_summary = ", ".join(f"{col} ({rate:.2f}%)" for col, rate in excluded)
             print(f"[Agent 2] Excluded from analysis (> {MISSINGNESS_ANALYSIS_THRESHOLD_PCT:.0f}% missing): {excluded_summary}")
 
+    usage_records = drain_capture("Agent 2")
+    if usage_records:
+        usage_note = None
+    elif "Reusing cached LLM schema blueprint" in "" :
+        usage_note = None  # unreachable; kept for clarity
+    else:
+        usage_note = "no API call needed (cached blueprint or heuristic fallback)"
     return {
         **state,
         "schema_blueprint": schema_blueprint,
+        "api_key_usage": usage_fragment(state, "agent2", llm_entry(usage_records, usage_note)),
         "errors": errors,
     }

@@ -110,6 +110,26 @@ class _QuotaThenSuccessGeminiClient:
 
 
 class TestAgent2Chunking(unittest.TestCase):
+    def setUp(self):
+        """Isolate every test from developer-machine state:
+          * real GEMINI_* variables loaded from backend/.env must not leak
+            into key-count diagnostics (patch them all to empty), and
+          * the persistent on-disk schema cache must never satisfy a test
+            that asserts actual LLM-call behaviour."""
+        env_names = ["GEMINI_API_KEYS", "GEMINI_API_KEY", "Gemini_API_Key",
+                     "GOOGLE_API_KEY"] + [f"GEMINI_API_KEY_{i}" for i in range(1, 6)]
+        env_patch = patch.dict(agent_2.os.environ,
+                               {name: "" for name in env_names}, clear=False)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        load_patch = patch.object(agent_2, "_load_schema_cache", return_value=None)
+        load_patch.start()
+        self.addCleanup(load_patch.stop)
+        save_patch = patch.object(agent_2, "_save_schema_cache",
+                                  lambda *args, **kwargs: None)
+        save_patch.start()
+        self.addCleanup(save_patch.stop)
+
     def test_gemini_key_diagnostics_detects_distinct_and_duplicate_keys(self):
         with patch.dict(agent_2.os.environ, {"GEMINI_API_KEYS": "alpha,beta"}, clear=False):
             distinct = agent_2._describe_configured_gemini_keys()

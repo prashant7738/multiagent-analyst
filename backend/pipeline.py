@@ -142,6 +142,7 @@ def build_pipeline() -> StateGraph:
 if __name__ == "__main__":
     import json
     import os
+    import uuid
 
     pipeline = build_pipeline()
 
@@ -164,6 +165,8 @@ if __name__ == "__main__":
         "dataset_domain":        "",
         "data_quality":          {},
         "column_ledger":         {},
+        "run_id":                os.getenv("PIPELINE_RUN_ID", uuid.uuid4().hex[:12]),
+        "chart_specs":           [],
         "stats":                 {},
         "chart_paths":           [],
         "validation_report":     {},

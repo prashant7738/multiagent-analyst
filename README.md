@@ -130,6 +130,19 @@ backend/
 
 ---
 
+## 📊 Insight Report v2 (Interactive, Data-Driven)
+
+The final report is no longer a static chart dump — it is a tiered, plain-language document whose visuals are chosen by statistical signal rather than hardcoded rules:
+
+- **Signal-driven chart planner** (`agents/chart_planner.py`): scores every candidate visualization on effect size (ANOVA η², Pareto concentration, skew/outlier interest, regression r², Cramér's V) so it works on **any dataset shape** — sales, HR, SaaS, support tickets — not just keyword-matched sales columns.
+- **Unified ChartSpec contract** (`agents/chart_spec.py`): every chart carries its own title, plain-language explanation, alt text, annotations and pre-aggregated data.
+- **Dual-path rendering**: interactive Apache ECharts charts on screen + deterministic matplotlib twins (`agents/chart_render_static.py`) for print/PDF/`<noscript>`, both built from the same spec.
+- **Tiered plain-language layout**: KPI hero strip → "In Plain English" box → three-part story (What happened / Why it matters / What to do next) → narratively grouped chart sections → technical appendix collapsed in `<details>` blocks with an inline glossary.
+- **Hybrid narrative**: deterministic grounded bullets always render; the LLM adds polish on top only where it passes story-validation, chart-id and jargon checks (`_compose_hybrid_narrative` + linter).
+- **Run isolation**: each run writes to `outputs/charts/<run_id>/` and `outputs/reports/<run_id>/`, so concurrent jobs never clobber each other's artifacts.
+
+---
+
 ## 🎯 Key Design Patterns
 
 1. **Stateless Agent Functions**: Pure functions that transform state without side effects
@@ -201,12 +214,13 @@ python pipeline.py
 | Agent 2 - Semantic Tagger | ✅ Complete | 100% |
 | Agent 3 - Preprocessor | ✅ Complete | 100% |
 | Agent 4 - Statistical Analysis | ✅ Complete | 100% |
+| Agent 5 - Output Validator | ✅ Complete | 100% |
+| Agent 6 - Insight Report (v2) | ✅ Complete | 100% |
 | Pipeline Orchestration | ✅ Complete | 100% |
 | Error Handling | ✅ Complete | 100% |
-| Agents 5-6 | 📋 Planned | 0% |
-| Frontend/UI | 📋 Planned | 0% |
+| Frontend/UI (React + FastAPI SSE) | ✅ Complete | 100% |
 | Multi-format Support (CSV/Excel/JSON/Parquet) | ✅ Complete | 100% |
-| Testing Suite | 🚧 In Progress | 70% |
+| Testing Suite | ✅ Complete | 205 tests green |
 
 ---
 

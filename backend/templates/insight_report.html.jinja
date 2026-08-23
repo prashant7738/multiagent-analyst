@@ -1,163 +1,486 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Insight Report — {{ dataset_name }}</title>
+<script>(function(){try{var t=localStorage.getItem('ir-theme');if(t!=='dark'&&t!=='light'){t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <style>
-  @page { size: A4; margin: 2cm 1.6cm; }
+  /* ── design tokens ──────────────────────────────────────────────────── */
+  :root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --border: #e5e7eb;
+    --text: #1f2933;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --good: #16a34a; --warn: #d97706; --bad: #dc2626;
+    --shadow: 0 1px 3px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.04);
+    --radius: 12px;
+  }
+  [data-theme="dark"] {
+    --bg: #0b1220;
+    --surface: #111827;
+    --surface-2: #0f172a;
+    --border: #26303e;
+    --text: #e5e7eb;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --accent-soft: #172554;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.35);
+  }
+
+  /* ── base ───────────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    font-family: "Helvetica Neue", Arial, sans-serif;
-    color: #1f2933;
-    font-size: 11pt;
-    line-height: 1.45;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--text); background: var(--bg);
+    font-size: 11pt; line-height: 1.55; margin: 0;
   }
-  h1 { font-size: 22pt; margin-bottom: 0.1em; color: #1e3a8a; }
-  h2 {
-    font-size: 14pt; margin-top: 1.6em; margin-bottom: 0.5em;
-    color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.2em;
+  h1 { font-size: 25pt; margin: 0 0 .1em; color: var(--text); letter-spacing: -.02em; }
+  h2 { font-size: 15pt; margin: 1.8em 0 .5em; color: var(--text);
+       border-bottom: 2px solid var(--border); padding-bottom: .3em; }
+  h3 { font-size: 12pt; margin: 0 0 .35em; color: var(--text); }
+  p { margin: .35em 0; }
+  table { width: 100%; border-collapse: collapse; margin: .6em 0 1em; font-size: 9.5pt; }
+  th, td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+  th { background: var(--surface-2); color: var(--text); }
+  tr:hover td { background: var(--surface-2); }
+  ul { margin: .3em 0 1em; padding-left: 1.4em; }
+  li { margin-bottom: .4em; }
+  a { color: var(--accent); }
+  abbr.glossary { text-decoration: underline dotted var(--accent); cursor: help; }
+  .empty-note { color: var(--muted); font-style: italic; }
+  .subtitle { color: var(--muted); font-size: 10pt; margin-top: 0; }
+
+  /* ── progress bar ───────────────────────────────────────────────────── */
+  .progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 90; background: transparent; }
+  .progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #7c3aed); transition: width .15s ease-out; }
+
+  /* ── topbar ─────────────────────────────────────────────────────────── */
+  .topbar {
+    position: sticky; top: 0; z-index: 80;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border-bottom: 1px solid var(--border);
   }
-  h3 { font-size: 11.5pt; margin-bottom: 0.3em; color: #374151; }
-  .subtitle { color: #6b7280; font-size: 10pt; margin-top: 0; }
+  .topbar-inner { max-width: 1240px; margin: 0 auto; display: flex; align-items: center; gap: 18px; padding: 10px 20px; }
+  .brand { font-weight: 800; font-size: 13pt; color: var(--text); text-decoration: none; letter-spacing: -.01em; white-space: nowrap; }
+  .brand span { color: var(--accent); }
+  .topnav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; }
+  .topnav::-webkit-scrollbar { display: none; }
+  .topnav a {
+    font-size: 9pt; color: var(--muted); text-decoration: none;
+    padding: 6px 11px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .topnav a:hover { color: var(--text); background: var(--surface); }
+  .topnav a.active { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .topbar-actions { display: flex; gap: 8px; }
+  .icon-btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center; transition: transform .15s ease;
+  }
+  .icon-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+
+  /* ── shell layout ───────────────────────────────────────────────────── */
+  .layout { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 230px minmax(0,1fr); gap: 28px; padding: 22px 20px 60px; }
+  .sidenav { position: sticky; top: 64px; align-self: start; max-height: calc(100vh - 84px); overflow-y: auto; padding: 6px 2px; }
+  .sidenav-title { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 6px 0 10px; padding-left: 10px; }
+  .sidenav a {
+    display: flex; align-items: center; gap: 9px; position: relative;
+    color: var(--muted); text-decoration: none; font-size: 9.5pt;
+    padding: 6px 10px; border-radius: 8px; margin-bottom: 2px;
+  }
+  .sidenav a::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: 0 0 auto; transition: background .2s; }
+  .sidenav a:hover { color: var(--text); background: var(--surface); }
+  .sidenav a.active { color: var(--text); background: var(--surface); box-shadow: var(--shadow); }
+  .sidenav a.active::before { background: var(--accent); }
+  .page { min-width: 0; }
+
+  /* ── hero / badges / kpis ───────────────────────────────────────────── */
+  .hero-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+  .chip {
+    font-size: 8.5pt; background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--muted); border-radius: 999px; padding: 3px 11px;
+  }
+  .badge-row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
   .badge {
-    display: inline-block; padding: 3px 10px; border-radius: 12px;
-    font-size: 9.5pt; font-weight: bold; color: white; margin-right: 6px;
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: 9.5pt; font-weight: 700; color: white;
   }
-  .badge.good { background: #16a34a; }
-  .badge.warn { background: #d97706; }
-  .badge.bad  { background: #dc2626; }
-  table { width: 100%; border-collapse: collapse; margin: 0.6em 0 1.2em; font-size: 9.5pt; }
-  th, td { border: 1px solid #e5e7eb; padding: 5px 8px; text-align: left; }
-  th { background: #f3f4f6; }
-  ul { margin: 0.3em 0 1em; padding-left: 1.4em; }
-  li { margin-bottom: 0.35em; }
-  .chart-gallery { display: block; }
-  .chart-item { margin-bottom: 1.2em; page-break-inside: avoid; }
-  .chart-item img { width: 100%; max-width: 620px; display: block; margin: 0 auto; }
-  .chart-caption { text-align: center; font-size: 9pt; color: #6b7280; margin-top: 0.2em; }
-  .footer { margin-top: 2em; padding-top: 0.8em; border-top: 1px solid #e5e7eb; font-size: 9pt; color: #6b7280; }
-  .empty-note { color: #9ca3af; font-style: italic; }
+  .badge.good { background: var(--good); } .badge.warn { background: var(--warn); } .badge.bad { background: var(--bad); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+  .kpi-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow); position: relative; overflow: hidden;
+  }
+  .kpi-card::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .55; }
+  .kpi-label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .kpi-value { font-size: 17pt; font-weight: 800; line-height: 1.25; margin-top: 2px; }
+
+  /* ── cards & boxes ──────────────────────────────────────────────────── */
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 20px; }
   .plain-language-box {
-    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
-    padding: 1em 1.2em; margin: 1em 0 1.4em; page-break-inside: avoid;
+    background: linear-gradient(180deg, var(--accent-soft), var(--surface));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+    border-radius: var(--radius); padding: 1em 1.3em; margin: 1.4em 0; page-break-inside: avoid;
   }
-  .plain-language-box h2 { margin-top: 0; border-bottom: none; padding-bottom: 0; }
-  .bottom-line {
-    font-size: 12pt; font-weight: bold; color: #1e3a8a; margin: 0 0 0.8em;
-    padding-bottom: 0.6em; border-bottom: 1px dashed #bfdbfe;
+  .plain-language-box h2 { margin-top: .2em; border-bottom: none; padding-bottom: 0; }
+  .bottom-line { font-size: 12.5pt; font-weight: 700; color: var(--accent); margin: 0 0 .8em; padding-bottom: .6em; border-bottom: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); }
+
+  .story-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: .8em 0 1.2em; }
+  .story-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; box-shadow: var(--shadow); page-break-inside: avoid; }
+  .story-card h3 { color: var(--accent); font-size: 9.5pt; text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 7px; }
+  .story-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 9pt; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ── chart sections ─────────────────────────────────────────────────── */
+  .section-head { display: flex; align-items: baseline; gap: 12px; }
+  .section-head h2 { margin-bottom: .2em; }
+  .section-blurb { color: var(--muted); font-size: 10pt; margin-top: -0.2em; }
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 15px 19px; margin: 0 0 18px; box-shadow: var(--shadow); page-break-inside: avoid;
   }
-  .plain-language-box ul { margin: 0.3em 0 0.2em; }
+  .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .chart-sub { color: var(--muted); font-size: 9.5pt; margin: .05em 0 .45em; }
+  .chart-desc { font-size: 10pt; margin: .3em 0; }
+  .llm-caption {
+    font-size: 10pt; color: var(--accent); background: var(--accent-soft);
+    border-left: 3px solid var(--accent); padding: 6px 11px; border-radius: 0 8px 8px 0; margin: .5em 0;
+  }
+  .chips { margin: .4em 0 .6em; display: flex; flex-wrap: wrap; gap: 6px; }
+  .echart { width: 100%; height: 350px; }
+  .chart-static { display: none; width: 100%; max-width: 700px; height: auto; margin: 4px auto; border-radius: 8px; }
+
+  /* ── appendix ───────────────────────────────────────────────────────── */
+  details.tech {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: .1em 1.2em .7em; margin: 0 0 10px; page-break-inside: avoid;
+  }
+  details.tech > summary {
+    cursor: pointer; font-weight: 700; color: var(--text); padding: .6em 0;
+    font-size: 11.5pt; list-style-position: outside;
+  }
+  details[open].tech > summary { border-bottom: 1px solid var(--surface-2); margin-bottom: .3em; }
+  details.tech h2 { border-bottom: none; margin-top: 1.1em; padding-bottom: 0; }
+  details.tech h3 { margin-top: 1em; }
+  .search-box {
+    width: min(320px, 100%); margin: 2px 0 8px; padding: 7px 12px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
+    color: var(--text); font-size: 9.5pt; outline: none;
+  }
+  .search-box:focus { border-color: var(--accent); }
+  .no-match-note { display: none; color: var(--muted); font-size: 9pt; font-style: italic; }
+
+  /* ── glossary / footer / modal / misc ───────────────────────────────── */
+  .glossary-grid { columns: 2; gap: 26px; }
+  .glossary-grid > div { break-inside: avoid; margin-bottom: 10px; }
+  @media (max-width: 760px) { .glossary-grid { columns: 1; } }
+  .footer { margin-top: 2.4em; padding-top: .9em; border-top: 1px solid var(--border); font-size: 9pt; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+  .to-top {
+    position: fixed; right: 22px; bottom: 22px; z-index: 70;
+    width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); cursor: pointer; font-size: 16px;
+    box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+    transform: translateY(8px);
+  }
+  .to-top.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+  .chart-modal { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; }
+  .chart-modal[hidden] { display: none; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(4, 10, 22, .62); }
+  .modal-panel {
+    position: relative; width: min(1100px, 94vw); height: min(86vh, 760px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.35); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { margin: 0; font-size: 12pt; }
+  .modal-body { flex: 1; min-height: 0; padding: 10px; display: flex; }
+  .modal-body .echart { height: 100%; }
+  .modal-body img { max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; }
+
+  /* reveal-on-scroll */
+  [data-reveal] { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+  [data-reveal].revealed { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    [data-reveal] { opacity: 1; transform: none; transition: none; }
+    .to-top { transition: none; }
+  }
+
+  /* responsive sidebar collapse */
+  @media (max-width: 1020px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidenav { display: none; }
+  }
+
+  /* ── print / PDF ────────────────────────────────────────────────────── */
+  @page { size: A4; margin: 1.6cm 1.4cm; }
+  @media print {
+    :root { --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f4f6; --border:#d1d5db;
+            --text:#111827; --muted:#4b5563; --accent:#1e3a8a; --accent-soft:#eff6ff; --shadow:none; }
+    html { scroll-behavior: auto; }
+    .progress, .topbar-actions, .to-top, .search-box, .expand-btn, .chart-modal { display: none !important; }
+    .topbar { position: static; backdrop-filter: none; background: none; border-bottom: 1px solid var(--border); }
+    .topnav { display: none; }
+    .layout { display: block; max-width: none; padding: 0; }
+    .echart { display: none !important; }
+    .chart-static { display: block !important; margin: 4px auto; }
+    .kpi-card, .panel, .chart-card, details.tech { box-shadow: none; }
+    .section-blurb, .footer { color: var(--muted); }
+  }
 </style>
 </head>
 <body>
+<noscript>
+<style>
+  .echart { display: none !important; }
+  .chart-static { display: block !important; }
+  .needs-js { display: none !important; }
+</style>
+</noscript>
 
-<h1>Data Insight Report</h1>
-<p class="subtitle">{{ dataset_name }} &middot; generated {{ generated_at }}</p>
+<div class="progress needs-js" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
 
-{% set quality = facts.data_quality.overall_quality_score %}
-<p>
-  {% if quality is not none and quality >= 80 %}
-    <span class="badge good">Data Quality: {{ quality }}</span>
-  {% elif quality is not none and quality >= 50 %}
-    <span class="badge warn">Data Quality: {{ quality }}</span>
-  {% elif quality is not none %}
-    <span class="badge bad">Data Quality: {{ quality }}</span>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#overview">Insight<span>Report</span></a>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#overview" data-target="overview">Overview</a>
+      <a href="#plain-english" data-target="plain-english">Plain English</a>
+      {% if story and story.get('what_happened') %}<a href="#the-story" data-target="the-story">The Story</a>{% endif %}
+      <a href="#findings" data-target="findings">Findings</a>
+      {% for key, sec in chart_sections %}
+      <a href="#sec-{{ key }}" data-target="sec-{{ key }}">{{ sec.heading }}</a>
+      {% endfor %}
+      <a href="#recommendations" data-target="recommendations">Recommendations</a>
+      <a href="#appendix" data-target="appendix">Appendix</a>
+      <a href="#glossary" data-target="glossary">Glossary</a>
+    </nav>
+    <div class="topbar-actions">
+      <button id="themeToggle" class="icon-btn needs-js" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+      <button class="icon-btn" type="button" onclick="window.print()" title="Print / Save as PDF" aria-label="Print report">⎙</button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+
+<aside class="sidenav needs-js" aria-label="On this page">
+  <div class="sidenav-title">Contents</div>
+  <a href="#overview" data-target="overview">Overview</a>
+  <a href="#plain-english" data-target="plain-english">In Plain English</a>
+  {% if story and story.get('what_happened') %}<a href="#the-story" data-target="the-story">The Story</a>{% endif %}
+  <a href="#findings" data-target="findings">Key Findings</a>
+  {% for key, sec in chart_sections %}
+  <a href="#sec-{{ key }}" data-target="sec-{{ key }}">{{ sec.heading }}</a>
+  {% endfor %}
+  <a href="#recommendations" data-target="recommendations">Recommendations</a>
+  <a href="#appendix" data-target="appendix">Technical Appendix</a>
+  <a href="#glossary" data-target="glossary">Glossary</a>
+</aside>
+
+<main class="page">
+
+<section id="overview">
+  <h1>Data Insight Report</h1>
+  <p class="subtitle">{{ dataset_name }} &middot; generated {{ generated_at }}</p>
+
+  {% set quality = facts.data_quality.overall_quality_score %}
+  <div class="badge-row">
+    {% if quality is not none and quality >= 80 %}
+      <span class="badge good">Data Quality: {{ quality }}/100</span>
+    {% elif quality is not none and quality >= 50 %}
+      <span class="badge warn">Data Quality: {{ quality }}/100</span>
+    {% elif quality is not none %}
+      <span class="badge bad">Data Quality: {{ quality }}/100</span>
+    {% endif %}
+    {% if facts.validation.passed %}
+      <span class="badge good">Validation Passed · {{ facts.validation.overall_validation_score }}/100</span>
+    {% else %}
+      <span class="badge bad">Validation Failed</span>
+    {% endif %}
+  </div>
+
+  {% if kpis %}
+  <div class="kpis" data-reveal>
+    {% for card in kpis %}
+    <div class="kpi-card">
+      <div class="kpi-label">{{ card.label }}</div>
+      <div class="kpi-value">{{ card.value }}</div>
+    </div>
+    {% endfor %}
+  </div>
   {% endif %}
-  {% if facts.validation.passed %}
-    <span class="badge good">Validation: Passed ({{ facts.validation.overall_validation_score }}/100)</span>
-  {% else %}
-    <span class="badge bad">Validation: Failed</span>
+
+  {% if facts.data_quality.overall_quality_score_pre_anomaly is not none and (facts.data_quality.anomaly_quality_penalty or facts.data_quality.data_quality_issue_penalty) %}
+  <p class="empty-note">
+    Data health adjusted from a pre-analysis score of {{ facts.data_quality.overall_quality_score_pre_anomaly }}:
+    &minus;{{ facts.data_quality.data_quality_issue_penalty or 0 }} points for structural data issues
+    ({{ facts.data_quality.data_quality_issue_row_pct or 0 }}% of rows) and
+    &minus;{{ facts.data_quality.anomaly_quality_penalty or 0 }} points for unusual records
+    ({{ facts.data_quality.statistical_outlier_row_pct or 0 }}% of rows).
+  </p>
   {% endif %}
-</p>
-{% if facts.validation.confidence_in_score is not none %}
-<p class="empty-note">Confidence in validation score: {{ facts.validation.confidence_in_score * 100 }}%{% if facts.validation.rule_review_required %}; one or more rules need human review{% endif %}.</p>
-{% endif %}
-{% if facts.data_quality.overall_quality_score_pre_anomaly is not none and (facts.data_quality.anomaly_quality_penalty or facts.data_quality.data_quality_issue_penalty) %}
-<p class="empty-note">
-  Adjusted from a pre-analysis score of {{ facts.data_quality.overall_quality_score_pre_anomaly }}:
-  &minus;{{ facts.data_quality.data_quality_issue_penalty or 0 }} points for structural data-quality issues
-  ({{ facts.data_quality.data_quality_issue_row_pct or 0 }}% of rows) and
-  &minus;{{ facts.data_quality.anomaly_quality_penalty or 0 }} points for statistical outliers
-  ({{ facts.data_quality.statistical_outlier_row_pct or 0 }}% of rows). Statistical outliers may be
-  legitimate long-tail values, so they are penalized only lightly; the score is driven mainly by
-  structural issues.
-</p>
-{% endif %}
+</section>
 
 {% if narrative.plain_language_insights or narrative.bottom_line %}
-<div class="plain-language-box">
+<div class="plain-language-box" id="plain-english" data-reveal>
   <h2>In Plain English</h2>
-  <p class="subtitle" style="margin-bottom: 0.6em;">No statistics background needed - here's what this data actually means for you.</p>
+  <p class="subtitle" style="margin-bottom:.6em;">No statistics background needed — here's what this data actually means for you.</p>
   {% if narrative.bottom_line %}
-  <p class="bottom-line">{{ narrative.bottom_line }}</p>
+  <p class="bottom-line">{{ narrative.bottom_line | abbr_glossary(glossary) }}</p>
   {% endif %}
   {% if narrative.plain_language_insights %}
   <ul>
     {% for insight in narrative.plain_language_insights %}
-    <li>{{ insight }}</li>
+    <li>{{ insight | abbr_glossary(glossary) }}</li>
     {% endfor %}
   </ul>
   {% endif %}
 </div>
 {% endif %}
 
-<h2>Executive Summary</h2>
-<p>{{ narrative.executive_summary }}</p>
-
-{% set shape = facts.shape_explanation %}
-{% if shape and shape.raw_cols is not none %}
-<h2>Dataset Overview</h2>
-<p>
-  Source file: {{ shape.raw_rows }} rows &times; {{ shape.raw_cols }} columns.
-  After preprocessing: {{ shape.cleaned_rows }} rows &times; {{ shape.cleaned_cols }} columns.
-</p>
-{% if shape.column_delta or shape.row_delta %}
-<p class="empty-note">
-  The pipeline transforms the dataset's shape - this is expected, not an error. Here is exactly why the
-  numbers above differ from the raw file, generated from the pipeline's own transformation log:
-</p>
-<ul>
-  {% for note in shape.column_explanations %}
-  <li>{{ note }}</li>
-  {% endfor %}
-  {% for note in shape.row_explanations %}
-  <li>{{ note }}</li>
-  {% endfor %}
-</ul>
-{% endif %}
+{% if story and story.get('what_happened') %}
+<section id="the-story" data-reveal>
+  <h2>The Story</h2>
+  <div class="story-grid">
+    <div class="story-card">
+      <h3><span class="story-num">1</span> What happened</h3>
+      <p>{{ story.get('what_happened', '') | abbr_glossary(glossary) }}</p>
+    </div>
+    <div class="story-card">
+      <h3><span class="story-num">2</span> Why it matters</h3>
+      <p>{{ story.get('why_it_matters', '') | abbr_glossary(glossary) }}</p>
+    </div>
+    <div class="story-card">
+      <h3><span class="story-num">3</span> What to do next</h3>
+      <p>{{ story.get('what_to_do_next', '') | abbr_glossary(glossary) }}</p>
+    </div>
+  </div>
+</section>
 {% endif %}
 
-<h2>Key Findings</h2>
-{% if narrative.key_findings %}
-<ul>
-  {% for finding in narrative.key_findings %}
-  <li>{{ finding }}</li>
+<section id="findings" data-reveal>
+  <h2>Executive Summary</h2>
+  <p>{{ narrative.executive_summary }}</p>
+  <h3 style="margin-top:1em;">Key Findings</h3>
+  {% if narrative.key_findings %}
+  <ul>
+    {% for finding in narrative.key_findings %}
+    <li>{{ finding | abbr_glossary(glossary) }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty-note">No key findings available.</p>
+  {% endif %}
+</section>
+
+{% for key, sec in chart_sections %}
+<section id="sec-{{ key }}" data-reveal>
+  <div class="section-head"><h2>{{ sec.heading }}</h2></div>
+  {% if sec.blurb %}<p class="section-blurb">{{ sec.blurb }}</p>{% endif %}
+  {% for c in sec.charts %}
+  <div class="chart-card" id="chart-{{ c.id }}" data-reveal>
+    <div class="chart-head">
+      <div>
+        <h3>{{ c.title }}</h3>
+        {% if c.subtitle %}<p class="chart-sub">{{ c.subtitle }}</p>{% endif %}
+      </div>
+      {% if c.img_b64 %}
+      <button class="icon-btn expand-btn needs-js" type="button" data-expand="{{ c.id }}" data-title="{{ c.title }}" title="View full size" aria-label="View chart full size">⤢</button>
+      {% endif %}
+    </div>
+    {% set desc = c.plain_summary or c.why_it_matters %}
+    {% if desc %}<p class="chart-desc">{{ desc | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.llm_caption %}<p class="llm-caption">{{ c.llm_caption | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.annotations %}
+    <div class="chips">
+      {% for a in c.annotations %}{% if a.label %}
+      <span class="chip">{{ a.label }}{% if a.value is defined and a.value is not none and a.value != '' %}:&nbsp;<strong>{% if a.value is number %}{{ a.value | humnum }}{% else %}{{ a.value }}{% endif %}</strong>{% endif %}</span>
+      {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if c.render == 'echarts' and c.option_json and has_interactive and c.img_b64 %}
+    <div class="echart" id="ec-{{ c.id }}" data-option="{{ c.option_json }}"></div>
+    <img class="chart-static" src="{{ c.img_b64 }}" alt="{{ c.alt_text }}">
+    {% elif c.img_b64 %}
+    <img src="{{ c.img_b64 }}" alt="{{ c.alt_text }}" style="{% if has_interactive %}width:100%; max-width:700px; display:block; margin:4px auto; border-radius:8px;{% endif %}">
+    {% endif %}
+  </div>
   {% endfor %}
-</ul>
-{% else %}
-<p class="empty-note">No key findings available.</p>
+</section>
+{% endfor %}
+
+{% if narrative.risks_and_caveats or narrative.recommendations %}
+<div class="two-col">
+  {% if narrative.risks_and_caveats %}
+  <div class="panel" data-reveal>
+    <h3>Risks &amp; Caveats</h3>
+    <ul>
+      {% for risk in narrative.risks_and_caveats %}
+      <li>{{ risk }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if narrative.recommendations %}
+  <div class="panel" id="recommendations" data-reveal>
+    <h3>Recommendations</h3>
+    <ul>
+      {% for rec in narrative.recommendations %}
+      <li>{{ rec | abbr_glossary(glossary) }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
 {% endif %}
+
+<div id="appendix" data-reveal>
+<h2>Technical Appendix</h2>
+<p class="empty-note">Detailed workings behind the summary above — open a section when you need the underlying tables.</p>
+
+{% macro filter_box() %}
+<input class="search-box needs-js" type="search" placeholder="Filter rows…" aria-label="Filter table rows">
+<span class="no-match-note">No matching rows.</span>
+{% endmacro %}
 
 {% if facts.data_quality.derived_metric_reconciliation %}
-<h2>⚠ Derived Metric Divergence</h2>
-<p class="empty-note">
-  The source data already contains a column matching one of the pipeline's derived business metrics, but
-  the two disagree beyond tolerance (r &lt; 0.99 or mean absolute % difference &gt; 1%). This means the
-  derivation formula or its source-column resolution is likely wrong for this dataset - treat the
-  affected derived metric as unreliable until reviewed.
-</p>
-<table>
-  <tr><th>Derived Column</th><th>Matched Source Column</th><th>Correlation (r)</th><th>MAPE %</th><th>Rows Compared</th></tr>
-  {% for item in facts.data_quality.derived_metric_reconciliation %}
-  <tr>
-    <td>{{ item.derived_column }}</td><td>{{ item.matched_source_column }}</td>
-    <td>{{ item.correlation }}</td><td>{{ item.mape_pct }}</td><td>{{ item.n }}</td>
-  </tr>
-  {% endfor %}
-</table>
+<details class="tech">
+  <summary>⚠ Derived Metric Divergence</summary>
+  <p class="empty-note">
+    The source data already contains a column matching one of the pipeline's derived business metrics, but
+    the two disagree beyond tolerance (r &lt; 0.99 or mean absolute % difference &gt; 1%). This means the
+    derivation formula or its source-column resolution is likely wrong for this dataset - treat the
+    affected derived metric as unreliable until reviewed.
+  </p>
+  <table>
+    <tr><th>Derived Column</th><th>Matched Source Column</th><th>Correlation (r)</th><th>MAPE %</th><th>Rows Compared</th></tr>
+    {% for item in facts.data_quality.derived_metric_reconciliation %}
+    <tr>
+      <td>{{ item.derived_column }}</td><td>{{ item.matched_source_column }}</td>
+      <td>{{ item.correlation }}</td><td>{{ item.mape_pct }}</td><td>{{ item.n }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</details>
 {% endif %}
-
 {% if facts.data_quality_detail %}
+<details class="tech" open>
+  <summary>Data quality detail</summary>
 {% set dqd = facts.data_quality_detail %}
+{{ filter_box() }}
 <h2>Data Quality Detail</h2>
 <h3>Duplicate Handling</h3>
 <ul>
@@ -184,11 +507,15 @@
 {% else %}
 <p class="empty-note">No missing values detected in the source dataset.</p>
 {% endif %}
+</details>
 {% endif %}
 
 {% if facts.top_correlations %}
+<details class="tech">
+  <summary>Correlations between columns</summary>
+{{ filter_box() }}
 <h2>Top Correlations</h2>
-<p class="empty-note">Computed on the cleaned dataset (after outlier clipping, imputation, and scaling) - values may differ from a Pearson correlation run directly on the raw file.</p>
+<p class="empty-note">Computed on the cleaned dataset (after outlier clipping, imputation, and scaling) — values may differ from a Pearson correlation run directly on the raw file.</p>
 <table>
   <tr><th>Column 1</th><th>Column 2</th><th>Pearson r</th><th>Strength</th><th>Direction</th></tr>
   {% for pair in facts.top_correlations %}
@@ -198,11 +525,15 @@
   </tr>
   {% endfor %}
 </table>
+</details>
 {% endif %}
 
 {% if facts.excluded_columns and (facts.excluded_columns.flagged_columns or facts.excluded_columns.excluded_pairs) %}
+<details class="tech">
+  <summary>Excluded columns (IDs / artifacts)</summary>
+{{ filter_box() }}
 <h2>Excluded — Likely IDs or Artifacts</h2>
-<p class="empty-note">These columns look like identifiers or external-model outputs (e.g. row IDs, classifier scores/probabilities) rather than business signals, so they are excluded from the headline findings above.</p>
+<p class="empty-note">These columns look like identifiers or external-model outputs rather than business signals, so they are excluded from the headline findings above.</p>
 {% if facts.excluded_columns.flagged_columns %}
 <p><strong>Flagged columns:</strong> {{ facts.excluded_columns.flagged_columns | join(", ") }}</p>
 {% endif %}
@@ -217,11 +548,15 @@
   {% endfor %}
 </table>
 {% endif %}
+</details>
 {% endif %}
 
 {% if facts.formulaic_pairs %}
+<details class="tech">
+  <summary>Known formula relationships</summary>
+{{ filter_box() }}
 <h2>Excluded — Known Formula Relationships</h2>
-<p class="empty-note">One column in each of these pairs is a direct formula of the other (e.g. profit = revenue - cost) - the correlation is tautological, not a discovered insight, so these are excluded from Top Correlations above.</p>
+<p class="empty-note">One column in each pair is a direct formula of the other (e.g. profit = revenue &minus; cost) — tautological, not an insight.</p>
 <table>
   <tr><th>Column 1</th><th>Column 2</th><th>Pearson r</th><th>Strength</th><th>Direction</th></tr>
   {% for pair in facts.formulaic_pairs %}
@@ -231,9 +566,13 @@
   </tr>
   {% endfor %}
 </table>
+</details>
 {% endif %}
 
 {% if facts.significant_trends %}
+<details class="tech">
+  <summary>Trend statistics per column</summary>
+{{ filter_box() }}
 <h2>Significant Trends</h2>
 <table>
   <tr><th>Column</th><th>Trend</th><th>r²</th><th>p-value</th></tr>
@@ -244,9 +583,13 @@
   </tr>
   {% endfor %}
 </table>
+</details>
 {% endif %}
 
 {% if facts.rankings %}
+<details class="tech">
+  <summary>Top / bottom rankings</summary>
+{{ filter_box() }}
 <h2>Top / Bottom Rankings</h2>
 {% for cat_col, data in facts.rankings.items() %}
 <h3>{{ cat_col }} (showing {{ data.top | length + data.bottom | length }} of {{ data.total_categories }} categories)</h3>
@@ -260,9 +603,13 @@
   {% endfor %}
 </table>
 {% endfor %}
+</details>
 {% endif %}
 
 {% if facts.profit_breakdown %}
+<details class="tech">
+  <summary>Profit breakdown</summary>
+{{ filter_box() }}
 <h2>Profit Breakdown</h2>
 {% for cat_col, data in facts.profit_breakdown.items() %}
 <h3>{{ cat_col }} (showing {{ data.top | length + data.bottom | length }} of {{ data.total_categories }} categories)</h3>
@@ -276,11 +623,15 @@
   {% endfor %}
 </table>
 {% endfor %}
+</details>
 {% endif %}
 
 {% set xdim = facts.cross_dimensional %}
 {% set lead_time = xdim.get('shipping_lead_time', {}) if xdim else {} %}
 {% if xdim and (xdim.discount_return_rate.buckets or xdim.rep_discount_margin.records or xdim.segment_order_value.records or xdim.region_shipping_cost.records or xdim.category_margin_trend or lead_time.get('distribution')) %}
+<details class="tech">
+  <summary>Cross-dimensional analysis</summary>
+{{ filter_box() }}
 <h2>Cross-Dimensional Analysis</h2>
 
 {% if xdim.discount_return_rate.buckets %}
@@ -337,22 +688,30 @@
 {% endif %}
 
 {% if xdim.category_margin_trend %}
-<p class="empty-note">Profit margin by product category over time is shown in the Visualizations chart gallery below.</p>
+<p class="empty-note">Profit margin by product category over time is shown in the Direction of travel section above.</p>
 {% endif %}
+</details>
 {% endif %}
 
 {% if facts.category_normalization %}
+<details class="tech">
+  <summary>Category normalization audit</summary>
+{{ filter_box() }}
 <h2>Normalization Applied</h2>
-<p class="empty-note">Only low-impact category spelling variants were merged after case/separator folding; closed-set geographic and low-cardinality values were preserved.</p>
+<p class="empty-note">Only low-impact category spelling variants were merged after case/separator folding.</p>
 <table>
   <tr><th>Column</th><th>Raw Value</th><th>Canonical Value</th><th>Row Count</th></tr>
   {% for row in facts.category_normalization %}
   <tr><td>{{ row.column }}</td><td>{{ row.raw }}</td><td>{{ row.canonical }}</td><td>{{ row.row_count }}</td></tr>
   {% endfor %}
 </table>
+</details>
 {% endif %}
 
 {% if (facts.anomalies and facts.anomalies.unique_flagged_rows) or (facts.anomalies and facts.anomalies.data_quality_issue_rows) %}
+<details class="tech">
+  <summary>Anomalies &amp; data-quality issues</summary>
+{{ filter_box() }}
 <h2>Anomalies &amp; Data-Quality Issues</h2>
 {% if facts.anomalies.unique_flagged_rows %}
 <h3>Statistical Outliers</h3>
@@ -363,8 +722,6 @@
   {{ facts.anomalies.z_threshold }} on its raw or log-transformed values (log-transformed for
   right-skewed columns) or a wider IQR rule for skewed columns with non-positive values, so the
   method adapts to each column's distribution instead of assuming normality everywhere.
-  These are extreme values that may be entirely legitimate (e.g. a large but real transaction),
-  so they do not by themselves indicate a data-quality problem.
 </p>
 {% endif %}
 {% if facts.anomalies.prioritized_anomalies %}
@@ -398,40 +755,13 @@
 {% else %}
 <p class="empty-note">No structural data-quality violations detected.</p>
 {% endif %}
+</details>
 {% endif %}
-
-{% if narrative.risks_and_caveats %}
-<h2>Risks &amp; Caveats</h2>
-<ul>
-  {% for risk in narrative.risks_and_caveats %}
-  <li>{{ risk }}</li>
-  {% endfor %}
-</ul>
-{% endif %}
-
-{% if narrative.recommendations %}
-<h2>Recommendations</h2>
-<ul>
-  {% for rec in narrative.recommendations %}
-  <li>{{ rec }}</li>
-  {% endfor %}
-</ul>
-{% endif %}
-
-{% if charts %}
-<h2>Visualizations</h2>
-<div class="chart-gallery">
-  {% for chart in charts %}
-  <div class="chart-item">
-    <img src="{{ chart.src }}" alt="{{ chart.caption }}">
-    <p class="chart-caption">{{ chart.caption }}</p>
-  </div>
-  {% endfor %}
 </div>
-{% endif %}
 
 {% set grounding = narrative.claims_grounding %}
 {% if grounding and grounding.claims_checked %}
+<section data-reveal>
 <h2>Internal Consistency Check</h2>
 <p>
   Internal consistency: {{ grounding.claims_grounded }} of {{ grounding.claims_checked }} narrative
@@ -453,24 +783,254 @@
   {% if recon %}
     pipeline output vs. the source dataset &mdash;
     {{ "PASS" if recon.status == "pass" else ("WARN" if recon.status == "warn" else "FAIL") }}
-    ({{ recon.detail }}). Value-level ground truth is verified independently by the Phase&nbsp;1
-    reconciliation test harness (tests/test_ground_truth_reconciliation.py), which checks these
-    numbers against the raw source CSV.
+    ({{ recon.detail }}).
   {% else %}
     verified independently by the Phase&nbsp;1 reconciliation test harness
     (tests/test_ground_truth_reconciliation.py), which checks the pipeline&rsquo;s numbers against
-    the raw source CSV &mdash; a different scope from the internal consistency check above.
+    the raw source CSV.
   {% endif %}
 </p>
+</section>
+{% endif %}
+
+{% if glossary %}
+<section id="glossary" data-reveal>
+<h2>Glossary</h2>
+<p class="empty-note">Hover any dotted-underlined term in this report to see its explanation.</p>
+<div class="glossary-grid">
+  {% for term, explanation in glossary.items() %}
+  <div><strong>{{ term }}</strong><br><span style="color:var(--muted); font-size:10pt;">{{ explanation }}</span></div>
+  {% endfor %}
+</div>
+</section>
 {% endif %}
 
 <div class="footer">
-  Validation score: {{ facts.validation.overall_validation_score }}/100
-  &middot; Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}
-  &middot; Pipeline confidence: {{ facts.reliability.overall_confidence }}
-  ({{ facts.reliability.decision_readiness }})
-  &middot; Narrative source: {{ narrative.source }}
+  <span>Validation score: {{ facts.validation.overall_validation_score }}/100</span>
+  <span>Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}</span>
+  <span>Pipeline confidence: {{ facts.reliability.overall_confidence }} ({{ facts.reliability.decision_readiness }})</span>
+  <span>Narrative source: {{ narrative.source }}</span>
 </div>
+
+</main>
+</div>
+
+<button class="to-top needs-js" id="toTop" type="button" title="Back to top" aria-label="Back to top">↑</button>
+
+<div class="chart-modal" id="chartModal" hidden role="dialog" aria-modal="true" aria-label="Chart full view">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h3 id="modalTitle">Chart</h3>
+      <button class="icon-btn" type="button" data-close-modal title="Close" aria-label="Close full view">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+{% if has_interactive %}
+{% autoescape false %}<script>{{ echarts_lib }}</script>{% endautoescape %}
+<script>
+(function () {
+  function humanize(value) {
+    if (value === null || value === undefined || isNaN(Number(value))) return String(value === undefined ? '' : value);
+    var n = Number(value), sign = n < 0 ? '-' : '', a = Math.abs(n);
+    function trim(s) { return s.replace(/\.?0+$/, ''); }
+    if (a >= 1e9) return sign + trim((a / 1e9).toFixed(2)) + 'B';
+    if (a >= 1e6) return sign + trim((a / 1e6).toFixed(2)) + 'M';
+    if (a >= 1e3) return sign + trim((a / 1e3).toFixed(2)) + 'K';
+    if (a % 1 === 0 && a < 1e3) return sign + String(a);
+    return sign + String(+a.toFixed(2));
+  }
+  function makeFormatter(fmt, symbol) {
+    return function (value) {
+      if (value === null || value === undefined || isNaN(Number(value))) return '';
+      var body = humanize(value);
+      if (fmt === 'percent') return body + '%';
+      if (fmt === 'currency') return symbol + body;
+      return body;
+    };
+  }
+
+  var instances = [];
+  document.querySelectorAll('.echart').forEach(function (el) {
+    try {
+      var rawOption = el.getAttribute('data-option');
+      if (!rawOption) return;
+      var option = JSON.parse(rawOption);
+      var fmt = option.__fmt || 'number', symbol = option.__symbol || '';
+      delete option.__fmt; delete option.__symbol;
+      var vf = makeFormatter(fmt, symbol);
+      ['xAxis', 'yAxis'].forEach(function (axisName) {
+        var axes = option[axisName];
+        if (!axes) return;
+        if (!Array.isArray(axes)) axes = [axes];
+        axes.forEach(function (ax) {
+          if (ax && ax.type === 'value') ax.axisLabel = Object.assign({}, ax.axisLabel, { formatter: vf });
+        });
+      });
+      if (option.tooltip) option.tooltip.valueFormatter = vf;
+      var chart = echarts.init(el, null, { renderer: 'canvas' });
+      chart.setOption(option);
+      el.__chartInstance = chart;
+      instances.push(chart);
+    } catch (err) {
+      el.style.display = 'none';
+      var img = el.parentElement.querySelector('.chart-static');
+      if (img) img.style.display = 'block';
+    }
+  });
+
+  // ── theme toggle ────────────────────────────────────────────────────────
+  var themeBtn = document.getElementById('themeToggle');
+  function syncThemeIcon() {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    themeBtn.textContent = dark ? '☾' : '☀';
+  }
+  themeBtn.addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var next = dark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('ir-theme', next); } catch (e) {}
+    syncThemeIcon();
+  });
+  syncThemeIcon();
+
+  // ── reading progress + back-to-top ─────────────────────────────────────
+  var bar = document.getElementById('progressBar');
+  var toTop = document.getElementById('toTop');
+  function onScroll() {
+    var doc = document.documentElement;
+    var max = doc.scrollHeight - window.innerHeight;
+    bar.style.width = (max > 0 ? Math.min(100, (window.scrollY / max) * 100) : 0) + '%';
+    toTop.classList.toggle('show', window.scrollY > 600);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+  toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+
+  // ── scrollspy (topnav + sidenav) ───────────────────────────────────────
+  var links = Array.prototype.slice.call(document.querySelectorAll('[data-target]'));
+  var targets = links.map(function (l) { return document.getElementById(l.getAttribute('data-target')); })
+                     .filter(Boolean);
+  if ('IntersectionObserver' in window && targets.length) {
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var id = entry.target.id;
+        links.forEach(function (l) { l.classList.toggle('active', l.getAttribute('data-target') === id); });
+      });
+    }, { rootMargin: '-70px 0px -66% 0px', threshold: 0 });
+    targets.forEach(function (t) { spy.observe(t); });
+  }
+
+  // ── reveal on scroll ───────────────────────────────────────────────────
+  var revealEls = document.querySelectorAll('[data-reveal]');
+  if ('IntersectionObserver' in window) {
+    var revealer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { entry.target.classList.add('revealed'); revealer.unobserve(entry.target); }
+      });
+    }, { threshold: 0.08 });
+    revealEls.forEach(function (el) { revealer.observe(el); });
+  } else {
+    revealEls.forEach(function (el) { el.classList.add('revealed'); });
+  }
+
+  // ── animated KPI counters (pure-number values only) ────────────────────
+  var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!reduceMotion && 'IntersectionObserver' in window) {
+    var counterObs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        counterObs.unobserve(entry.target);
+        var el = entry.target, finalText = el.textContent.trim();
+        if (!/^[\d,]+$/.test(finalText)) return;
+        var target = parseInt(finalText.replace(/,/g, ''), 10);
+        var start = null, dur = 750;
+        function step(ts) {
+          if (!start) start = ts;
+          var p = Math.min(1, (ts - start) / dur);
+          var eased = 1 - Math.pow(1 - p, 3);
+          el.textContent = Math.round(target * eased).toLocaleString();
+          if (p < 1) requestAnimationFrame(step); else el.textContent = finalText;
+        }
+        requestAnimationFrame(step);
+      });
+    }, { threshold: 0.4 });
+    document.querySelectorAll('.kpi-value').forEach(function (el) { counterObs.observe(el); });
+  }
+
+  // ── appendix table filters ─────────────────────────────────────────────
+  document.querySelectorAll('.search-box').forEach(function (box) {
+    var container = box.closest('details');
+    var note = container.querySelector('.no-match-note');
+    box.addEventListener('input', function () {
+      var q = box.value.trim().toLowerCase();
+      var anyRow = false, anyVisible = false;
+      container.querySelectorAll('table tr').forEach(function (row) {
+        if (row.querySelector('th')) return;
+        anyRow = true;
+        var show = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+        row.style.display = show ? '' : 'none';
+        if (show) anyVisible = true;
+      });
+      if (note) note.style.display = (anyRow && q && !anyVisible) ? 'inline' : 'none';
+    });
+  });
+
+  // ── chart fullscreen modal ──────────────────────────────────────────────
+  var modal = document.getElementById('chartModal');
+  var modalBody = document.getElementById('modalBody');
+  var modalTitle = document.getElementById('modalTitle');
+  var movedEl = null, movedFromParent = null, movedNextSibling = null;
+
+  function closeModal() {
+    if (movedEl) {
+      if (movedNextSibling && movedNextSibling.parentNode === movedFromParent) {
+        movedFromParent.insertBefore(movedEl, movedNextSibling);
+      } else if (movedFromParent) {
+        movedFromParent.appendChild(movedEl);
+      }
+      if (movedEl.classList.contains('echart') && movedEl.__chartInstance) movedEl.__chartInstance.resize();
+    }
+    movedEl = movedFromParent = movedNextSibling = null;
+    modal.hidden = true;
+    document.body.style.overflow = '';
+  }
+  modal.querySelectorAll('[data-close-modal]').forEach(function (el) { el.addEventListener('click', closeModal); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+
+  document.querySelectorAll('.expand-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var card = document.getElementById('chart-' + btn.getAttribute('data-expand'));
+      if (!card) return;
+      modalTitle.textContent = btn.getAttribute('data-title') || 'Chart';
+      var holder = card.querySelector('.echart');
+      if (holder) {
+        movedEl = holder; movedFromParent = holder.parentNode;
+        movedNextSibling = holder.nextElementSibling;
+        modalBody.innerHTML = '';
+        modalBody.appendChild(holder);
+        if (holder.__chartInstance) holder.__chartInstance.resize();
+      } else {
+        var img = card.querySelector('img');
+        modalBody.innerHTML = '';
+        if (img) {
+          var clone = img.cloneNode();
+          clone.className = ''; clone.style.cssText = 'max-width:100%;max-height:100%;margin:auto;';
+          modalBody.appendChild(clone);
+        }
+      }
+      modal.hidden = false;
+      document.body.style.overflow = 'hidden';
+    });
+  });
+
+  window.addEventListener('resize', function () { instances.forEach(function (c) { c.resize(); }); });
+})();
+</script>
+{% endif %}
 
 </body>
 </html>

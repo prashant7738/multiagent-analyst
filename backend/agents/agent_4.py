@@ -2,6 +2,7 @@ import os
 import re
 import math
 import warnings
+from contextvars import ContextVar
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -19,12 +20,27 @@ warnings.filterwarnings("ignore")
 CHARTS_DIR = "outputs/charts"
 os.makedirs(CHARTS_DIR, exist_ok=True)
 
+# Per-run chart isolation. When the pipeline runs with a run_id (API jobs),
+# PNGs land in outputs/charts/<run_id>/ so concurrent jobs can never clobber
+# each other's files. The ContextVar keeps this thread-safe without threading
+# a parameter through every plotting helper; plain `python pipeline.py` runs
+# keep the legacy shared-directory behavior (empty subdir).
+_RUN_SUBDIR = ContextVar("agent4_run_subdir", default="")
+
+
+def _run_charts_dir() -> str:
+    sub = _RUN_SUBDIR.get()
+    path = os.path.join(CHARTS_DIR, sub) if sub else CHARTS_DIR
+    os.makedirs(path, exist_ok=True)
+    return path
+
 
 def _clear_chart_dir():
-    for filename in os.listdir(CHARTS_DIR):
+    target = _run_charts_dir()
+    for filename in os.listdir(target):
         if not filename.lower().endswith(".png"):
             continue
-        path = os.path.join(CHARTS_DIR, filename)
+        path = os.path.join(target, filename)
         if os.path.isfile(path):
             os.remove(path)
 
@@ -85,7 +101,7 @@ def _thin_axis_tick_labels(ax, max_labels=MAX_XTICK_LABELS):
 
 
 def _save(fig, name):
-    path = os.path.join(CHARTS_DIR, f"{name}.png")
+    path = os.path.join(_run_charts_dir(), f"{name}.png")
     if os.path.exists(path):
         os.remove(path)
     for ax in fig.get_axes():
@@ -1974,6 +1990,16 @@ def agent4_analysis(state: GraphState) -> GraphState:
         errors.append("Agent4: No cleaned_df in state. Agent 3 failed.")
         return {**state, "errors": errors}
 
+    run_id = str(state.get("run_id") or "").strip()
+    run_token = _RUN_SUBDIR.set(run_id) if run_id else None
+    try:
+        return _agent4_analysis_inner(state, errors, schema_blueprint, df)
+    finally:
+        if run_token is not None:
+            _RUN_SUBDIR.reset(run_token)
+
+
+def _agent4_analysis_inner(state: GraphState, errors: list, schema_blueprint, df) -> GraphState:
     _clear_chart_dir()
 
     print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
@@ -2179,7 +2205,8 @@ def agent4_analysis(state: GraphState) -> GraphState:
     # strong correlation heatmap), which buries the genuinely useful ones and
     # makes every report look the same regardless of what the data says.
     ranked = sorted(all_chart_candidates, key=lambda c: c["score"], reverse=True)
-    kept_paths = {c["path"] for c in ranked[:MAX_CHARTS_PER_REPORT]}
+    kept = ranked[:MAX_CHARTS_PER_REPORT]
+    kept_paths = {c["path"] for c in kept}
     dropped = [c for c in all_chart_candidates if c["path"] not in kept_paths]
     for c in dropped:
         try:
@@ -2191,11 +2218,42 @@ def agent4_analysis(state: GraphState) -> GraphState:
     # rather than jumping around in score order.
     all_chart_paths = [c["path"] for c in all_chart_candidates if c["path"] in kept_paths]
 
+    # ── Unified data-driven ChartSpec gallery ────────────────────────────────
+    # Planner specs are computed straight from cleaned_df/schema/stats (domain-
+    # free signal scoring); legacy agent_4 PNGs are wrapped so both kinds share
+    # one priority-ranked gallery consumed by the report template.
+    from agents.chart_spec import finalize_specs, validate_spec, wrap_legacy_candidate
+    from agents.chart_planner import build_chart_specs as _build_planner_specs
+
+    try:
+        planner_specs = _build_planner_specs(df, schema_blueprint, stats)
+    except Exception as exc:  # noqa: BLE001 — report still renders via legacy charts
+        planner_specs = []
+        errors.append(f"Agent4: chart planner failed, falling back to legacy charts: {exc}")
+
+    legacy_specs = []
+    for candidate in all_chart_candidates:
+        if candidate.get("path") in kept_paths:
+            wrapped = wrap_legacy_candidate(candidate)
+            if wrapped:
+                legacy_specs.append(wrapped)
+
+    chart_specs = finalize_specs(planner_specs + legacy_specs, cap=MAX_CHARTS_PER_REPORT)
+    for spec_problems in (validate_spec(s) for s in chart_specs):
+        for problem in spec_problems:
+            errors.append(f"Agent4: invalid chart spec: {problem}")
+    print(
+        f"[Agent 4] Chart specs: {len(planner_specs)} planner + {len(legacy_specs)} legacy "
+        f"-> {len(chart_specs)} final (cap={MAX_CHARTS_PER_REPORT})"
+    )
+
     stats["chart_selection"] = {
         "candidates": all_chart_candidates,
         "kept_count": len(all_chart_paths),
         "dropped_count": len(dropped),
         "max_charts_per_report": MAX_CHARTS_PER_REPORT,
+        "planner_specs": len(planner_specs),
+        "final_specs": len(chart_specs),
     }
     print(
         f"[Agent 4] Step 12 — Chart selection: {len(all_chart_candidates)} candidates -> "
@@ -2216,6 +2274,7 @@ def agent4_analysis(state: GraphState) -> GraphState:
         **state_with_reliability,
         "stats":        stats,
         "chart_paths":  all_chart_paths,
+        "chart_specs":  chart_specs,
         "data_quality": data_quality if data_quality is not None else state.get("data_quality"),
         "errors":       errors,
     }

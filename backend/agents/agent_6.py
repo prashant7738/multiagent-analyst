@@ -34,11 +34,22 @@ from agents.agent_2 import (
     _get_groq_client,
     _parse_schema_blueprint_response,
 )
+from agents.chart_render_static import render_spec_png
+from agents.chart_spec import SECTION_BY_FAMILY
+from agents.echarts_options import option_json as echarts_option_json
+from agents.report_style import (
+    humanize_currency,
+    humanize_number,
+    humanize_pct,
+    humanize_ratio,
+    titleize,
+)
 from main import update_reliability
 
 REPORTS_DIR = "outputs/reports"
 TEMPLATE_DIR = str(Path(__file__).resolve().parent.parent / "templates")
 TEMPLATE_NAME = "insight_report.html.jinja"
+ECHARTS_LIB_PATH = Path(TEMPLATE_DIR) / "assets" / "echarts.min.js"
 
 TOP_CORRELATIONS_LIMIT = 5
 TOP_RANKING_LIMIT = 3
@@ -49,7 +60,28 @@ CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the 
 # emitting the JSON body; 1200 was too tight and routinely truncated the response
 # mid-JSON (silent fallback to the deterministic narrative). Bumped with headroom
 # for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
-AGENT6_MAX_OUTPUT_TOKENS = 4096
+AGENT6_MAX_OUTPUT_TOKENS = 4096  # story + captions + glossary need more room than the old contract
+MAX_CHART_CAPTIONS_FROM_LLM = 4
+
+
+# Terms a non-technical reader shouldn't have to decode unaided. Used two ways:
+# the prompt forbids them in plain-language sections, and the linter below
+# double-checks the LLM's actual output (prompts alone don't enforce anything).
+_JARGON_PATTERNS = [
+    r"r-?squared", r"r\u00b2", r"p-value", r"z-score", r"standard deviation",
+    r"correlation coefficient", r"regression", r"\biqr\b", r"pearson",
+    r"quartile", r"kappa", r"variance", r"\boutlier", r"coefficient",
+]
+
+# Always-available tooltips so even a fallback-only report explains its terms.
+DEFAULT_GLOSSARY = {
+    "average": "The value you get by adding every record up and dividing by how many there are.",
+    "median": "The middle value when all records are lined up in order — half sit above it, half below.",
+    "skewed": "Lopsided: most records bunch at one end with a long tail stretching the other way.",
+    "unusual records": "Entries far outside the typical range — sometimes mistakes, sometimes genuinely rare events.",
+    "link strength": "How dependably two things move together; closer to 100% means a tighter relationship.",
+    "quality score": "A 0–100 health check on the data itself — missing values, duplicates and rule violations lower it.",
+}
 
 
 def _verbose_logging_enabled():
@@ -514,6 +546,33 @@ def _extract_normalization_facts(state):
     return rows
 
 
+def _jsonable_example_rows(rows) -> list:
+    """Coerce example-row values (pandas Timestamps, numpy scalars, NaN…) into
+    JSON-safe primitives so the template's `| tojson` never explodes."""
+    import math
+
+    def convert(value):
+        if isinstance(value, dict):
+            return {str(k): convert(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [convert(v) for v in value]
+        if isinstance(value, (bool, str)) or value is None:
+            return value
+        if hasattr(value, "isoformat"):  # datetime / Timestamp
+            return str(value)
+        if isinstance(value, (int, float)):
+            try:
+                f = float(value)
+                return None if math.isnan(f) else value
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+    if not isinstance(rows, list):
+        return []
+    return [convert(row) for row in rows]
+
+
 def _extract_anomaly_facts(stats):
     summary = dict(stats.get("anomaly_summary", {}) or {})
     # Surface the structural data-quality issues alongside the statistical
@@ -524,7 +583,12 @@ def _extract_anomaly_facts(stats):
     summary["confident_issue_row_pct"] = dq_issues.get("confident_issue_row_pct", summary["data_quality_issue_row_pct"])
     summary["review_required"] = bool(dq_issues.get("review_required"))
     summary["issues_by_rule"] = dq_issues.get("issues_by_rule", {})
-    summary["rule_details"] = dq_issues.get("rule_details", {})
+    rule_details = {}
+    for rule, detail in (dq_issues.get("rule_details", {}) or {}).items():
+        if isinstance(detail, dict) and detail.get("example_rows"):
+            detail = {**detail, "example_rows": _jsonable_example_rows(detail["example_rows"])}
+        rule_details[rule] = detail
+    summary["rule_details"] = rule_details
     summary["rules_checked"] = dq_issues.get("rules_checked", [])
     summary["prioritized_anomalies"] = summary.get("prioritized_anomalies", [])
     summary["business_impact_total"] = summary.get("business_impact_total", 0.0)
@@ -574,6 +638,21 @@ def _extract_reliability_facts(state):
     }
 
 
+def _extract_chart_summaries(state, limit: int = 12) -> list[dict]:
+    """Compact chart inventory handed to the LLM so captions can reference
+    real charts by id (hallproofed: unknown ids are dropped at merge time)."""
+    out = []
+    for spec in (state.get("chart_specs") or [])[:limit]:
+        if not isinstance(spec, dict):
+            continue
+        out.append({
+            "id": spec.get("id"),
+            "title": spec.get("title"),
+            "what_it_shows": spec.get("plain_summary") or spec.get("why_it_matters") or "",
+        })
+    return out
+
+
 def _extract_insight_facts(state):
     """Pure-Python fact extraction. No LLM calls, no hallucination risk."""
     stats = state.get("stats", {}) or {}
@@ -594,6 +673,7 @@ def _extract_insight_facts(state):
         "significant_trends": _extract_regression_facts(stats),
         "validation": _extract_validation_facts(state),
         "reliability": _extract_reliability_facts(state),
+        "charts": _extract_chart_summaries(state),
     }
 
 
@@ -663,6 +743,15 @@ def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: 
         sections.append(("executive_summary", narrative["executive_summary"]))
     for index, finding in enumerate(narrative.get("key_findings") or []):
         sections.append((f"key_finding[{index}]", finding))
+    story = narrative.get("story")
+    if isinstance(story, dict):
+        for key in ("what_happened", "why_it_matters", "what_to_do_next"):
+            text = story.get(key)
+            if isinstance(text, str) and text:
+                sections.append((f"story.{key}", text))
+    for caption_id, caption in (narrative.get("chart_captions") or {}).items():
+        if isinstance(caption, str) and caption:
+            sections.append((f"caption[{caption_id}]", caption))
 
     checked = 0
     grounded = 0
@@ -738,11 +827,27 @@ Return ONLY a JSON object with exactly these keys:
 {
   "executive_summary": "2-4 sentence overview of the dataset and its most important signal",
   "key_findings": ["4-6 bullet strings, each citing a concrete number from the facts"],
+  "story": {
+    "what_happened": "2-3 plain sentences describing the main movements in the data",
+    "why_it_matters": "1-3 sentences on the business consequence of those movements",
+    "what_to_do_next": "1-3 sentences of the single most sensible next action"
+  },
+  "chart_captions": {
+    "<chart id from facts.charts>": "ONE extra sentence, plain English, that reader should notice in that chart"
+  },
+  "glossary_terms": [
+    {"term": "a technical term you were forced to use elsewhere", "plain_explanation": "one-sentence explanation a non-technical reader understands"}
+  ],
   "plain_language_insights": ["4-6 bullet strings for non-technical readers, following the rules above"],
   "bottom_line": "1 sentence, plain English, the single most useful takeaway for a non-technical reader",
   "risks_and_caveats": ["1-3 bullet strings about data quality/validation concerns, if any"],
   "recommendations": ["3-5 concrete, actionable bullet strings grounded in the findings"]
 }
+
+Rules for the new keys:
+- "story" must read like three short paragraphs of one continuous explanation - no jargon, no bullet lists inside.
+- Only include ids that appear in facts.charts under "chart_captions"; at most 4.
+- "glossary_terms" only for terms you genuinely used; never define everyday words.
 """
 
 
@@ -1006,12 +1111,184 @@ def _fallback_narrative(insight_facts: dict) -> dict:
     return {
         "executive_summary": executive_summary,
         "key_findings": key_findings,
+        "story": _fallback_story(insight_facts),
+        "chart_captions": {},
+        "glossary_terms": [],
         "plain_language_insights": plain_language_insights,
         "bottom_line": bottom_line,
         "risks_and_caveats": risks_and_caveats,
         "recommendations": recommendations,
         "source": "fallback",
     }
+
+
+# ── hybrid narrative assembly (deterministic floor + LLM polish) ─────────────
+
+def _fallback_story(insight_facts: dict) -> dict:
+    """Three-part deterministic story used when the LLM is unavailable or its
+    own story fails validation. Built strictly from extracted facts."""
+    quality = insight_facts.get("data_quality") or {}
+    anomalies = insight_facts.get("anomalies") or {}
+    growth = insight_facts.get("growth") or {}
+
+    what_parts = []
+    for cat_col, data in (insight_facts.get("rankings") or {}).items():
+        top = (data.get("top") or [None])[0]
+        if top and top.get("revenue_share_pct") is not None:
+            what_parts.append(
+                f"'{top.get(cat_col)}' is the strongest {cat_col}, contributing "
+                f"{top.get('revenue_share_pct')}% of revenue"
+            )
+            break
+    best_month = growth.get("best_month")
+    if best_month and best_month.get("month"):
+        what_parts.append(f"{best_month['month']} is the strongest month in the record")
+    if anomalies.get("unique_flagged_rows"):
+        what_parts.append(
+            f"{anomalies['unique_flagged_rows']} records look unusual compared with their normal ranges"
+        )
+    what_happened = (
+        "The analysis found " + "; ".join(what_parts[:3]) + "."
+        if what_parts else
+        "No single standout pattern emerged from this dataset — performance is fairly evenly spread."
+    )
+
+    why_parts = []
+    score = quality.get("overall_quality_score")
+    if score is not None:
+        why_parts.append(
+            "the data is solid enough to act on with confidence"
+            if score >= 80 else
+            f"the data scores {score}/100 for quality, so treat the figures as directional"
+        )
+    if anomalies.get("data_quality_issue_rows"):
+        why_parts.append(
+            f"{anomalies['data_quality_issue_rows']} rows carry structural issues worth fixing first"
+        )
+    why_it_matters = (
+        "Because " + "; ".join(why_parts) + "."
+        if why_parts else
+        "These patterns are mild but consistent across the dataset."
+    )
+
+    what_to_do_next = (
+        "Start by reviewing the strongest and weakest groups highlighted above, "
+        "double-check the flagged unusual records, then revisit these numbers "
+        "after any structural issues noted in this report have been fixed."
+    )
+    return {"what_happened": what_happened, "why_it_matters": why_it_matters,
+            "what_to_do_next": what_to_do_next}
+
+
+def _jargon_hits(text) -> list[str]:
+    """Return jargon terms found in `text` (case-insensitive)."""
+    if not isinstance(text, str):
+        return []
+    lowered = text.lower()
+    hits = []
+    for pattern in _JARGON_PATTERNS:
+        match = re.search(pattern, lowered)
+        if match:
+            hits.append(match.group(0))
+    return hits
+
+
+def _valid_story(story) -> dict | None:
+    """Accept an LLM story only when all three parts are usable strings."""
+    if not isinstance(story, dict):
+        return None
+    cleaned = {}
+    for key in ("what_happened", "why_it_matters", "what_to_do_next"):
+        value = story.get(key)
+        if not isinstance(value, str) or not value.strip() or len(value) > 900:
+            return None
+        cleaned[key] = value.strip()
+    return cleaned
+
+
+def _compose_hybrid_narrative(llm_narrative: dict, deterministic: dict, facts: dict) -> dict:
+    """Deterministic-first composition.
+
+    The guaranteed plain-language floor (bullets, bottom line, story skeleton)
+    ALWAYS renders; the LLM's contribution is layered on top where it passes
+    basic hygiene checks. This is what makes the report safe to ship even on a
+    day the LLM returns nonsense.
+    """
+    known_chart_ids = {c.get("id") for c in facts.get("charts", [])}
+
+    # Start from the LLM output but never inherit empty/missing sections.
+    merged = {}
+    for key, value in llm_narrative.items():
+        if value not in (None, "", [], {}):
+            merged[key] = value
+
+    # 1 — plain-language bullets: deterministic first, deduped LLM extras after.
+    det_bullets = [b for b in (deterministic.get("plain_language_insights") or [])]
+    seen = {" ".join(str(b).lower().split()) for b in det_bullets}
+    extras = []
+    for bullet in llm_narrative.get("plain_language_insights") or []:
+        if not isinstance(bullet, str):
+            continue
+        normalized = " ".join(bullet.lower().split())
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            extras.append(bullet.strip())
+    merged["plain_language_insights"] = (det_bullets + extras[:4]) or det_bullets
+
+    # 2 — bottom line & story: LLM version wins only when jargon-free.
+    if _jargon_hits(merged.get("bottom_line")):
+        merged["bottom_line"] = deterministic.get("bottom_line", "")
+    llm_story = _valid_story(llm_narrative.get("story"))
+    if llm_story is None or any(_jargon_hits(v) for v in llm_story.values()):
+        merged["story"] = _fallback_story(facts)
+    else:
+        merged["story"] = llm_story
+
+    # 3 — captions: only for real chart ids, only jargon-free ones.
+    captions = {}
+    raw_captions = llm_narrative.get("chart_captions")
+    if isinstance(raw_captions, dict):
+        for cid, caption in raw_captions.items():
+            if cid in known_chart_ids and isinstance(caption, str) \
+                    and caption.strip() and not _jargon_hits(caption):
+                captions[cid] = caption.strip()
+    merged["chart_captions"] = dict(list(captions.items())[:MAX_CHART_CAPTIONS_FROM_LLM])
+
+    # 4 — glossary: LLM terms appended to defaults, capped.
+    glossary = dict(DEFAULT_GLOSSARY)
+    raw_terms = llm_narrative.get("glossary_terms")
+    if isinstance(raw_terms, list):
+        for entry in raw_terms:
+            if isinstance(entry, dict) and entry.get("term") and entry.get("plain_explanation"):
+                glossary[str(entry["term"]).strip()] = str(entry["plain_explanation"]).strip()
+    merged["glossary_terms"] = dict(list(glossary.items())[:12])
+    return merged
+
+
+def _lint_plain_language(merged: dict, deterministic: dict) -> int:
+    """Final safety net: swap any remaining jargon-laden bullet/line back to
+    deterministic wording. Returns the number of replacements made."""
+    swaps = [b for b in (deterministic.get("plain_language_insights") or [])
+             if not _jargon_hits(b)]
+    used: set[str] = set()
+    clean = []
+    replaced = 0
+    for bullet in merged.get("plain_language_insights") or []:
+        if not _jargon_hits(bullet):
+            clean.append(bullet)
+            continue
+        replacement = next((s for s in swaps
+                            if s.lower() not in {c.lower() for c in clean}
+                            and s.lower() not in used), None)
+        if replacement:
+            used.add(replacement.lower())
+            clean.append(replacement)
+            replaced += 1
+    merged["plain_language_insights"] = clean
+    if _jargon_hits(merged.get("bottom_line")) and deterministic.get("bottom_line"):
+        merged["bottom_line"] = deterministic["bottom_line"]
+        replaced += 1
+    return replaced
 
 
 def _ground_recommendations(insight_facts, narrative):
@@ -1063,46 +1340,205 @@ def _ground_recommendations(insight_facts, narrative):
 # 3 — RENDERING (Jinja2 -> HTML -> WeasyPrint PDF)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _embed_png(path: Path, max_size=(1400, 900)) -> str | None:
+    """Read a PNG and return a base64 data URI (single-file portability)."""
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            compressed = BytesIO()
+            image.convert("RGB").save(compressed, format="PNG", optimize=True, compress_level=9)
+        return f"data:image/png;base64,{base64.b64encode(compressed.getvalue()).decode('ascii')}"
+    except OSError:
+        return None
+
+
+def _charts_output_dir(state) -> Path:
+    """Per-run charts directory (falls back to the shared legacy dir)."""
+    run_id = str(state.get("run_id") or "").strip()
+    base = Path("outputs/charts")
+    return base / run_id if run_id else base
+
+
+def _build_chart_view_models(state, narrative: dict) -> list[dict]:
+    """Unified gallery entries consumed by the template.
+
+    Every entry carries BOTH render targets:
+      * `option_json` — ECharts option for the interactive screen view
+      * `img_b64`     — static PNG twin for print/PDF/<noscript>
+
+    Legacy agent_4 PNG-only families arrive as render="image" specs; planner
+    specs get their static twin rendered on demand here.
+    """
+    captions = narrative.get("chart_captions") or {}
+    out_dir = _charts_output_dir(state)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    view_models = []
+    for spec in state.get("chart_specs") or []:
+        if not isinstance(spec, dict):
+            continue
+        png_path = spec.get("png_path")
+        if not png_path:
+            # Render the static twin lazily so print/PDF stays complete even
+            # when only the interactive path was planned up front.
+            png_path = render_spec_png(spec, str(out_dir))
+        img_b64 = _embed_png(Path(png_path)) if png_path else None
+
+        entry = {
+            "id": spec.get("id", "chart"),
+            "title": spec.get("title", ""),
+            "subtitle": spec.get("subtitle", ""),
+            "why_it_matters": spec.get("why_it_matters", ""),
+            "plain_summary": spec.get("plain_summary", ""),
+            "llm_caption": captions.get(spec.get("id"), ""),
+            "alt_text": spec.get("alt_text") or spec.get("title", ""),
+            "section": spec.get("section", "what_matters"),
+            "render": spec.get("render", "image"),
+            "annotations": spec.get("annotations") or [],
+            "option_json": "",
+            "img_b64": img_b64 or "",
+        }
+        if spec.get("render") == "echarts":
+            try:
+                entry["option_json"] = echarts_option_json(spec)
+            except Exception:  # noqa: BLE001 — degrade to static image
+                entry["render"] = "image"
+        view_models.append(entry)
+    return view_models
+
+
+def _group_by_section(chart_entries: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Order sections narratively and drop empties."""
+    order = ["what_matters", "shape", "direction", "relationships", "watchlist"]
+    headings = {
+        "what_matters": ("What matters most", "The groups and items that carry the business."),
+        "shape": ("The shape of your numbers", "How values spread out, and what typical really means."),
+        "direction": ("Direction of travel", "Trends over time and repeating rhythms."),
+        "relationships": ("How things connect", "Where two measures move together."),
+        "watchlist": ("Worth double-checking", "Unusual records and risk pockets to review."),
+    }
+    grouped = []
+    for section in order:
+        items = [c for c in chart_entries if c["section"] == section]
+        if items:
+            title, blurb = headings.get(section, (section.replace("_", " ").title(), ""))
+            grouped.append((section, {"heading": title, "blurb": blurb, "charts": items}))
+    return grouped
+
+
+def _kpi_cards(facts: dict) -> list[dict]:
+    """Hero strip values, all grounded in extracted facts."""
+    dataset = facts.get("dataset") or {}
+    quality = facts.get("data_quality") or {}
+    validation = facts.get("validation") or {}
+    reliability = facts.get("reliability") or {}
+    cards = [
+        {"label": "Rows analysed", "value": humanize_number(dataset.get("raw_rows"))},
+        {"label": "Columns", "value": humanize_number(dataset.get("raw_cols"))},
+    ]
+    score = quality.get("overall_quality_score")
+    if score is not None:
+        cards.append({"label": "Data health",
+                      "value": f"{humanize_pct(score)}".rstrip("%") + "/100"})
+    v_score = validation.get("overall_validation_score")
+    if v_score is not None:
+        cards.append({"label": "Validation",
+                      "value": ("Pass · " if validation.get("passed") else "Fail · ")
+                               + f"{humanize_pct(v_score)}".rstrip("%") + "/100"})
+    readiness = reliability.get("decision_readiness")
+    if readiness:
+        cards.append({"label": "Decision readiness", "value": str(readiness).replace("_", " ")})
+    return cards
+
+
 def _render_html(insight_facts, narrative, chart_paths, state):
-    # Embed each chart as a base64 data URI rather than a file:// path, so the
-    # report is a single self-contained file that renders on any machine.
-    charts = []
+    """Render the report. Signature kept compatible with existing tests:
+    legacy `chart_paths` PNGs are still embedded as base64 images."""
+    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+    env.filters.update({
+        "humnum": humanize_number,
+        "humpct": humanize_pct,
+        "humcur": lambda v, symbol="": humanize_currency(v, symbol),
+        "humratio": humanize_ratio,
+        "titleize": titleize,
+        "abbr_glossary": _glossary_abbr,
+    })
+
+    # Legacy PNG paths → image entries (backwards compatibility + tests).
+    legacy_entries = []
     for p in (chart_paths or []):
         path = Path(p)
         if not path.exists():
             continue
-        try:
-            from PIL import Image
-            with Image.open(path) as image:
-                image.thumbnail((1400, 900), Image.Resampling.LANCZOS)
-                compressed = BytesIO()
-                image.convert("RGB").save(compressed, format="PNG", optimize=True, compress_level=9)
-            encoded = base64.b64encode(compressed.getvalue()).decode("ascii")
-        except OSError:
+        data_uri = _embed_png(path)
+        if not data_uri:
             continue
-        charts.append({
-            "src": f"data:image/png;base64,{encoded}",
-            "caption": path.stem.replace("_", " ").title(),
+        legacy_entries.append({
+            "id": f"legacy_{path.stem}",
+            "title": path.stem.replace("_", " ").title(),
+            "subtitle": "", "why_it_matters": "", "plain_summary": "",
+            "llm_caption": "", "alt_text": path.stem.replace("_", " "),
+            "section": "what_matters",
+            "render": "image", "annotations": [],
+            "option_json": "", "img_b64": data_uri,
         })
 
-    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
     # Non-JSON-native values (pd.Timestamp, numpy scalars, etc.) can end up in
     # facts/example_rows; fall back to str() instead of letting |tojson raise.
     env.policies["json.dumps_kwargs"] = {"default": str}
+
+    entries = _build_chart_view_models(state, narrative) + legacy_entries
+    echarts_lib = ""
+    if ECHARTS_LIB_PATH.exists():
+        echarts_lib = ECHARTS_LIB_PATH.read_text(encoding="utf-8", errors="replace")
+
     template = env.get_template(TEMPLATE_NAME)
     return template.render(
         facts=insight_facts,
         narrative=narrative,
-        charts=charts,
+        story=narrative.get("story") or {},
+        glossary=narrative.get("glossary_terms") or DEFAULT_GLOSSARY,
+        kpis=_kpi_cards(insight_facts),
+        chart_sections=_group_by_section(entries),
+        has_interactive=bool(echarts_lib),
+        echarts_lib=echarts_lib,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         dataset_name=Path(state.get("csv_path", "dataset")).name,
     )
 
 
-def _write_report(html_string, reports_dir, errors):
+def _glossary_abbr(text, glossary):
+    """Wrap known technical terms in <abbr> tooltips (Jinja filter).
+
+    Escapes everything itself and returns Markup, so templates use it as
+    `{{ text | abbr_glossary(glossary) }}` even under autoescape — no unsafe
+    raw-HTML passthrough of LLM-generated prose.
+    """
+    from markupsafe import Markup, escape
+    if not isinstance(text, str) or not text or not glossary:
+        return text
+    result = escape(text)
+    for term, explanation in glossary.items():
+        pattern = re.compile(re.escape(str(term)), re.IGNORECASE)
+        match = pattern.search(str(result))
+        if not match:
+            continue
+        matched = str(escape(match.group(0)))
+        tooltip = str(escape(explanation))
+        abbr = Markup(f'<abbr class="glossary" title="{tooltip}">{matched}</abbr>')
+        result = Markup(pattern.sub(lambda _m: str(abbr), str(result), count=1))
+    return result
+
+
+def _write_report(html_string, reports_dir, errors, run_id: str | None = None):
     """Always write the HTML file; best-effort convert to PDF. Returns the report path
-    (PDF if conversion succeeded, otherwise the HTML fallback) plus a pdf_written flag."""
-    output_dir = Path(reports_dir)
+    (PDF if conversion succeeded, otherwise the HTML fallback) plus a pdf_written flag.
+
+    When `run_id` is present the report is written to `<reports_dir>/<run_id>/`
+    so concurrent pipeline runs never overwrite each other's documents. Legacy
+    callers (no run_id) keep the historical flat filename."""
+    output_dir = Path(reports_dir) / str(run_id) if run_id else Path(reports_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     html_path = output_dir / "insight_report.html"
@@ -1235,6 +1671,25 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         narrative = _fallback_narrative(insight_facts)
         narrative_source = "fallback"
 
+    # Hybrid composition: the deterministic narrative is ALWAYS computed and
+    # forms the guaranteed floor; the LLM output (when it arrived) is layered
+    # on top where it passes hygiene checks (story validity, jargon, ids).
+    deterministic = _fallback_narrative(insight_facts)
+    if narrative_source == "llm":
+        try:
+            narrative = _compose_hybrid_narrative(narrative, deterministic, insight_facts)
+            # Preserve the actual provider tag ("groq"/"gemini") set by
+            # _call_llm_for_narrative instead of hardcoding one provider.
+        except Exception as compose_error:
+            print(f"[Agent 6] Hybrid composition failed, using deterministic floor: {compose_error}")
+            narrative = deterministic
+            narrative_source = "fallback"
+    else:
+        narrative = deterministic
+    lint_replacements = _lint_plain_language(narrative, deterministic)
+    if lint_replacements:
+        print(f"[Agent 6] Jargon linter replaced {lint_replacements} plain-language line(s)")
+
     narrative["recommendations"] = _ground_recommendations(insight_facts, narrative)
 
     claims_grounding = _check_narrative_grounding(insight_facts, narrative)
@@ -1247,7 +1702,9 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
 
     chart_paths = state.get("chart_paths", []) or []
     html_string = _render_html(insight_facts, narrative, chart_paths, state)
-    report_path, pdf_written = _write_report(html_string, REPORTS_DIR, errors)
+    report_path, pdf_written = _write_report(
+        html_string, REPORTS_DIR, errors, run_id=state.get("run_id")
+    )
 
     if verbose:
         print(f"[Agent 6]   narrative_source={narrative.get('source', narrative_source)}")
@@ -1255,16 +1712,24 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
 
     print(f"[Agent 6] Completed: report={report_path} pdf_written={pdf_written}")
 
+    # Confidence reflects NARRATIVE quality only: whether the story came from
+    # the grounded LLM pass or the deterministic fallback. PDF availability is
+    # environmental (missing native libs on some machines), not a data-quality
+    # signal, so it no longer docks points — it stays in the evidence trail.
     if narrative.get("source", narrative_source) == "fallback":
-        confidence = 0.5 if not pdf_written else 0.7
+        confidence = 0.55
     else:
-        confidence = 0.85 if not pdf_written else 1.0
+        confidence = 0.95
 
     # A narrative that cites numbers absent from the computed facts is less
-    # trustworthy even if it read grammatically fine and the PDF rendered.
+    # trustworthy even if it read grammatically fine.
     grounding_confidence = claims_grounding.get("confidence", 1.0)
     confidence = round(confidence * (0.7 + 0.3 * grounding_confidence), 3)
 
+    ready = (
+        narrative.get("source", narrative_source) != "fallback"
+        and not claims_grounding.get("claims_flagged")
+    )
     state_with_reliability = update_reliability(
         state,
         "agent6",
@@ -1275,7 +1740,7 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
             f"report_path={report_path}",
             f"claims_grounded={claims_grounding['claims_grounded']}/{claims_grounding['claims_checked']}",
         ],
-        decision_readiness="ready" if pdf_written else "needs_review",
+        decision_readiness="ready" if ready else "needs_review",
     )
 
     return {

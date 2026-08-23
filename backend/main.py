@@ -31,6 +31,10 @@ class GraphState(TypedDict):
     # ── Agent 4 outputs ───────────────────────────────────────────────────────
     stats: dict
     chart_paths: list
+    chart_specs: list         # data-driven ChartSpec dicts (see agents/chart_spec.py)
+
+    # ── run identity ──────────────────────────────────────────────────────────
+    run_id: str               # short unique id scoping this run's outputs (charts/reports)
 
     # ── Agent 5 outputs ───────────────────────────────────────────────────────
     validation_report: dict   # Tier 1 contract checks + Cohen's kappa tagging agreement

@@ -14,6 +14,7 @@ from agents.agent_1 import GraphState
 from agents.agent_3 import _is_count_field
 from agents.rule_definitions import rule_manifest
 from main import update_reliability
+from agents.report_style import safe_filename_component
 
 warnings.filterwarnings("ignore")
 
@@ -102,7 +103,8 @@ def _thin_axis_tick_labels(ax, max_labels=MAX_XTICK_LABELS):
 
 
 def _save(fig, name):
-    path = os.path.join(_run_charts_dir(), f"{name}.png")
+    safe_name = safe_filename_component(name)
+    path = os.path.join(_run_charts_dir(), f"{safe_name}.png")
     if os.path.exists(path):
         os.remove(path)
     for ax in fig.get_axes():

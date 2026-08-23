@@ -12,6 +12,9 @@ These are also registered as Jinja filters in agent_6's render environment.
 
 from __future__ import annotations
 
+import hashlib
+import re
+
 PALETTE = {
     "primary":   "#2563EB",
     "secondary": "#16A34A",
@@ -110,9 +113,20 @@ def titleize(column_name: str) -> str:
 
 
 def slugify(label: str) -> str:
-    import re
     slug = re.sub(r"[^a-z0-9]+", "_", str(label).lower()).strip("_")
     return slug or "value"
+
+
+def safe_filename_component(label: str, max_length: int = 120) -> str:
+    """Return a deterministic, portable filename component for arbitrary labels."""
+    original = str(label)
+    slug = slugify(original)
+    digest = hashlib.sha256(original.encode("utf-8", errors="replace")).hexdigest()[:10]
+    changed = slug != original or original in {".", ".."}
+    if changed:
+        suffix = f"_{digest}"
+        slug = f"{slug[:max_length - len(suffix)]}{suffix}"
+    return slug[:max_length] or "value"
 
 
 def math_is_nan(num: float) -> bool:

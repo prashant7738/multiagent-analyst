@@ -18,13 +18,15 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 
-from agents.report_style import CHART_COLORS, PALETTE, humanize_number
+from agents.report_style import CHART_COLORS, PALETTE, humanize_number, safe_filename_component
 
 
 def render_spec_png(spec: dict, out_dir: str) -> str | None:
     """Render one ChartSpec to `<out_dir>/static_<id>.png`. Best-effort."""
     try:
-        out_path = os.path.join(out_dir, f"static_{spec.get('id', 'chart')}.png")
+        os.makedirs(out_dir, exist_ok=True)
+        safe_id = safe_filename_component(spec.get("id", "chart"))
+        out_path = os.path.join(out_dir, f"static_{safe_id}.png")
         _draw(spec, out_path)
         return out_path if os.path.exists(out_path) else None
     except Exception:  # noqa: BLE001 — print fallback must never break the report

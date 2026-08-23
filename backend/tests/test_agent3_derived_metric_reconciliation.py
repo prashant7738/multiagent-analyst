@@ -14,6 +14,39 @@ def _schema(revenue_col, cost_col):
 
 
 class TestDerivedMetricReconciliation(unittest.TestCase):
+    def test_equivalent_derived_metrics_are_removed_from_cleaned_output(self):
+        revenue = pd.Series([100.0, 200.0, 300.0, 400.0, 500.0])
+        cost = pd.Series([40.0, 80.0, 120.0, 160.0, 200.0])
+        df = pd.DataFrame({
+            "Revenue": revenue,
+            "Cost": cost,
+            "Profit": revenue - cost,
+            "Unit Price": [10.0, 20.0, 30.0, 40.0, 50.0],
+            "Units Sold": [10, 10, 10, 10, 10],
+        })
+        schema_blueprint = {
+            "Revenue": {"semantic_tag": "currency", "intended_type": "float", "financial_role": "revenue"},
+            "Cost": {"semantic_tag": "currency", "intended_type": "float", "financial_role": "cost"},
+            "Profit": {"semantic_tag": "currency", "intended_type": "float"},
+            "Unit Price": {"semantic_tag": "currency", "intended_type": "float"},
+            "Units Sold": {"semantic_tag": "count", "intended_type": "int"},
+        }
+        state = {
+            "_df_cache": df,
+            "schema_blueprint": schema_blueprint,
+            "raw_profile": {"duplicate_rows": 0},
+        }
+
+        result = agent_3.agent3_preprocessor(state)
+
+        self.assertNotIn("derived_profit", result["cleaned_df"].columns)
+        self.assertNotIn("derived_revenue_per_unit", result["cleaned_df"].columns)
+        self.assertIn("derived_profit_margin_pct", result["cleaned_df"].columns)
+        metadata = result["schema_blueprint"]["__metadata__"]
+        self.assertEqual(metadata["canonical_derived_metrics"]["derived_profit"], "Profit")
+        self.assertEqual(metadata["canonical_derived_metrics"]["derived_revenue_per_unit"], "Unit Price")
+        self.assertEqual(metadata["raw_formula_relationships"][0]["result"], "Profit")
+
     def test_profit_uses_total_cost_when_unit_cost_appears_first(self):
         revenue = pd.Series([1000.0, 1200.0, 1400.0, 1600.0, 1800.0])
         unit_cost = pd.Series([10.0, 12.0, 14.0, 16.0, 18.0])

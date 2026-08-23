@@ -1483,9 +1483,80 @@ def _find_reconciliation_match(df, derived_col, source_cols, concept_cache):
         if not _is_numeric_col(df, col):
             continue
         candidate_tokens = concept_cache.setdefault(col, _concept_tokens(col))
-        if concept and concept <= candidate_tokens:
+        alias_match = (
+            derived_col == "derived_revenue_per_unit"
+            and "price" in candidate_tokens
+            and any(
+                token in {"unit", "units"}
+                for source in (source_cols or [])
+                for token in _concept_tokens(source)
+            )
+        )
+        if (concept and concept <= candidate_tokens) or alias_match:
             return col
     return None
+
+
+def _find_redundant_derived_metrics(df, derivation_map):
+    """Return derived columns that agree with an existing raw equivalent."""
+    redundant = {}
+    concept_cache = {}
+    for derived_col, source_cols in (derivation_map or {}).items():
+        if derived_col not in df.columns:
+            continue
+        match_col = _find_reconciliation_match(df, derived_col, source_cols, concept_cache)
+        if not match_col:
+            continue
+        derived_vals = pd.to_numeric(df[derived_col], errors="coerce")
+        match_vals = pd.to_numeric(df[match_col], errors="coerce")
+        valid = derived_vals.notna() & match_vals.notna()
+        if int(valid.sum()) < RECONCILIATION_MIN_PAIRS:
+            continue
+        d_v, m_v = derived_vals[valid], match_vals[valid]
+        corr = float(d_v.corr(m_v)) if d_v.std() > 0 and m_v.std() > 0 else None
+        nonzero = valid & (match_vals.abs() > 1e-9)
+        mape = None
+        if int(nonzero.sum()) >= RECONCILIATION_MIN_PAIRS:
+            mape = float(
+                (derived_vals[nonzero] - match_vals[nonzero]).abs().div(match_vals[nonzero].abs()).mean() * 100
+            )
+        if corr is not None and corr >= RECONCILIATION_MIN_CORR and (
+            mape is None or mape <= RECONCILIATION_MAX_MAPE_PCT
+        ):
+            redundant[derived_col] = match_col
+    return redundant
+
+
+def _detect_raw_formula_relationships(df, schema_blueprint):
+    """Find validated raw revenue/cost/profit identities for analysis metadata."""
+    numeric = [col for col in df.columns if not str(col).startswith("derived_") and _is_numeric_col(df, col)]
+    role_columns = {}
+    for role in ("revenue", "cost", "profit"):
+        role_columns[role] = [
+            col for col in numeric
+            if isinstance(schema_blueprint.get(col), dict)
+            and schema_blueprint[col].get("financial_role") == role
+        ]
+    role_columns["profit"].extend(
+        col for col in numeric
+        if "profit" in _concept_tokens(col) and col not in role_columns["profit"]
+    )
+    relationships = []
+    for profit in role_columns["profit"]:
+        profit_values = pd.to_numeric(df[profit], errors="coerce")
+        for revenue in role_columns["revenue"]:
+            revenue_values = pd.to_numeric(df[revenue], errors="coerce")
+            for cost in role_columns["cost"]:
+                if len({profit, revenue, cost}) < 3:
+                    continue
+                cost_values = pd.to_numeric(df[cost], errors="coerce")
+                valid = profit_values.notna() & revenue_values.notna() & cost_values.notna()
+                if int(valid.sum()) < RECONCILIATION_MIN_PAIRS:
+                    continue
+                expected = revenue_values[valid] - cost_values[valid]
+                if np.isclose(profit_values[valid], expected, rtol=1e-6, atol=1e-6).all():
+                    relationships.append({"result": profit, "sources": [revenue, cost], "operation": "subtract"})
+    return relationships
 
 
 def _reconcile_derived_metrics(df, derivation_map):
@@ -1867,6 +1938,17 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     recon_notes, derived_divergences = _reconcile_derived_metrics(df, derivation_map)
     preprocessing_log.extend(recon_notes)
+    redundant_derived = _find_redundant_derived_metrics(df, derivation_map)
+    for derived_col, canonical_col in redundant_derived.items():
+        df.drop(columns=[derived_col], inplace=True)
+        derivation_map = {
+            derived: [canonical_col if source == derived_col else source for source in sources]
+            for derived, sources in derivation_map.items()
+            if derived != derived_col
+        }
+        preprocessing_log.append(
+            f"Redundant derived metric removed: [{derived_col}] matches canonical raw column [{canonical_col}]"
+        )
     if derived_divergences:
         for divergence in derived_divergences:
             errors.append(
@@ -1938,10 +2020,16 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     if verbose:
         print(f"[Agent 3] Step 8 - Date features extracted ({len(notes)} datetime columns)")
 
-    if derivation_map:
+    raw_formula_relationships = _detect_raw_formula_relationships(df, schema_blueprint)
+    if derivation_map or raw_formula_relationships or redundant_derived:
         metadata = schema_blueprint.setdefault("__metadata__", {})
         if isinstance(metadata, dict):
-            metadata["derived_metric_sources"] = derivation_map
+            if derivation_map:
+                metadata["derived_metric_sources"] = derivation_map
+            if redundant_derived:
+                metadata["canonical_derived_metrics"] = redundant_derived
+            if raw_formula_relationships:
+                metadata["raw_formula_relationships"] = raw_formula_relationships
 
     data_quality = _compute_enhanced_quality_score(
         df_raw,

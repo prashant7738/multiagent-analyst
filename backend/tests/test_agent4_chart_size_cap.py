@@ -33,6 +33,20 @@ class TestChartDimensionCap(unittest.TestCase):
         self.assertLessEqual(width, agent_4.MAX_CHART_DIM_PX)
         self.assertLessEqual(height, agent_4.MAX_CHART_DIM_PX)
 
+    def test_dense_quarter_labels_are_thinned_and_rotated_readably(self):
+        fig, ax = plt.subplots(figsize=(8, 4))
+        labels = [f"2020-Q{i % 4 + 1}" for i in range(48)]
+        ax.bar(range(len(labels)), np.ones(len(labels)))
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels)
+
+        agent_4._thin_axis_tick_labels(ax)
+
+        visible = [label for label in ax.get_xticklabels() if label.get_visible()]
+        self.assertLessEqual(len(visible), 24)
+        self.assertTrue(visible)
+        self.assertTrue(all(abs(label.get_rotation()) in (45, 90) for label in visible))
+
     def test_category_distribution_with_high_cardinality_stays_within_cap_and_is_top_n_other(self):
         rng = np.random.default_rng(1)
         # 1000 unique categories, non-uniform frequency

@@ -66,6 +66,17 @@ class TestValidateAndFinalize(unittest.TestCase):
         out = finalize_specs(specs, cap=3)
         self.assertEqual([s["id"] for s in out], ["top", "high", "mid"])
 
+    def test_finalize_dedupes_same_chart_with_different_ids(self):
+        specs = [
+            {"id": "planner-trend", "section": "direction", "chart_type": "line", "title": "Revenue over time", "priority": 40},
+            {"id": "legacy_growth", "section": "direction", "chart_type": "line", "title": "Revenue over time", "priority": 80},
+        ]
+
+        out = finalize_specs(specs, cap=5)
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["id"], "legacy_growth")
+
     def test_finalize_keeps_minimal_dicts_but_skips_junk(self):
         out = finalize_specs([None, {}, {"id": "x"}], cap=5)
         self.assertEqual(out, [{"id": "x"}])

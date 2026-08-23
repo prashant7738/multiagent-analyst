@@ -19,6 +19,7 @@ are wrapped as render="image" specs so the gallery stays uniform.
 from __future__ import annotations
 
 import math
+import re
 
 CHART_TYPES = frozenset({
     "bar",            # vertical bars: {labels, values}
@@ -136,18 +137,28 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
 
 
 def finalize_specs(specs: list, cap: int = 10) -> list:
-    """Dedupe by id, sort by signal priority (stable), and cap the count."""
+    """Dedupe by id and semantic chart identity, then cap by priority."""
     seen: set[str] = set()
+    seen_semantic: dict[tuple, str] = {}
     unique = []
-    for spec in specs:
-        if not spec or not isinstance(spec, dict):
-            continue
+    ordered_specs = sorted(
+        (spec for spec in specs if spec and isinstance(spec, dict)),
+        key=lambda spec: spec.get("priority", 0.0),
+        reverse=True,
+    )
+    for spec in ordered_specs:
         sid = spec.get("id")
+        title = re.sub(r"[^a-z0-9]+", " ", str(spec.get("title", "")).lower()).strip()
         if sid in seen:
             continue
         seen.add(sid)
+        source_kind = "legacy" if str(sid).startswith("legacy_") else "planner"
+        semantic_identity = (spec.get("section"), spec.get("chart_type"), title)
+        previous_kind = seen_semantic.get(semantic_identity)
+        if previous_kind and previous_kind != source_kind:
+            continue
+        seen_semantic.setdefault(semantic_identity, source_kind)
         unique.append(spec)
-    unique.sort(key=lambda s: s.get("priority", 0.0), reverse=True)
     return unique[:cap]
 
 

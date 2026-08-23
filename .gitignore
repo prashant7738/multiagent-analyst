@@ -28,4 +28,7 @@ backend/uploads/
 backend/outputs/
 backend/*.csv
 
+# Local tooling caches
+.graphify/
+
 .pgdata

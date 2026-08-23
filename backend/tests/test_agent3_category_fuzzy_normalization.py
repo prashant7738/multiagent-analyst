@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -87,6 +88,18 @@ class TestBuildCanonicalCategoryMap(unittest.TestCase):
 
 
 class TestFuzzyCanonicalizeCategories(unittest.TestCase):
+    def test_skips_high_cardinality_columns_before_pairwise_matching(self):
+        labels = [f"Product {index:04d}" for index in range(1001)]
+        df = pd.DataFrame({"Product": labels})
+        schema_blueprint = {"Product": {"semantic_tag": "categorical_label", "intended_type": "string"}}
+
+        with patch("agents.agent_3._levenshtein_distance", side_effect=AssertionError("pairwise matching ran")):
+            result_df, notes, normalization_applied = _fuzzy_canonicalize_categories(df, schema_blueprint)
+
+        self.assertEqual(result_df["Product"].tolist(), labels)
+        self.assertEqual(normalization_applied, {})
+        self.assertTrue(any("high cardinality" in note for note in notes))
+
     def test_keeps_independently_valid_countries_separate(self):
         countries = ["Brunei", "Burundi", "Slovakia", "Slovenia", "Ireland", "Iceland", "Australia", "Austria"]
         df = pd.DataFrame({"Country": countries * 10})

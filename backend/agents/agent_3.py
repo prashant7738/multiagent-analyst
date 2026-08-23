@@ -260,6 +260,9 @@ FUZZY_MATCH_MIN_LENGTH = 6
 FUZZY_REVIEW_ROW_PCT = 5.0
 FUZZY_RARE_VALUE_PCT = 1.0
 LOW_CARDINALITY_MAX = 3
+# Pairwise edit-distance matching is useful for ordinary categorical columns,
+# but becomes quadratic and not meaningful for product-like high-cardinality fields.
+FUZZY_MAX_CATEGORY_LABELS = 500
 
 GEOGRAPHIC_COLUMN_TOKENS = {"country", "countries", "nation", "state", "province"}
 
@@ -416,6 +419,12 @@ def _fuzzy_canonicalize_categories(df, schema_blueprint):
 
         value_counts = series.astype("string").value_counts()
         if len(value_counts) < 2:
+            continue
+        if len(value_counts) > FUZZY_MAX_CATEGORY_LABELS:
+            notes.append(
+                f"{col}: fuzzy category normalization skipped (high cardinality: "
+                f"{len(value_counts)} distinct labels)"
+            )
             continue
 
         mapping, merges, flagged = _build_canonical_category_map(value_counts)

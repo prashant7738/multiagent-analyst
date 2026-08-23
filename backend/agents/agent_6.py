@@ -1548,14 +1548,27 @@ def _write_report(html_string, reports_dir, errors, run_id: str | None = None):
 
     pdf_path = output_dir / "insight_report.pdf"
     try:
-        from weasyprint import HTML, WeasyPrintUnavailableError
+        from weasyprint import HTML
+    except Exception as import_error:
+        errors.append(f"Agent6: PDF conversion failed, falling back to HTML report: {import_error}")
+        return str(html_path), False
+
+    try:
+        from weasyprint import WeasyPrintUnavailableError
+    except ImportError:
+        WeasyPrintUnavailableError = None
+
+    try:
         if pdf_path.exists():
             pdf_path.unlink()
         HTML(string=html_string, base_url=str(output_dir)).write_pdf(str(pdf_path))
         return str(pdf_path), True
-    except WeasyPrintUnavailableError:
-        return str(html_path), False
     except Exception as pdf_error:
+        if (
+            WeasyPrintUnavailableError is not None
+            and isinstance(pdf_error, WeasyPrintUnavailableError)
+        ):
+            return str(html_path), False
         errors.append(f"Agent6: PDF conversion failed, falling back to HTML report: {pdf_error}")
         return str(html_path), False
 

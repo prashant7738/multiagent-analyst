@@ -197,6 +197,23 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         self.assertTrue(result["report_path"].endswith(".html"))
         self.assertTrue(any("PDF conversion failed" in e for e in result["errors"]))
 
+    def test_missing_weasyprint_exception_class_falls_back_to_html_report(self):
+        errors = []
+        fake_weasyprint = SimpleNamespace(
+            HTML=SimpleNamespace(
+                __call__=lambda *_args, **_kwargs: None,
+            ),
+        )
+
+        with patch.dict("sys.modules", {"weasyprint": fake_weasyprint}):
+            report_path, pdf_written = agent_6._write_report(
+                "<html></html>", self._tmpdir.name, errors
+            )
+
+        self.assertTrue(report_path.endswith(".html"))
+        self.assertFalse(pdf_written)
+        self.assertTrue(any("PDF conversion failed" in error for error in errors))
+
     def test_missing_upstream_data_records_error_without_raising(self):
         state = _build_state()
         state["stats"] = {}

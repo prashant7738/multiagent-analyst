@@ -164,7 +164,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
              patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
-        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        report_html = Path(result["report_path"]).with_suffix(".html").read_text(encoding="utf-8")
         self.assertEqual(report_html.count("<h2>Data Quality Detail</h2>"), 1)
 
     def test_print_styles_show_scroll_reveal_content(self):
@@ -187,7 +187,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
              patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
-        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        report_html = Path(result["report_path"]).with_suffix(".html").read_text(encoding="utf-8")
         self.assertIn("Business Impact of Unusual Entries", report_html)
         self.assertIn("275955.42", report_html)
 

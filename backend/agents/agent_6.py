@@ -60,7 +60,7 @@ CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the 
 # emitting the JSON body; 1200 was too tight and routinely truncated the response
 # mid-JSON (silent fallback to the deterministic narrative). Bumped with headroom
 # for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
-AGENT6_MAX_OUTPUT_TOKENS = 4096  # story + captions + glossary need more room than the old contract
+AGENT6_MAX_OUTPUT_TOKENS = 3000  # enough room for the compact narrative contract
 MAX_CHART_CAPTIONS_FROM_LLM = 4
 
 
@@ -879,6 +879,72 @@ def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT
     return node
 
 
+def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
+    """Build a compact, narrative-only view of the deterministic facts.
+
+    The full facts remain available to report rendering and grounding checks;
+    the LLM only needs the decision-bearing summaries, not appendix data or
+    repeated quality/detail fields.
+    """
+    quality = insight_facts.get("data_quality", {}) or {}
+    quality_detail = insight_facts.get("data_quality_detail", {}) or {}
+    anomalies = insight_facts.get("anomalies", {}) or {}
+    compact_quality = {
+        key: quality.get(key)
+        for key in (
+            "overall_quality_score", "overall_quality_score_pre_anomaly",
+            "anomaly_quality_penalty", "raw_completeness_pct", "raw_missing_pct",
+            "remaining_null_pct", "statistical_outlier_row_pct",
+            "data_quality_issue_row_pct", "data_quality_issue_penalty",
+            "duplicate_rate_pct", "derived_metric_reconciliation",
+        )
+        if key in quality
+    }
+    compact_quality_detail = {
+        "duplicates": quality_detail.get("duplicates", {}),
+        "missing_values": (quality_detail.get("missing_values", []) or [])[:5],
+        "has_missing": quality_detail.get("has_missing", False),
+    }
+    compact_anomalies = {
+        key: anomalies.get(key)
+        for key in (
+            "unique_flagged_rows", "unique_flagged_row_pct", "data_quality_issue_rows",
+            "data_quality_issue_row_pct", "confident_issue_row_pct", "review_required",
+            "issues_by_rule", "rules_checked", "prioritized_anomalies", "business_impact_total",
+        )
+        if key in anomalies
+    }
+    compact_anomalies["rule_details"] = {
+        rule: {
+            key: detail.get(key)
+            for key in ("count", "pct", "review_required", "severity", "impact")
+            if key in detail
+        }
+        for rule, detail in (anomalies.get("rule_details", {}) or {}).items()
+        if isinstance(detail, dict)
+    }
+    prompt_facts = {
+        "dataset": insight_facts.get("dataset", {}),
+        "shape_explanation": insight_facts.get("shape_explanation", {}),
+        "data_quality": compact_quality,
+        "data_quality_detail": compact_quality_detail,
+        "top_correlations": insight_facts.get("top_correlations", []),
+        "excluded_columns": insight_facts.get("excluded_columns", {}),
+        "formulaic_pairs": insight_facts.get("formulaic_pairs", []),
+        "growth": insight_facts.get("growth", {}),
+        "rankings": insight_facts.get("rankings", {}),
+        "profit_breakdown": insight_facts.get("profit_breakdown", {}),
+        "cross_dimensional": insight_facts.get("cross_dimensional", {}),
+        "category_normalization": insight_facts.get("category_normalization", []),
+        "anomalies": compact_anomalies,
+        "significant_trends": insight_facts.get("significant_trends", []),
+        "validation": insight_facts.get("validation", {}),
+        "reliability": insight_facts.get("reliability", {}),
+        "charts": insight_facts.get("charts", []),
+    }
+    return _truncate_lists_for_prompt(prompt_facts, max_items=5)
+
+
 def _call_llm_for_narrative(insight_facts: dict) -> dict:
     """Ask Groq for the narrative, falling back to Gemini on provider failure.
 
@@ -887,8 +953,11 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
     cap; if Groq still fails (quota, outage, oversized prompt) Gemini is tried
     next, and the caller falls back to a deterministic narrative if both fail.
     """
-    prompt_facts = _truncate_lists_for_prompt(insight_facts)
-    user_content = f"Write the report narrative for these facts:\n{json.dumps(prompt_facts, indent=2, default=str)}"
+    prompt_facts = _build_narrative_prompt_facts(insight_facts)
+    user_content = (
+        "Write the report narrative for these facts:\n"
+        f"{json.dumps(prompt_facts, separators=(',', ':'), default=str)}"
+    )
 
     try:
         response = _get_groq_client().chat.completions.create(

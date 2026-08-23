@@ -263,6 +263,43 @@ class TestTruncateListsForPrompt(unittest.TestCase):
         self.assertEqual(len(prompt_facts["top_correlations"]), agent_6._MAX_LIST_ITEMS_FOR_PROMPT + 1)
         self.assertTrue(str(prompt_facts["top_correlations"][-1]).endswith("omitted for brevity"))
 
+    def test_narrative_prompt_payload_keeps_signals_without_report_details(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 14, "cleaned_rows": 10000, "cleaned_cols": 60},
+            "shape_explanation": {"column_explanations": ["expanded features"]},
+            "data_quality": {"overall_quality_score": 100, "remaining_null_pct": 0},
+            "data_quality_detail": {
+                "duplicates": {"exact_duplicates_removed": 4},
+                "missing_values": [{"column": f"c{i}", "missing_count": i} for i in range(20)],
+            },
+            "top_correlations": [{"col1": f"a{i}", "col2": "revenue", "pearson_r": 0.9} for i in range(20)],
+            "cross_dimensional": {
+                "category_margin_trend": {
+                    "series": [{"category": f"c{i}", "month": i, "margin": 0.2} for i in range(20)]
+                },
+            },
+            "anomalies": {
+                "data_quality_issue_rows": 5,
+                "data_quality_issue_row_pct": 0.05,
+                "rule_details": {"bad rule": {
+                    "count": 5,
+                    "pct": 0.05,
+                    "example_rows": [{f"feature_{i}": i for i in range(100)}],
+                }},
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(20)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        self.assertEqual(prompt_facts["dataset"]["raw_rows"], 10000)
+        self.assertEqual(prompt_facts["data_quality"]["overall_quality_score"], 100)
+        self.assertEqual(prompt_facts["anomalies"]["data_quality_issue_rows"], 5)
+        self.assertNotIn("example_rows", prompt_facts["anomalies"]["rule_details"]["bad rule"])
+        self.assertLess(len(serialized), 10000)
+        self.assertEqual(len(insight_facts["data_quality_detail"]["missing_values"]), 20)
+
 
 class TestRawColumnCountGuard(unittest.TestCase):
     """Guards against the executive summary silently reporting a post-transform

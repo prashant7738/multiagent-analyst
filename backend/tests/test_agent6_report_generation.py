@@ -300,6 +300,43 @@ class TestTruncateListsForPrompt(unittest.TestCase):
         self.assertLess(len(serialized), 10000)
         self.assertEqual(len(insight_facts["data_quality_detail"]["missing_values"]), 20)
 
+    def test_narrative_prompt_payload_has_hard_size_budget_for_many_dimensions(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 14, "cleaned_rows": 10000, "cleaned_cols": 60},
+            "data_quality": {"overall_quality_score": 100},
+            "rankings": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_revenue": j * 1000} for j in range(8)],
+                    "bottom": [{"label": f"bottom-{j}", "total_revenue": j * 100} for j in range(8)],
+                    "total_categories": 30,
+                }
+                for i in range(12)
+            },
+            "profit_breakdown": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_profit": j * 100} for j in range(8)],
+                    "bottom": [{"label": f"bottom-{j}", "total_profit": j * 10} for j in range(8)],
+                    "total_categories": 30,
+                }
+                for i in range(12)
+            },
+            "cross_dimensional": {
+                f"analysis_{i}": {
+                    "records": [{"group": f"group-{j}", "value": j} for j in range(20)]
+                }
+                for i in range(8)
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(20)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        self.assertLessEqual(len(serialized), agent_6.MAX_NARRATIVE_PROMPT_CHARS)
+        self.assertIn("dataset", prompt_facts)
+        self.assertIn("rankings", prompt_facts)
+        self.assertIn("cross_dimensional", prompt_facts)
+
 
 class TestRawColumnCountGuard(unittest.TestCase):
     """Guards against the executive summary silently reporting a post-transform

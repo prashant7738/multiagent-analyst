@@ -62,6 +62,7 @@ CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the 
 # for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
 AGENT6_MAX_OUTPUT_TOKENS = 3000  # enough room for the compact narrative contract
 MAX_CHART_CAPTIONS_FROM_LLM = 4
+MAX_NARRATIVE_PROMPT_CHARS = 12000
 
 
 # Terms a non-technical reader shouldn't have to decode unaided. Used two ways:
@@ -879,6 +880,45 @@ def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT
     return node
 
 
+def _compact_dimension_sections(sections: dict, max_sections: int = 4, max_rows: int = 3) -> dict:
+    """Keep the strongest bounded slice of each dimension-oriented analysis."""
+    compact = {}
+    for section_name, section in list((sections or {}).items())[:max_sections]:
+        if not isinstance(section, dict):
+            compact[section_name] = section
+            continue
+        reduced = {}
+        for key, value in section.items():
+            if key in {"top", "bottom", "records", "buckets"} and isinstance(value, list):
+                reduced[key] = value[:max_rows]
+            elif key not in {"series", "distribution", "anomaly_indices", "anomaly_values"}:
+                reduced[key] = value
+        compact[section_name] = reduced
+    return compact
+
+
+def _compact_cross_dimensional_facts(analyses: dict) -> dict:
+    """Retain labels and representative values, dropping full time series."""
+    compact = {}
+    for analysis_name, analysis in (analyses or {}).items():
+        if not isinstance(analysis, dict):
+            compact[analysis_name] = analysis
+            continue
+        reduced = {}
+        for key, value in analysis.items():
+            if isinstance(value, list):
+                reduced[key] = value[:4]
+            elif isinstance(value, dict):
+                reduced[key] = {
+                    name: rows[:4] if isinstance(rows, list) else rows
+                    for name, rows in list(value.items())[:4]
+                }
+            else:
+                reduced[key] = value
+        compact[analysis_name] = reduced
+    return compact
+
+
 def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
     """Build a compact, narrative-only view of the deterministic facts.
 
@@ -932,9 +972,9 @@ def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
         "excluded_columns": insight_facts.get("excluded_columns", {}),
         "formulaic_pairs": insight_facts.get("formulaic_pairs", []),
         "growth": insight_facts.get("growth", {}),
-        "rankings": insight_facts.get("rankings", {}),
-        "profit_breakdown": insight_facts.get("profit_breakdown", {}),
-        "cross_dimensional": insight_facts.get("cross_dimensional", {}),
+        "rankings": _compact_dimension_sections(insight_facts.get("rankings", {})),
+        "profit_breakdown": _compact_dimension_sections(insight_facts.get("profit_breakdown", {})),
+        "cross_dimensional": _compact_cross_dimensional_facts(insight_facts.get("cross_dimensional", {})),
         "category_normalization": insight_facts.get("category_normalization", []),
         "anomalies": compact_anomalies,
         "significant_trends": insight_facts.get("significant_trends", []),
@@ -942,7 +982,18 @@ def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
         "reliability": insight_facts.get("reliability", {}),
         "charts": insight_facts.get("charts", []),
     }
-    return _truncate_lists_for_prompt(prompt_facts, max_items=5)
+    prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=4)
+    serialized_length = len(json.dumps(prompt_facts, separators=(",", ":"), default=str))
+    if serialized_length > MAX_NARRATIVE_PROMPT_CHARS:
+        for key in ("data_quality_detail", "category_normalization", "excluded_columns", "formulaic_pairs"):
+            prompt_facts.pop(key, None)
+        prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=2)
+    if len(json.dumps(prompt_facts, separators=(",", ":"), default=str)) > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["cross_dimensional"] = _compact_cross_dimensional_facts(
+            prompt_facts.get("cross_dimensional", {})
+        )
+        prompt_facts["charts"] = (prompt_facts.get("charts") or [])[:3]
+    return prompt_facts
 
 
 def _call_llm_for_narrative(insight_facts: dict) -> dict:

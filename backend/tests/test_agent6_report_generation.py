@@ -342,6 +342,32 @@ class TestTruncateListsForPrompt(unittest.TestCase):
         self.assertIn("rankings", prompt_facts)
         self.assertIn("cross_dimensional", prompt_facts)
 
+    def test_narrative_prompt_payload_has_provider_headroom(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 21, "cleaned_rows": 10000, "cleaned_cols": 83},
+            "data_quality": {"overall_quality_score": 100, "remaining_null_pct": 0},
+            "top_correlations": [
+                {"col1": f"feature_{i}", "col2": "total_sales", "pearson_r": 0.9}
+                for i in range(30)
+            ],
+            "growth": {"monthly": [{"label": f"2024-{i:02d}", "growth_pct": i} for i in range(30)]},
+            "rankings": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_revenue": j * 1000} for j in range(10)],
+                    "bottom": [{"label": f"bottom-{j}", "total_revenue": j * 100} for j in range(10)],
+                }
+                for i in range(15)
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(30)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        # Leave room for the system prompt and model completion under Groq's
+        # 8,000-token per-minute request limit.
+        self.assertLessEqual(len(serialized), 7000)
+
 
 class TestRawColumnCountGuard(unittest.TestCase):
     """Guards against the executive summary silently reporting a post-transform

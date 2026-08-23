@@ -62,7 +62,9 @@ CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the 
 # for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
 AGENT6_MAX_OUTPUT_TOKENS = 3000  # enough room for the compact narrative contract
 MAX_CHART_CAPTIONS_FROM_LLM = 4
-MAX_NARRATIVE_PROMPT_CHARS = 12000
+# Keep the facts payload well below Groq's 8,000 TPM request ceiling after the
+# system prompt and reserved completion tokens are included.
+MAX_NARRATIVE_PROMPT_CHARS = 7000
 
 
 # Terms a non-technical reader shouldn't have to decode unaided. Used two ways:
@@ -983,16 +985,29 @@ def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
         "charts": insight_facts.get("charts", []),
     }
     prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=4)
-    serialized_length = len(json.dumps(prompt_facts, separators=(",", ":"), default=str))
-    if serialized_length > MAX_NARRATIVE_PROMPT_CHARS:
-        for key in ("data_quality_detail", "category_normalization", "excluded_columns", "formulaic_pairs"):
+
+    def _serialized_size():
+        return len(json.dumps(prompt_facts, separators=(",", ":"), default=str))
+
+    # Compact progressively by narrative value. Full `insight_facts` remains
+    # untouched for report rendering and claim-grounding validation.
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        for key in ("data_quality_detail", "category_normalization", "excluded_columns", "formulaic_pairs", "validation", "reliability"):
             prompt_facts.pop(key, None)
         prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=2)
-    if len(json.dumps(prompt_facts, separators=(",", ":"), default=str)) > MAX_NARRATIVE_PROMPT_CHARS:
-        prompt_facts["cross_dimensional"] = _compact_cross_dimensional_facts(
-            prompt_facts.get("cross_dimensional", {})
-        )
-        prompt_facts["charts"] = (prompt_facts.get("charts") or [])[:3]
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["rankings"] = _compact_dimension_sections(prompt_facts.get("rankings", {}), max_sections=3, max_rows=1)
+        prompt_facts["profit_breakdown"] = _compact_dimension_sections(prompt_facts.get("profit_breakdown", {}), max_sections=3, max_rows=1)
+        prompt_facts["cross_dimensional"] = _compact_cross_dimensional_facts(prompt_facts.get("cross_dimensional", {}))
+        prompt_facts["charts"] = (prompt_facts.get("charts") or [])[:2]
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["cross_dimensional"] = {}
+        prompt_facts["charts"] = []
+        prompt_facts["growth"] = {}
+        prompt_facts["significant_trends"] = []
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["rankings"] = _compact_dimension_sections(prompt_facts.get("rankings", {}), max_sections=1, max_rows=1)
+        prompt_facts["profit_breakdown"] = _compact_dimension_sections(prompt_facts.get("profit_breakdown", {}), max_sections=1, max_rows=1)
     return prompt_facts
 
 

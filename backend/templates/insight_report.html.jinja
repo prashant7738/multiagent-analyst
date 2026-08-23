@@ -367,6 +367,15 @@
   so they do not by themselves indicate a data-quality problem.
 </p>
 {% endif %}
+{% if facts.anomalies.prioritized_anomalies %}
+<h3>Business Impact of Unusual Entries</h3>
+<table>
+  <tr><th>Column</th><th>Flagged Values</th><th>Estimated Business Impact</th></tr>
+  {% for item in facts.anomalies.prioritized_anomalies %}
+  <tr><td>{{ item.column }}</td><td>{{ item.flagged_count }}</td><td>{{ item.business_impact }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
 <h3>Structural Data-Quality Issues</h3>
 {% if facts.anomalies.data_quality_issue_rows %}
 <p>
@@ -383,15 +392,6 @@
   {% if detail.review_required and detail.example_rows %}
   <tr><td colspan="3"><strong>Example rows:</strong> {{ detail.example_rows | tojson }}</td></tr>
   {% endif %}
-  {% endfor %}
-</table>
-{% endif %}
-{% if facts.anomalies.prioritized_anomalies %}
-<h3>Business Impact of Unusual Entries</h3>
-<table>
-  <tr><th>Column</th><th>Flagged Values</th><th>Estimated Business Impact</th></tr>
-  {% for item in facts.anomalies.prioritized_anomalies %}
-  <tr><td>{{ item.column }}</td><td>{{ item.flagged_count }}</td><td>{{ item.business_impact }}</td></tr>
   {% endfor %}
 </table>
 {% endif %}
@@ -438,6 +438,11 @@
   figures match pipeline output (confidence {{ grounding.confidence }}).
   {% if grounding.claims_flagged %}
     {{ grounding.claims_flagged }} figure(s) could not be matched and should be double-checked.
+    <ul>
+      {% for claim in grounding.flagged_examples %}
+      <li>{{ claim.source }}: {{ claim.value }} could not be matched to the deterministic pipeline facts.</li>
+      {% endfor %}
+    </ul>
   {% endif %}
   This only checks the narrative against the pipeline&rsquo;s own intermediate values &mdash; it does
   not verify those values against the original source data.

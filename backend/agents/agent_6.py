@@ -672,8 +672,9 @@ def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: 
         for claim in _extract_numeric_claims(text):
             checked += 1
             is_grounded = any(
-                abs(claim - known) <= max(tolerance, abs(known) * 0.05)
+                abs(claim - candidate) <= max(tolerance, abs(candidate) * 0.05)
                 for known in known_values
+                for candidate in ({known, known * 100, known / 100} if known else {known})
             )
             if is_grounded:
                 grounded += 1

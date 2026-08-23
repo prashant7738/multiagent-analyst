@@ -14,6 +14,26 @@ def _schema(revenue_col, cost_col):
 
 
 class TestDerivedMetricReconciliation(unittest.TestCase):
+    def test_profit_uses_total_cost_when_unit_cost_appears_first(self):
+        revenue = pd.Series([1000.0, 1200.0, 1400.0, 1600.0, 1800.0])
+        unit_cost = pd.Series([10.0, 12.0, 14.0, 16.0, 18.0])
+        total_cost = pd.Series([400.0, 500.0, 600.0, 700.0, 800.0])
+        df = pd.DataFrame({"Unit Cost": unit_cost, "Total Revenue": revenue,
+                           "Total Cost": total_cost,
+                           "Total Profit": revenue - total_cost})
+        schema = {
+            "Total Revenue": {"semantic_tag": "currency", "financial_role": "revenue"},
+            "Unit Cost": {"semantic_tag": "currency", "financial_role": "cost"},
+            "Total Cost": {"semantic_tag": "currency", "financial_role": "cost"},
+        }
+
+        result, _, derivation_map = agent_3._derive_business_metrics(df, schema)
+        notes, divergences = agent_3._reconcile_derived_metrics(result, derivation_map)
+
+        self.assertEqual(derivation_map["derived_profit"], ["Total Revenue", "Total Cost"])
+        self.assertEqual(divergences, [])
+        self.assertTrue(any("Reconciliation OK" in note for note in notes))
+
     def test_agreeing_ground_truth_column_is_not_flagged(self):
         rev = pd.Series(np.arange(100, 200, dtype=float))
         cost = pd.Series(np.arange(50, 150, dtype=float))

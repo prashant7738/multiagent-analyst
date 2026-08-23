@@ -4,6 +4,24 @@ from agents import agent_6
 
 
 class TestAgent6ClaimGrounding(unittest.TestCase):
+    def test_percentage_claim_matches_fraction_fact(self):
+        report = agent_6._check_narrative_grounding(
+            {"growth": {"rate": 0.12}},
+            {"executive_summary": "Growth reached 12%.", "key_findings": []},
+        )
+
+        self.assertEqual(report["claims_grounded"], 1)
+        self.assertEqual(report["claims_flagged"], 0)
+
+    def test_fraction_claim_matches_percentage_fact(self):
+        report = agent_6._check_narrative_grounding(
+            {"growth": {"rate": 12.0}},
+            {"executive_summary": "Growth reached 0.12.", "key_findings": []},
+        )
+
+        self.assertEqual(report["claims_grounded"], 1)
+        self.assertEqual(report["claims_flagged"], 0)
+
     def test_grounded_claim_matches_known_fact(self):
         insight_facts = {
             "top_correlations": [{"col1": "revenue", "col2": "cost", "pearson_r": 0.97}],

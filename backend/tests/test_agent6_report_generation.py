@@ -167,6 +167,25 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         report_html = Path(result["report_path"]).read_text(encoding="utf-8")
         self.assertEqual(report_html.count("<h2>Data Quality Detail</h2>"), 1)
 
+    def test_report_renders_business_impact_without_structural_issues(self):
+        state = _build_state()
+        state["stats"]["anomaly_summary"].update({
+            "unique_flagged_rows": 1,
+            "prioritized_anomalies": [{
+                "column": "revenue",
+                "flagged_count": 1,
+                "business_impact": 275955.42,
+            }],
+        })
+
+        with patch.object(agent_6, "_get_groq_client", side_effect=RuntimeError("no groq key")), \
+             patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
+            result = agent_6.agent6_insight_report_generator(state)
+
+        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        self.assertIn("Business Impact of Unusual Entries", report_html)
+        self.assertIn("275955.42", report_html)
+
     def test_pdf_conversion_failure_falls_back_to_html_report(self):
         state = _build_state()
 

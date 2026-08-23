@@ -1279,6 +1279,7 @@ def _find_financial_role_col(df, schema_blueprint, role, require_variation=False
     column) is not a usable business metric even if the tag matches.
     """
     schema_blueprint = schema_blueprint or {}
+    candidates = []
     for col in df.columns:
         meta = schema_blueprint.get(col, {})
         if not (isinstance(meta, dict) and meta.get("financial_role") == role and _is_numeric_col(df, col)):
@@ -1287,8 +1288,17 @@ def _find_financial_role_col(df, schema_blueprint, role, require_variation=False
             values = pd.to_numeric(df[col], errors="coerce").dropna()
             if len(values) < 2 or values.nunique() <= 1:
                 continue
-        return col
-    return None
+        candidates.append(col)
+
+    if not candidates:
+        return None
+
+    per_unit_tokens = {"unit", "per", "avg", "average", "each"}
+    aggregate_candidates = [
+        col for col in candidates
+        if not (set(re.split(r"[^a-z0-9]+", str(col).lower())) & per_unit_tokens)
+    ]
+    return (aggregate_candidates or candidates)[0]
 
 
 def _is_numeric_col(df, col):

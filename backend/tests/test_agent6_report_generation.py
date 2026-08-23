@@ -167,6 +167,11 @@ class TestAgent6ReportGeneration(unittest.TestCase):
         report_html = Path(result["report_path"]).read_text(encoding="utf-8")
         self.assertEqual(report_html.count("<h2>Data Quality Detail</h2>"), 1)
 
+    def test_print_styles_show_scroll_reveal_content(self):
+        template = (Path(agent_6.TEMPLATE_DIR) / agent_6.TEMPLATE_NAME).read_text(encoding="utf-8")
+        print_styles = template.split("@media print", 1)[1]
+        self.assertIn("[data-reveal] { opacity: 1; transform: none; transition: none; }", print_styles)
+
     def test_report_renders_business_impact_without_structural_issues(self):
         state = _build_state()
         state["stats"]["anomaly_summary"].update({

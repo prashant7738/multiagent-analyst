@@ -164,8 +164,13 @@ class TestAgent6ReportGeneration(unittest.TestCase):
              patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
-        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        report_html = Path(result["report_path"]).with_suffix(".html").read_text(encoding="utf-8")
         self.assertEqual(report_html.count("<h2>Data Quality Detail</h2>"), 1)
+
+    def test_print_styles_show_scroll_reveal_content(self):
+        template = (Path(agent_6.TEMPLATE_DIR) / agent_6.TEMPLATE_NAME).read_text(encoding="utf-8")
+        print_styles = template.split("@media print", 1)[1]
+        self.assertIn("[data-reveal] { opacity: 1; transform: none; transition: none; }", print_styles)
 
     def test_report_renders_business_impact_without_structural_issues(self):
         state = _build_state()
@@ -182,7 +187,7 @@ class TestAgent6ReportGeneration(unittest.TestCase):
              patch.object(agent_6, "_call_gemini_json_with_failover", side_effect=RuntimeError("no gemini key")):
             result = agent_6.agent6_insight_report_generator(state)
 
-        report_html = Path(result["report_path"]).read_text(encoding="utf-8")
+        report_html = Path(result["report_path"]).with_suffix(".html").read_text(encoding="utf-8")
         self.assertIn("Business Impact of Unusual Entries", report_html)
         self.assertIn("275955.42", report_html)
 
@@ -196,6 +201,23 @@ class TestAgent6ReportGeneration(unittest.TestCase):
 
         self.assertTrue(result["report_path"].endswith(".html"))
         self.assertTrue(any("PDF conversion failed" in e for e in result["errors"]))
+
+    def test_missing_weasyprint_exception_class_falls_back_to_html_report(self):
+        errors = []
+        fake_weasyprint = SimpleNamespace(
+            HTML=SimpleNamespace(
+                __call__=lambda *_args, **_kwargs: None,
+            ),
+        )
+
+        with patch.dict("sys.modules", {"weasyprint": fake_weasyprint}):
+            report_path, pdf_written = agent_6._write_report(
+                "<html></html>", self._tmpdir.name, errors
+            )
+
+        self.assertTrue(report_path.endswith(".html"))
+        self.assertFalse(pdf_written)
+        self.assertTrue(any("PDF conversion failed" in error for error in errors))
 
     def test_missing_upstream_data_records_error_without_raising(self):
         state = _build_state()
@@ -245,6 +267,106 @@ class TestTruncateListsForPrompt(unittest.TestCase):
 
         self.assertEqual(len(prompt_facts["top_correlations"]), agent_6._MAX_LIST_ITEMS_FOR_PROMPT + 1)
         self.assertTrue(str(prompt_facts["top_correlations"][-1]).endswith("omitted for brevity"))
+
+    def test_narrative_prompt_payload_keeps_signals_without_report_details(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 14, "cleaned_rows": 10000, "cleaned_cols": 60},
+            "shape_explanation": {"column_explanations": ["expanded features"]},
+            "data_quality": {"overall_quality_score": 100, "remaining_null_pct": 0},
+            "data_quality_detail": {
+                "duplicates": {"exact_duplicates_removed": 4},
+                "missing_values": [{"column": f"c{i}", "missing_count": i} for i in range(20)],
+            },
+            "top_correlations": [{"col1": f"a{i}", "col2": "revenue", "pearson_r": 0.9} for i in range(20)],
+            "cross_dimensional": {
+                "category_margin_trend": {
+                    "series": [{"category": f"c{i}", "month": i, "margin": 0.2} for i in range(20)]
+                },
+            },
+            "anomalies": {
+                "data_quality_issue_rows": 5,
+                "data_quality_issue_row_pct": 0.05,
+                "rule_details": {"bad rule": {
+                    "count": 5,
+                    "pct": 0.05,
+                    "example_rows": [{f"feature_{i}": i for i in range(100)}],
+                }},
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(20)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        self.assertEqual(prompt_facts["dataset"]["raw_rows"], 10000)
+        self.assertEqual(prompt_facts["data_quality"]["overall_quality_score"], 100)
+        self.assertEqual(prompt_facts["anomalies"]["data_quality_issue_rows"], 5)
+        self.assertNotIn("example_rows", prompt_facts["anomalies"]["rule_details"]["bad rule"])
+        self.assertLess(len(serialized), 10000)
+        self.assertEqual(len(insight_facts["data_quality_detail"]["missing_values"]), 20)
+
+    def test_narrative_prompt_payload_has_hard_size_budget_for_many_dimensions(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 14, "cleaned_rows": 10000, "cleaned_cols": 60},
+            "data_quality": {"overall_quality_score": 100},
+            "rankings": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_revenue": j * 1000} for j in range(8)],
+                    "bottom": [{"label": f"bottom-{j}", "total_revenue": j * 100} for j in range(8)],
+                    "total_categories": 30,
+                }
+                for i in range(12)
+            },
+            "profit_breakdown": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_profit": j * 100} for j in range(8)],
+                    "bottom": [{"label": f"bottom-{j}", "total_profit": j * 10} for j in range(8)],
+                    "total_categories": 30,
+                }
+                for i in range(12)
+            },
+            "cross_dimensional": {
+                f"analysis_{i}": {
+                    "records": [{"group": f"group-{j}", "value": j} for j in range(20)]
+                }
+                for i in range(8)
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(20)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        self.assertLessEqual(len(serialized), agent_6.MAX_NARRATIVE_PROMPT_CHARS)
+        self.assertIn("dataset", prompt_facts)
+        self.assertIn("rankings", prompt_facts)
+        self.assertIn("cross_dimensional", prompt_facts)
+
+    def test_narrative_prompt_payload_has_provider_headroom(self):
+        insight_facts = {
+            "dataset": {"raw_rows": 10000, "raw_cols": 21, "cleaned_rows": 10000, "cleaned_cols": 83},
+            "data_quality": {"overall_quality_score": 100, "remaining_null_pct": 0},
+            "top_correlations": [
+                {"col1": f"feature_{i}", "col2": "total_sales", "pearson_r": 0.9}
+                for i in range(30)
+            ],
+            "growth": {"monthly": [{"label": f"2024-{i:02d}", "growth_pct": i} for i in range(30)]},
+            "rankings": {
+                f"dimension_{i}": {
+                    "top": [{"label": f"top-{j}", "total_revenue": j * 1000} for j in range(10)],
+                    "bottom": [{"label": f"bottom-{j}", "total_revenue": j * 100} for j in range(10)],
+                }
+                for i in range(15)
+            },
+            "charts": [{"id": f"chart-{i}", "title": "Revenue", "what_it_shows": "Trend"} for i in range(30)],
+        }
+
+        prompt_facts = agent_6._build_narrative_prompt_facts(insight_facts)
+        serialized = json.dumps(prompt_facts, separators=(",", ":"), default=str)
+
+        # Leave room for the system prompt and model completion under Groq's
+        # 8,000-token per-minute request limit.
+        self.assertLessEqual(len(serialized), 7000)
 
 
 class TestRawColumnCountGuard(unittest.TestCase):

@@ -60,8 +60,11 @@ CLAIM_GROUNDING_TOLERANCE = 1.0  # absolute tolerance (also scaled by 5% of the 
 # emitting the JSON body; 1200 was too tight and routinely truncated the response
 # mid-JSON (silent fallback to the deterministic narrative). Bumped with headroom
 # for the ~20-25 bullet points the narrative prompt asks for plus thinking overhead.
-AGENT6_MAX_OUTPUT_TOKENS = 4096  # story + captions + glossary need more room than the old contract
+AGENT6_MAX_OUTPUT_TOKENS = 3000  # enough room for the compact narrative contract
 MAX_CHART_CAPTIONS_FROM_LLM = 4
+# Keep the facts payload well below Groq's 8,000 TPM request ceiling after the
+# system prompt and reserved completion tokens are included.
+MAX_NARRATIVE_PROMPT_CHARS = 7000
 
 
 # Terms a non-technical reader shouldn't have to decode unaided. Used two ways:
@@ -900,6 +903,135 @@ def _truncate_lists_for_prompt(node, max_items: int = _MAX_LIST_ITEMS_FOR_PROMPT
     return node
 
 
+def _compact_dimension_sections(sections: dict, max_sections: int = 4, max_rows: int = 3) -> dict:
+    """Keep the strongest bounded slice of each dimension-oriented analysis."""
+    compact = {}
+    for section_name, section in list((sections or {}).items())[:max_sections]:
+        if not isinstance(section, dict):
+            compact[section_name] = section
+            continue
+        reduced = {}
+        for key, value in section.items():
+            if key in {"top", "bottom", "records", "buckets"} and isinstance(value, list):
+                reduced[key] = value[:max_rows]
+            elif key not in {"series", "distribution", "anomaly_indices", "anomaly_values"}:
+                reduced[key] = value
+        compact[section_name] = reduced
+    return compact
+
+
+def _compact_cross_dimensional_facts(analyses: dict) -> dict:
+    """Retain labels and representative values, dropping full time series."""
+    compact = {}
+    for analysis_name, analysis in (analyses or {}).items():
+        if not isinstance(analysis, dict):
+            compact[analysis_name] = analysis
+            continue
+        reduced = {}
+        for key, value in analysis.items():
+            if isinstance(value, list):
+                reduced[key] = value[:4]
+            elif isinstance(value, dict):
+                reduced[key] = {
+                    name: rows[:4] if isinstance(rows, list) else rows
+                    for name, rows in list(value.items())[:4]
+                }
+            else:
+                reduced[key] = value
+        compact[analysis_name] = reduced
+    return compact
+
+
+def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
+    """Build a compact, narrative-only view of the deterministic facts.
+
+    The full facts remain available to report rendering and grounding checks;
+    the LLM only needs the decision-bearing summaries, not appendix data or
+    repeated quality/detail fields.
+    """
+    quality = insight_facts.get("data_quality", {}) or {}
+    quality_detail = insight_facts.get("data_quality_detail", {}) or {}
+    anomalies = insight_facts.get("anomalies", {}) or {}
+    compact_quality = {
+        key: quality.get(key)
+        for key in (
+            "overall_quality_score", "overall_quality_score_pre_anomaly",
+            "anomaly_quality_penalty", "raw_completeness_pct", "raw_missing_pct",
+            "remaining_null_pct", "statistical_outlier_row_pct",
+            "data_quality_issue_row_pct", "data_quality_issue_penalty",
+            "duplicate_rate_pct", "derived_metric_reconciliation",
+        )
+        if key in quality
+    }
+    compact_quality_detail = {
+        "duplicates": quality_detail.get("duplicates", {}),
+        "missing_values": (quality_detail.get("missing_values", []) or [])[:5],
+        "has_missing": quality_detail.get("has_missing", False),
+    }
+    compact_anomalies = {
+        key: anomalies.get(key)
+        for key in (
+            "unique_flagged_rows", "unique_flagged_row_pct", "data_quality_issue_rows",
+            "data_quality_issue_row_pct", "confident_issue_row_pct", "review_required",
+            "issues_by_rule", "rules_checked", "prioritized_anomalies", "business_impact_total",
+        )
+        if key in anomalies
+    }
+    compact_anomalies["rule_details"] = {
+        rule: {
+            key: detail.get(key)
+            for key in ("count", "pct", "review_required", "severity", "impact")
+            if key in detail
+        }
+        for rule, detail in (anomalies.get("rule_details", {}) or {}).items()
+        if isinstance(detail, dict)
+    }
+    prompt_facts = {
+        "dataset": insight_facts.get("dataset", {}),
+        "shape_explanation": insight_facts.get("shape_explanation", {}),
+        "data_quality": compact_quality,
+        "data_quality_detail": compact_quality_detail,
+        "top_correlations": insight_facts.get("top_correlations", []),
+        "excluded_columns": insight_facts.get("excluded_columns", {}),
+        "formulaic_pairs": insight_facts.get("formulaic_pairs", []),
+        "growth": insight_facts.get("growth", {}),
+        "rankings": _compact_dimension_sections(insight_facts.get("rankings", {})),
+        "profit_breakdown": _compact_dimension_sections(insight_facts.get("profit_breakdown", {})),
+        "cross_dimensional": _compact_cross_dimensional_facts(insight_facts.get("cross_dimensional", {})),
+        "category_normalization": insight_facts.get("category_normalization", []),
+        "anomalies": compact_anomalies,
+        "significant_trends": insight_facts.get("significant_trends", []),
+        "validation": insight_facts.get("validation", {}),
+        "reliability": insight_facts.get("reliability", {}),
+        "charts": insight_facts.get("charts", []),
+    }
+    prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=4)
+
+    def _serialized_size():
+        return len(json.dumps(prompt_facts, separators=(",", ":"), default=str))
+
+    # Compact progressively by narrative value. Full `insight_facts` remains
+    # untouched for report rendering and claim-grounding validation.
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        for key in ("data_quality_detail", "category_normalization", "excluded_columns", "formulaic_pairs", "validation", "reliability"):
+            prompt_facts.pop(key, None)
+        prompt_facts = _truncate_lists_for_prompt(prompt_facts, max_items=2)
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["rankings"] = _compact_dimension_sections(prompt_facts.get("rankings", {}), max_sections=3, max_rows=1)
+        prompt_facts["profit_breakdown"] = _compact_dimension_sections(prompt_facts.get("profit_breakdown", {}), max_sections=3, max_rows=1)
+        prompt_facts["cross_dimensional"] = _compact_cross_dimensional_facts(prompt_facts.get("cross_dimensional", {}))
+        prompt_facts["charts"] = (prompt_facts.get("charts") or [])[:2]
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["cross_dimensional"] = {}
+        prompt_facts["charts"] = []
+        prompt_facts["growth"] = {}
+        prompt_facts["significant_trends"] = []
+    if _serialized_size() > MAX_NARRATIVE_PROMPT_CHARS:
+        prompt_facts["rankings"] = _compact_dimension_sections(prompt_facts.get("rankings", {}), max_sections=1, max_rows=1)
+        prompt_facts["profit_breakdown"] = _compact_dimension_sections(prompt_facts.get("profit_breakdown", {}), max_sections=1, max_rows=1)
+    return prompt_facts
+
+
 def _call_llm_for_narrative(insight_facts: dict) -> dict:
     """Ask Groq for the narrative, falling back to Gemini on provider failure.
 
@@ -908,8 +1040,11 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
     cap; if Groq still fails (quota, outage, oversized prompt) Gemini is tried
     next, and the caller falls back to a deterministic narrative if both fail.
     """
-    prompt_facts = _truncate_lists_for_prompt(insight_facts)
-    user_content = f"Write the report narrative for these facts:\n{json.dumps(prompt_facts, indent=2, default=str)}"
+    prompt_facts = _build_narrative_prompt_facts(insight_facts)
+    user_content = (
+        "Write the report narrative for these facts:\n"
+        f"{json.dumps(prompt_facts, separators=(',', ':'), default=str)}"
+    )
 
     try:
         response = _get_groq_client().chat.completions.create(
@@ -1614,14 +1749,27 @@ def _write_report(html_string, reports_dir, errors, run_id: str | None = None):
 
     pdf_path = output_dir / "insight_report.pdf"
     try:
-        from weasyprint import HTML, WeasyPrintUnavailableError
+        from weasyprint import HTML
+    except Exception as import_error:
+        errors.append(f"Agent6: PDF conversion failed, falling back to HTML report: {import_error}")
+        return str(html_path), False
+
+    try:
+        from weasyprint import WeasyPrintUnavailableError
+    except ImportError:
+        WeasyPrintUnavailableError = None
+
+    try:
         if pdf_path.exists():
             pdf_path.unlink()
         HTML(string=html_string, base_url=str(output_dir)).write_pdf(str(pdf_path))
         return str(pdf_path), True
-    except WeasyPrintUnavailableError:
-        return str(html_path), False
     except Exception as pdf_error:
+        if (
+            WeasyPrintUnavailableError is not None
+            and isinstance(pdf_error, WeasyPrintUnavailableError)
+        ):
+            return str(html_path), False
         errors.append(f"Agent6: PDF conversion failed, falling back to HTML report: {pdf_error}")
         return str(html_path), False
 

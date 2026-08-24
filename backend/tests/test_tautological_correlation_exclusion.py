@@ -77,6 +77,44 @@ class TestTautologicalCorrelationExclusion(unittest.TestCase):
         )
         self.assertEqual(correlation["formulaic_pairs"], [])
 
+    def test_excludes_raw_revenue_profit_formula_pair(self):
+        rng = np.random.RandomState(2)
+        revenue = rng.uniform(100, 1000, 60)
+        cost = rng.uniform(50, 500, 60)
+        profit = revenue - cost
+        df = pd.DataFrame({
+            "Revenue": revenue,
+            "Cost": cost,
+            "Profit": profit,
+            "Unrelated": rng.uniform(0, 1, 60),
+        })
+        schema_blueprint = {
+            "Revenue": {"financial_role": "revenue"},
+            "Cost": {"financial_role": "cost"},
+            "Profit": {"financial_role": "profit"},
+            "Unrelated": {"semantic_tag": "currency"},
+            "__metadata__": {
+                "raw_formula_relationships": [{
+                    "result": "Profit",
+                    "sources": ["Revenue", "Cost"],
+                    "operation": "subtract",
+                }],
+            },
+        }
+
+        correlation, _ = agent_4._correlation(df, schema_blueprint)
+
+        formulaic_pairs = {
+            frozenset((p["col1"], p["col2"]))
+            for p in correlation["formulaic_pairs"]
+        }
+        strong_pairs = {
+            frozenset((p["col1"], p["col2"]))
+            for p in correlation["strong_pairs"]
+        }
+        self.assertIn(frozenset(("Revenue", "Profit")), formulaic_pairs)
+        self.assertNotIn(frozenset(("Revenue", "Profit")), strong_pairs)
+
     def test_is_formulaic_pair_checks_both_directions(self):
         derivation_map = {"derived_profit": ["revenue", "cost"]}
         self.assertTrue(agent_4._is_formulaic_pair("derived_profit", "revenue", derivation_map))

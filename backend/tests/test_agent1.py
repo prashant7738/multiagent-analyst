@@ -174,6 +174,14 @@ class TestAgent1ErrorHandling(unittest.TestCase):
         # raw_profile should be empty / default (not populated on failure)
         self.assertFalse(result.get("raw_profile"))
 
+    def test_load_failure_records_blocked_reliability(self):
+        result = self.profiler(_make_state("/nonexistent/path/data.csv"))
+
+        reliability = result["reliability"]
+        self.assertEqual(reliability["stage_confidence"]["agent1"], 0.0)
+        self.assertEqual(reliability["overall_confidence"], 0.0)
+        self.assertEqual(reliability["decision_readiness"], "blocked")
+
 
 class TestAgent1MultiFormatDispatch(unittest.TestCase):
     @classmethod

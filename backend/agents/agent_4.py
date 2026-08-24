@@ -14,6 +14,7 @@ from agents.agent_1 import GraphState
 from agents.agent_3 import _is_count_field
 from agents.rule_definitions import rule_manifest
 from main import update_reliability
+from agents.report_style import safe_filename_component
 
 warnings.filterwarnings("ignore")
 
@@ -96,12 +97,14 @@ def _thin_axis_tick_labels(ax, max_labels=MAX_XTICK_LABELS):
         label.set_visible(i % step == 0)
     for label in ax.get_xticklabels():
         if label.get_visible():
-            label.set_rotation(90)
-            label.set_fontsize(7)
+            label.set_rotation(45)
+            label.set_ha("right")
+            label.set_fontsize(8)
 
 
 def _save(fig, name):
-    path = os.path.join(_run_charts_dir(), f"{name}.png")
+    safe_name = safe_filename_component(name)
+    path = os.path.join(_run_charts_dir(), f"{safe_name}.png")
     if os.path.exists(path):
         os.remove(path)
     for ax in fig.get_axes():
@@ -476,10 +479,24 @@ def _get_derivation_map(schema_blueprint):
     return derivation_map if isinstance(derivation_map, dict) else {}
 
 
-def _is_formulaic_pair(c1, c2, derivation_map):
+def _get_raw_formula_relationships(schema_blueprint):
+    metadata = schema_blueprint.get("__metadata__")
+    if not isinstance(metadata, dict):
+        return []
+    relationships = metadata.get("raw_formula_relationships")
+    return relationships if isinstance(relationships, list) else []
+
+
+def _is_formulaic_pair(c1, c2, derivation_map, raw_formula_relationships=None):
     """True if c1/c2 are directly related by a known formula (one is derived
     from the other), not just incidentally correlated."""
-    return c2 in derivation_map.get(c1, []) or c1 in derivation_map.get(c2, [])
+    if c2 in derivation_map.get(c1, []) or c1 in derivation_map.get(c2, []):
+        return True
+    for relationship in raw_formula_relationships or []:
+        members = {relationship.get("result"), *(relationship.get("sources") or [])}
+        if c1 in members and c2 in members and c1 != c2:
+            return True
+    return False
 
 
 def _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
@@ -520,6 +537,7 @@ def _correlation(df, schema_blueprint):
 
     flagged_columns = flag_leakage_columns(df, pearson)
     derivation_map = _get_derivation_map(schema_blueprint)
+    raw_formula_relationships = _get_raw_formula_relationships(schema_blueprint)
 
     strong_pairs = []
     max_abs_r = 0.0
@@ -536,7 +554,7 @@ def _correlation(df, schema_blueprint):
                     "direction": "positive" if r > 0 else "negative",
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
                 }
-                if _is_formulaic_pair(c1, c2, derivation_map) or _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
+                if _is_formulaic_pair(c1, c2, derivation_map, raw_formula_relationships) or _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
                     formulaic_pairs.append(pair)
                 elif c1 in flagged_columns or c2 in flagged_columns:
                     excluded_pairs.append(pair)
@@ -699,13 +717,8 @@ def _growth_rates(df, schema_blueprint):
         result["quarterly"] = quarterly.dropna().to_dict(orient="records")
 
         if len(quarterly) >= 2 and _has_meaningful_variation(quarterly[rev_col]):
-            if len(quarterly) > MAX_TIME_SERIES_CHART_POINTS:
-                chart_data = quarterly.groupby(year_col, as_index=False)[rev_col].sum()
-                chart_data["label"] = chart_data[year_col].astype(str)
-                title = f"Yearly {label} (aggregated from {len(quarterly)} quarters)"
-            else:
-                chart_data = quarterly
-                title = f"Quarterly {label}"
+            chart_data = quarterly
+            title = f"Quarterly {label}"
             fig, ax = plt.subplots(figsize=(max(6, len(chart_data)+2), 4))
             bars = ax.bar(chart_data["label"], chart_data[rev_col],
                           color=COLORS["secondary"], alpha=0.85)

@@ -418,7 +418,14 @@ def agent1_structural_profiler(state: GraphState) -> GraphState:
         df = _load_dataframe(csv_path, sheet_name=sheet_name)
     except Exception as e:
         errors.append(f"Agent1: File load failed — {e}")
-        return {**state, "errors": errors}
+        state_with_reliability = update_reliability(
+            state,
+            "agent1",
+            0.0,
+            evidence=["file_load_failed"],
+            decision_readiness="blocked",
+        )
+        return {**state_with_reliability, "errors": errors}
 
     # Capture raw shape immediately, before any transform (encoding, feature
     # engineering, etc.) ever touches the dataframe. Every downstream agent that

@@ -1057,6 +1057,7 @@ def _build_narrative_prompt_facts(insight_facts: dict) -> dict:
             "unique_flagged_rows", "unique_flagged_row_pct", "data_quality_issue_rows",
             "data_quality_issue_row_pct", "confident_issue_row_pct", "review_required",
             "issues_by_rule", "rules_checked", "prioritized_anomalies", "business_impact_total",
+            "business_impact_ceiling",
         )
         if key in anomalies
     }
@@ -1332,7 +1333,43 @@ def _fallback_narrative(insight_facts: dict) -> dict:
         )
 
     recommendations = []
+    for dimension, data in (insight_facts.get("profit_breakdown") or {}).items():
+        candidates = [
+            row for row in (data.get("top") or []) + (data.get("bottom") or [])
+            if row.get("total_profit") is not None and float(row["total_profit"]) < 0
+        ]
+        if candidates:
+            worst = min(candidates, key=lambda row: float(row["total_profit"]))
+            recommendations.append(
+                f"Investigate '{worst[dimension]}' in {dimension}: it shows negative total profit "
+                f"({worst['total_profit']})."
+            )
+            break
     rankings = insight_facts.get("rankings") or {}
+    for dimension, profit_data in (insight_facts.get("profit_breakdown") or {}).items():
+        revenue_data = rankings.get(dimension) or {}
+        revenue_rows = {
+            row.get(dimension): row for row in (revenue_data.get("top") or []) + (revenue_data.get("bottom") or [])
+        }
+        profit_rows = {
+            row.get(dimension): row for row in (profit_data.get("top") or []) + (profit_data.get("bottom") or [])
+        }
+        underperformers = []
+        for value in revenue_rows.keys() & profit_rows.keys():
+            revenue_share = revenue_rows[value].get("revenue_share_pct")
+            profit_share = profit_rows[value].get("profit_share_pct")
+            if revenue_share is None or profit_share is None:
+                continue
+            gap = float(revenue_share) - float(profit_share)
+            if gap >= 5:
+                underperformers.append((gap, value, revenue_share, profit_share))
+        if underperformers:
+            gap, value, revenue_share, profit_share = max(underperformers)
+            recommendations.append(
+                f"Review '{value}' in {dimension}: it contributes {revenue_share}% of revenue "
+                f"but only {profit_share}% of profit, a {round(gap, 2)} percentage-point gap."
+            )
+            break
     for dimension, data in rankings.items():
         weakest = (data.get("bottom") or [None])[0]
         if weakest and weakest.get(dimension) is not None:
@@ -1601,6 +1638,7 @@ def _ground_recommendations(insight_facts, narrative):
         for item in (insight_facts.get("anomalies") or {}).get("prioritized_anomalies", [])
         if item.get("business_impact") is not None
     }
+    impact_ceiling = (insight_facts.get("anomalies") or {}).get("business_impact_ceiling")
 
     def _recommendation_is_traceable(recommendation):
         text = str(recommendation)
@@ -1608,11 +1646,19 @@ def _ground_recommendations(insight_facts, narrative):
         mentions_money = "$" in text or any(word in text.casefold() for word in ("impact", "revenue", "cost"))
         if not mentions_money or not numeric_claims:
             return True
-        return any(
+        within_known_impact = any(
             any(abs(claim - impact) <= max(CLAIM_GROUNDING_TOLERANCE, abs(impact) * 0.05)
                 for impact in anomaly_impacts)
             for claim in numeric_claims
         )
+        if impact_ceiling is not None:
+            try:
+                within_known_impact = within_known_impact and all(
+                    claim <= float(impact_ceiling) for claim in numeric_claims
+                )
+            except (TypeError, ValueError):
+                pass
+        return within_known_impact
 
     grounded = [
         recommendation for recommendation in (narrative.get("recommendations", []) or [])
@@ -1622,7 +1668,7 @@ def _ground_recommendations(insight_facts, narrative):
     for recommendation in fallback:
         if len(grounded) >= 5:
             break
-        if recommendation not in grounded:
+        if recommendation not in grounded and _recommendation_is_traceable(recommendation):
             grounded.append(recommendation)
     return grounded[:5]
 
@@ -1765,7 +1811,14 @@ def _render_html(insight_facts, narrative, chart_paths, state):
 
     # Legacy PNG paths → image entries (backwards compatibility + tests).
     legacy_entries = []
+    represented_paths = {
+        str(spec.get("png_path"))
+        for spec in (state.get("chart_specs") or [])
+        if isinstance(spec, dict) and spec.get("png_path")
+    }
     for p in (chart_paths or []):
+        if str(p) in represented_paths:
+            continue
         path = Path(p)
         if not path.exists():
             continue
@@ -2012,6 +2065,11 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
     narrative["glossary_terms"] = _build_dynamic_glossary(narrative)
 
     claims_grounding = _check_narrative_grounding(insight_facts, narrative)
+    if claims_grounding["claims_flagged"] and narrative.get("source", narrative_source) != "fallback":
+        narrative = dict(deterministic)
+        narrative["recommendations"] = _ground_recommendations(insight_facts, narrative)
+        narrative = _normalize_narrative_evidence_tags(narrative)
+        claims_grounding = _check_narrative_grounding(insight_facts, narrative)
     narrative["claims_grounding"] = claims_grounding
     if claims_grounding["claims_flagged"]:
         print(

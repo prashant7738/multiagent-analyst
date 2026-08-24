@@ -55,6 +55,15 @@ class TestAgent6ClaimGrounding(unittest.TestCase):
         self.assertEqual(report["claims_flagged"], 1)
         self.assertEqual(report["flagged_examples"][0]["value"], 58.0)
 
+    def test_unmatched_negative_claim_in_typed_finding_is_flagged(self):
+        report = agent_6._check_narrative_grounding(
+            {"data_quality": {"overall_quality_score": 86.0}},
+            {"key_findings": [{"claim": "Profit fell to -100.0.", "type": "fact"}]},
+        )
+
+        self.assertEqual(report["claims_flagged"], 1)
+        self.assertEqual(report["flagged_examples"][0]["value"], -100.0)
+
     def test_small_ordinal_numbers_are_not_treated_as_claims(self):
         insight_facts = {"dataset": {"rows": 340}}
         narrative = {

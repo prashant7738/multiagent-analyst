@@ -1080,6 +1080,10 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
     result = {}
     all_anomaly_indices = set()
     impact_cols = _impact_columns(df)
+    impact_ceiling = None
+    attributed_impact_indices = set()
+    if impact_cols:
+        impact_ceiling = round(float(df[impact_cols].apply(pd.to_numeric, errors="coerce").abs().sum().sum()), 2)
     for col in _numeric_cols(df, schema_blueprint):
         s = df[col].dropna()
         if len(s) < 4:
@@ -1130,8 +1134,20 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
                 "col_mean":        round(col_mean, 4),
                 "col_std":         round(col_std, 4),
             }
-            impact_values = df.loc[anomaly_indices, impact_cols].apply(pd.to_numeric, errors="coerce") if impact_cols else df.loc[anomaly_indices, [col]].apply(pd.to_numeric, errors="coerce")
-            result[col]["business_impact"] = round(float(impact_values.abs().sum().sum()), 2)
+            new_impact_indices = [
+                index for index in anomaly_indices
+                if index not in attributed_impact_indices
+            ]
+            attributed_impact_indices.update(new_impact_indices)
+            impact_values = (
+                df.loc[new_impact_indices, impact_cols].apply(pd.to_numeric, errors="coerce")
+                if impact_cols and new_impact_indices
+                else df.loc[new_impact_indices, [col]].apply(pd.to_numeric, errors="coerce")
+            )
+            result[col]["business_impact"] = round(
+                min(float(impact_values.abs().sum().sum()), impact_ceiling)
+                if impact_ceiling is not None else float(impact_values.abs().sum().sum()), 2
+            )
 
     prioritized = []
     for col, details in result.items():
@@ -1153,8 +1169,12 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
         "statistical_outlier_rows": int(len(all_anomaly_indices)),
         "statistical_outlier_row_pct": round((len(all_anomaly_indices) / max(len(df), 1)) * 100, 2),
         "prioritized_anomalies": prioritized,
-        "business_impact_total": round(sum(item["business_impact"] for item in prioritized), 2),
+        "business_impact_total": round(
+            min(sum(item["business_impact"] for item in prioritized), impact_ceiling)
+            if impact_ceiling is not None else sum(item["business_impact"] for item in prioritized), 2
+        ),
         "business_impact_columns": impact_cols,
+        "business_impact_ceiling": impact_ceiling,
         "rule_manifest": rule_manifest(),
     }
     return result, summary
@@ -1240,7 +1260,10 @@ def _detect_data_quality_issues(df, schema_blueprint):
     for col in df.columns:
         tokens = _tokens(col)
         meta = schema_blueprint.get(col, {}) if isinstance(schema_blueprint, dict) else {}
-        if meta.get("semantic_tag") == "percentage" and col not in {
+        derived_monetary = col.startswith("derived_") and bool(
+            {"revenue", "sales", "amount", "cost", "profit"} & tokens
+        ) and not ({"pct", "percent", "percentage", "margin", "rate"} & tokens)
+        if meta.get("semantic_tag") == "percentage" and not derived_monetary and col not in {
             key.split(" out of ")[0] for key in issues_by_rule
         }:
             rules_checked.add(f"{col} percentage bounds")

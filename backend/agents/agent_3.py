@@ -1444,8 +1444,22 @@ def _derive_business_metrics(df, schema_blueprint=None):
         derivation_map["derived_total_revenue"] = [price_col, unit_col]
 
     if rev_col and discount_col:
-        df["derived_revenue_after_discount"] = df[rev_col] - df[discount_col]
-        df["derived_discount_pct"] = (df[discount_col] / df[rev_col].replace(0, np.nan)) * 100
+        discount_values = pd.to_numeric(df[discount_col], errors="coerce")
+        discount_meta = schema_blueprint.get(discount_col, {})
+        discount_tokens = set(re.findall(r"[a-z0-9]+", discount_col.lower()))
+        if "amount" in discount_tokens or discount_meta.get("unit_scale") == "amount":
+            discount_amount = discount_values
+            discount_pct = discount_amount / df[rev_col].replace(0, np.nan) * 100
+        else:
+            fraction_mask = discount_values.abs() <= 1
+            discount_pct = discount_values.where(~fraction_mask, discount_values * 100)
+            discount_amount = discount_values.where(~fraction_mask, discount_values) * df[rev_col].where(
+                fraction_mask, 1
+            )
+            discount_amount = discount_amount.where(~fraction_mask, discount_values * df[rev_col])
+            discount_amount = discount_amount.where(fraction_mask, discount_values)
+        df["derived_revenue_after_discount"] = df[rev_col] - discount_amount
+        df["derived_discount_pct"] = discount_pct
         notes.append(f"Derived: revenue_after_discount and discount_pct from [{rev_col}] and [{discount_col}]")
         derivation_map["derived_revenue_after_discount"] = [rev_col, discount_col]
         derivation_map["derived_discount_pct"] = [discount_col, rev_col]

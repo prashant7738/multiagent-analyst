@@ -81,6 +81,26 @@ def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None,
     }
 
 
+def maybe_start_rag_build(manager: JobManager, job_id: str) -> bool:
+    """Start RAG indexing after analysis, when the RAG dependencies are enabled."""
+    job = manager.get_job(job_id)
+    settings = get_settings()
+    if (
+        job is None
+        or job.status != "completed"
+        or job.result is None
+        or not job.csv_path
+        or not settings.database_url
+        or not settings.hf_token
+        or job.rag_status == "ready"
+    ):
+        return False
+
+    from api.services.rag_service import start_rag_build
+
+    return start_rag_build(manager, job)
+
+
 class _MilestoneEmitter:
     """Translate observed GraphState transitions into ordered SSE events.
 
@@ -179,6 +199,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[s
 
         result = build_result(job_id, final_state, manager.get_job(job_id).filename if manager.get_job(job_id) else None)
         manager.set_result(job_id, final_state, final_state.get("errors", []) or [], result=result)
+        maybe_start_rag_build(manager, job_id)
 
         pipeline_errors = final_state.get("errors", []) or []
         manager.append_event(job_id, {

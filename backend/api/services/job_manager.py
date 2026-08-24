@@ -275,8 +275,16 @@ class JobManager:
         job = self.get_job(job_id)
         if job is None:
             return False
+        if self._store is not None and hasattr(self._store, "claim_rag_build"):
+            record = self._store.claim_rag_build(job_id)
+            if record is None:
+                return False
+            claimed_job = Job.from_record(record)
+            with self._lock:
+                self._jobs[job_id] = claimed_job
+            return True
         with job.condition:
-            if job.rag_status == "building":
+            if job.rag_status in {"building", "ready"}:
                 return False
             job.rag_status = "building"
             job.rag_error = None

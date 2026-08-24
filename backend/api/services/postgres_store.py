@@ -159,3 +159,24 @@ class PostgresJobStore:
                     (job_id,),
                 )
                 return cur.rowcount > 0
+
+    def claim_rag_build(self, job_id: str) -> dict[str, Any] | None:
+        """Atomically claim an eligible RAG build and return the new job record."""
+        self._ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        """
+                        UPDATE {}.{}
+                        SET rag_status = 'building', rag_error = NULL,
+                            rag_progress = '{{"phase":"preparing","embedded":0,"total":0}}'::jsonb,
+                            updated_at = now()
+                        WHERE job_id = %s AND rag_status NOT IN ('building', 'ready')
+                        RETURNING *;
+                        """
+                    ).format(sql.Identifier(self.schema), sql.Identifier(self.table)),
+                    (job_id,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None

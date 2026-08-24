@@ -77,6 +77,26 @@ def create_app() -> FastAPI:
             "health": "/api/health",
         }
 
+    @app.on_event("startup")
+    async def _sweep_stale_rag_builds() -> None:
+        """Mark RAG builds orphaned by a previous server restart as failed.
+
+        A ``building`` job whose build thread died with the old process would
+        otherwise block rebuilds forever (try_begin_rag_build refuses while
+        building) and leave the frontend indicator spinning indefinitely.
+        """
+        from api.services.job_manager import get_job_manager
+
+        try:
+            manager = get_job_manager()
+        except Exception:  # noqa: BLE001 — persistence may be unavailable at boot
+            logger.warning("RAG startup sweep skipped: job manager unavailable.")
+            return
+        for job in manager.list_jobs():
+            if job.rag_status == "building":
+                manager.set_rag_status(job.job_id, "failed", error="Indexing was interrupted by a server restart.")
+                logger.warning("Marked stale RAG build for job %s as failed.", job.job_id)
+
     logger.info("%s v%s initialized.", settings.app_name, settings.version)
     return app
 

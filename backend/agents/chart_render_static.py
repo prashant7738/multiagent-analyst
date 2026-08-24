@@ -83,9 +83,11 @@ def _draw(spec: dict, out_path: str) -> None:
             raise ValueError("bar data missing")
         ax = fig.add_subplot(111)
         colors = [PALETTE["primary"]] * len(values)
-        if values:
-            top_i = int(np.argmax(values))
-            colors[top_i] = PALETTE["accent"] if kind != "pareto" else PALETTE["primary"]
+        if values and kind != "pareto":
+            # Semantic emphasis: watchlist charts flag their highest bar as a concern
+            # (red); everywhere else the highest bar is the standout performer (green).
+            extreme_i = int(np.argmax(values))
+            colors[extreme_i] = PALETTE["accent"] if spec.get("section") == "watchlist" else PALETTE["secondary"]
         ax.bar(range(len(values)), values, color=colors, alpha=0.88)
         _rotate_labels(ax, labels)
         if kind == "pareto":
@@ -107,7 +109,11 @@ def _draw(spec: dict, out_path: str) -> None:
             raise ValueError("barh data missing")
         ax = fig.add_subplot(111)
         ypos = np.arange(len(values))[::-1]
-        ax.barh(ypos, values, color=[PALETTE["primary"]] * len(values), alpha=0.85, height=0.62)
+        bar_colors = [PALETTE["primary"]] * len(values)
+        if values:
+            extreme_i = int(np.argmax(values))
+            bar_colors[extreme_i] = PALETTE["accent"] if spec.get("section") == "watchlist" else PALETTE["secondary"]
+        ax.barh(ypos, values, color=bar_colors, alpha=0.85, height=0.62)
         ax.set_yticks(ypos)
         ax.set_yticklabels(labels, fontsize=9)
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(_formatter(axis_cfg)))

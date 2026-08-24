@@ -84,7 +84,8 @@ def _connect() -> Iterator[psycopg.Connection]:
     if not dsn:
         raise RuntimeError("RAG dataset chat requires DATABASE_URL (Postgres + pgvector) to be configured")
     with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
-        register_vector(conn)
+        # Note: We skip register_vector() to avoid compatibility issues
+        # PostgreSQL can handle vector operations directly without Python type registration
         yield conn
 
 
@@ -97,31 +98,46 @@ def _ensure_schema() -> None:
     if _SCHEMA_READY:
         return
     settings = get_settings()
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            cur.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {} (
-                        id BIGSERIAL PRIMARY KEY,
-                        job_id TEXT NOT NULL,
-                        doc_type TEXT NOT NULL,
-                        row_index INTEGER,
-                        doc_text TEXT NOT NULL,
-                        metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
-                        embedding VECTOR({}) NOT NULL,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                    );
-                    """
-                ).format(_table(), sql.Literal(settings.rag_embedding_dim))
-            )
-            cur.execute(
-                sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (job_id);").format(
-                    sql.Identifier(f"idx_{settings.rag_embeddings_table}_job_id"), _table()
+    try:
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                # Ensure vector extension is created
+                print("[RAG] Creating vector extension...")
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                print("[RAG] Vector extension ensured")
+                
+                # Create embeddings table
+                print("[RAG] Creating embeddings table...")
+                cur.execute(
+                    sql.SQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS {} (
+                            id BIGSERIAL PRIMARY KEY,
+                            job_id TEXT NOT NULL,
+                            doc_type TEXT NOT NULL,
+                            row_index INTEGER,
+                            doc_text TEXT NOT NULL,
+                            metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            embedding vector({}) NOT NULL,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                        );
+                        """
+                    ).format(_table(), sql.Literal(settings.rag_embedding_dim))
                 )
-            )
-    _SCHEMA_READY = True
+                print("[RAG] Embeddings table ensured")
+                
+                # Create index
+                cur.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (job_id);").format(
+                        sql.Identifier(f"idx_{settings.rag_embeddings_table}_job_id"), _table()
+                    )
+                )
+                print("[RAG] Index ensured")
+        _SCHEMA_READY = True
+        print("[RAG] Schema initialization complete")
+    except Exception as e:
+        print(f"[RAG] Schema initialization failed: {e}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -148,8 +164,17 @@ def _get_hf_client():
     return _hf_client
 
 
-def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
-    """Embed ``texts`` in provider-safe batches, retrying with backoff on quota errors."""
+def embed_texts(
+    texts: list[str],
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    progress_cb: "Any | None" = None,
+) -> list[list[float]]:
+    """Embed ``texts`` in provider-safe batches, retrying with backoff on quota errors.
+
+    ``progress_cb(done, total)`` fires after each successful batch so callers can
+    surface live progress. Storage behavior is unchanged: vectors are returned
+    in full and the caller still performs a single bulk insert.
+    """
     if not texts:
         return []
 
@@ -157,6 +182,7 @@ def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list
     client = _get_hf_client()
     is_query = task_type == "RETRIEVAL_QUERY"
     vectors: list[list[float]] = []
+    done = 0
 
     for start in range(0, len(texts), settings.rag_embed_batch_size):
         batch = texts[start:start + settings.rag_embed_batch_size]
@@ -179,6 +205,13 @@ def embed_texts(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list
                 raise
         if last_error is not None:
             raise last_error
+
+        done += len(batch)
+        if progress_cb is not None:
+            try:
+                progress_cb(done, len(texts))
+            except Exception:  # noqa: BLE001 — progress reporting must never kill a build
+                pass
 
     return vectors
 
@@ -309,6 +342,14 @@ def _delete_job_docs(job_id: str) -> None:
             cur.execute(sql.SQL("DELETE FROM {} WHERE job_id = %s;").format(_table()), (job_id,))
 
 
+def delete_job_documents(job_id: str) -> None:
+    """Best-effort removal of a job's RAG embeddings (used when deleting history)."""
+    try:
+        _delete_job_docs(job_id)
+    except Exception:  # noqa: BLE001 — deletion must not fail the request
+        pass
+
+
 def _insert_documents(job_id: str, docs: list[dict[str, Any]], vectors: list[list[float]]) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
@@ -319,23 +360,40 @@ def _insert_documents(job_id: str, docs: list[dict[str, Any]], vectors: list[lis
                     doc.get("row_index"),
                     doc["text"],
                     Jsonb(json_safe(doc.get("metadata") or {})),
-                    vector,
+                    f"[{','.join(str(v) for v in vector)}]",  # Convert to PostgreSQL vector format
                 )
                 for doc, vector in zip(docs, vectors)
             ]
             cur.executemany(
                 sql.SQL(
                     "INSERT INTO {} (job_id, doc_type, row_index, doc_text, metadata, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s, %s);"
+                    "VALUES (%s, %s, %s, %s, %s, %s::vector);"
                 ).format(_table()),
                 rows,
             )
 
 
 def build_rag_index(job: "Job") -> dict[str, int]:
-    """Rebuild the embedding index for ``job`` from scratch. Returns row sampling info."""
+    """Rebuild the embedding index for ``job`` from scratch. Returns row sampling info.
+
+    Publishes live progress via ``JobManager.set_rag_progress`` (phase +
+    embedded/total counters) so the frontend can show an indicator. Storage
+    remains a single bulk insert at the end — progress never implies partial writes.
+    """
     _ensure_schema()
     _delete_job_docs(job.job_id)
+
+    from api.services.job_manager import get_job_manager  # deferred: avoids circular import
+
+    manager = get_job_manager()
+
+    def _report(phase: str, embedded: int | None = None, total: int | None = None) -> None:
+        try:
+            manager.set_rag_progress(job.job_id, phase, embedded=embedded, total=total)
+        except Exception:  # noqa: BLE001 — progress reporting must never kill a build
+            pass
+
+    _report("preparing", embedded=0, total=0)
 
     from api.services.chat_service import build_dataset_context  # deferred: avoids circular import
 
@@ -361,7 +419,22 @@ def build_rag_index(job: "Job") -> dict[str, int]:
 
     all_docs = fact_docs + row_docs
     if all_docs:
-        vectors = embed_texts([d["text"] for d in all_docs], task_type="RETRIEVAL_DOCUMENT")
+        total_docs = len(all_docs)
+        print(f"[RAG] Embedding {total_docs} documents for job {job.job_id[:8]} "
+              f"({sampled_rows}/{total_rows} rows + {len(fact_docs)} facts)")
+        _report("embedding", embedded=0, total=total_docs)
+
+        def _on_batch(done: int, total: int) -> None:
+            print(f"[RAG] Embedded {done}/{total} documents ({done * 100 // max(total, 1)}%)")
+            _report("embedding", embedded=done, total=total)
+
+        vectors = embed_texts(
+            [d["text"] for d in all_docs],
+            task_type="RETRIEVAL_DOCUMENT",
+            progress_cb=_on_batch,
+        )
+
+        _report("saving", embedded=total_docs, total=total_docs)
         _insert_documents(job.job_id, all_docs, vectors)
 
     return {"total_rows": total_rows, "sampled_rows": sampled_rows}
@@ -396,6 +469,9 @@ def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
     _ensure_schema()
     settings = get_settings()
     question_vector = embed_texts([question], task_type="RETRIEVAL_QUERY")[0]
+    
+    # Convert vector to PostgreSQL format: [0.1, 0.2, 0.3, ...]
+    vector_str = f"[{','.join(str(v) for v in question_vector)}]"
 
     with _connect() as conn:
         with conn.cursor() as cur:
@@ -405,7 +481,7 @@ def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
                     "WHERE job_id = %s AND doc_type = 'row' "
                     "ORDER BY embedding <=> %s::vector LIMIT %s;"
                 ).format(_table()),
-                (job_id, question_vector, settings.rag_top_k_rows),
+                (job_id, vector_str, settings.rag_top_k_rows),
             )
             row_docs = cur.fetchall()
 
@@ -415,7 +491,7 @@ def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
                     "WHERE job_id = %s AND doc_type != 'row' "
                     "ORDER BY embedding <=> %s::vector LIMIT %s;"
                 ).format(_table()),
-                (job_id, question_vector, settings.rag_top_k_facts),
+                (job_id, vector_str, settings.rag_top_k_facts),
             )
             fact_docs = cur.fetchall()
 

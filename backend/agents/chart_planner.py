@@ -36,6 +36,7 @@ MIN_GROUP_ROWS = 3           # smallest usable category group
 MIN_ROWS_FOR_GROUPS = 8      # minimum rows before group comparisons make sense
 CAT_MAX_UNIQUE = 25          # above this a categorical isn't readable anyway
 CROSSTAB_MAX_UNIQUE = 8      # heatmap cells stay readable
+MAX_SPECS_PER_FAMILY = 3     # let up to N qualifying trends/pairs compete for a chart slot, not just the single best
 
 
 # ── local column classification (kept independent of agent_4) ────────────────
@@ -367,6 +368,17 @@ def _distribution_specs(df, schema_blueprint) -> list[dict]:
 
 # ── 4. trend over time (from Agent 4's regression results) ───────────────────
 
+def _trend_direction_word(y_fit: list, y_values: list, slope_direction: str) -> str:
+    """A statistically significant regression can still have a practically tiny fitted
+    change (common with large n) - only call it "upward"/"downward" when the fitted line
+    actually moves by a meaningful amount relative to the typical value, else "flat"."""
+    if not y_fit or not y_values:
+        return slope_direction
+    avg = sum(abs(v) for v in y_values) / len(y_values) or 1e-9
+    pct_change = abs(y_fit[-1] - y_fit[0]) / avg * 100
+    return slope_direction if pct_change >= 3 else "flat"
+
+
 def _trend_spec(df, schema_blueprint, stats) -> list[dict]:
     regression = (stats or {}).get("regression") or {}
     if not isinstance(regression, dict) or not regression:
@@ -385,52 +397,71 @@ def _trend_spec(df, schema_blueprint, stats) -> list[dict]:
     if not eligible:
         return []
     eligible.sort(reverse=True)
-    r_squared, col = eligible[0]
-    info = regression[col]
 
-    working = pd.DataFrame({
-        "idx": (pd.to_numeric(df[year_col], errors="coerce") * 12
-                + pd.to_numeric(df[month_col], errors="coerce")),
-        "y": pd.to_numeric(df[col], errors="coerce"),
-    }).dropna()
-    if working.empty:
-        return []
-    monthly = working.groupby("idx")["y"].mean().reset_index().sort_values("idx")
-    if len(monthly) < 3:
-        return []
-    labels = [_idx_to_month_label(i) for i in monthly["idx"]]
-    y_fit = [round(float(info["slope"]) * float(i) + float(info["intercept"]), 4)
-             for i in monthly["idx"]]
-    direction = info.get("trend", "upward")
+    specs = []
+    for r_squared, col in eligible[:MAX_SPECS_PER_FAMILY]:
+        info = regression[col]
+        working = pd.DataFrame({
+            "idx": (pd.to_numeric(df[year_col], errors="coerce") * 12
+                    + pd.to_numeric(df[month_col], errors="coerce")),
+            "y": pd.to_numeric(df[col], errors="coerce"),
+        }).dropna()
+        if working.empty:
+            continue
+        monthly = working.groupby("idx")["y"].mean().reset_index().sort_values("idx")
+        if len(monthly) < 3:
+            continue
+        labels = [_idx_to_month_label(i) for i in monthly["idx"]]
+        y_fit = [round(float(info["slope"]) * float(i) + float(info["intercept"]), 4)
+                 for i in monthly["idx"]]
+        y_values = [round(float(v), 4) for v in monthly["y"]]
+        direction = _trend_direction_word(y_fit, y_values, info.get("trend", "upward"))
 
-    return [make_spec(
-        spec_id=f"trend_{col}",
-        family="trend",
-        chart_type="line",
-        title=f"{titleize(col)} over time",
-        subtitle=f"monthly averages · {direction} direction",
-        why_it_matters=(
-            f"{titleize(col)} has been moving steadily {direction} — the fitted line explains "
-            f"{humanize_pct(r_squared * 100)} of the month-to-month pattern, so this looks like a real trend rather than noise."
-        ),
-        plain_summary=(
-            f"Each point is one month's typical {titleize(col).lower()}. The dashed line is the "
-            f"overall direction of travel: {'rising' if direction == 'upward' else 'falling'} over the period shown."
-        ),
-        alt_text=f"Line chart of monthly {col} with fitted trend line",
-        data={
-            "x": labels,
-            "y": [round(float(v), 4) for v in monthly["y"]],
-            "fit": {"y_fit": y_fit},
-        },
-        annotations=[
-            {"label": "Direction", "value": direction},
-            {"label": "Pattern strength", "value": round(float(r_squared), 4)},
-        ],
-        axis={**_unit_for(col, schema_blueprint), "x_granularity": "month",
-              "y_label": titleize(col)},
-        priority=round(float(r_squared) * 100, 2),
-    )]
+        if direction == "flat":
+            subtitle = "monthly averages · little overall change"
+            why_it_matters = (
+                f"{titleize(col)} is statistically significant but the actual month-to-month change is "
+                f"small — the fitted line explains {humanize_pct(r_squared * 100)} of the pattern, but this "
+                f"looks stable rather than a meaningful trend."
+            )
+            plain_summary = (
+                f"Each point is one month's typical {titleize(col).lower()}. The dashed line stays "
+                f"roughly flat — this metric has held steady over the period shown."
+            )
+        else:
+            subtitle = f"monthly averages · {direction} direction"
+            why_it_matters = (
+                f"{titleize(col)} has been moving steadily {direction} — the fitted line explains "
+                f"{humanize_pct(r_squared * 100)} of the month-to-month pattern, so this looks like a real trend rather than noise."
+            )
+            plain_summary = (
+                f"Each point is one month's typical {titleize(col).lower()}. The dashed line is the "
+                f"overall direction of travel: {'rising' if direction == 'upward' else 'falling'} over the period shown."
+            )
+
+        specs.append(make_spec(
+            spec_id=f"trend_{col}",
+            family="trend",
+            chart_type="line",
+            title=f"{titleize(col)} over time",
+            subtitle=subtitle,
+            why_it_matters=why_it_matters,
+            plain_summary=plain_summary,
+            alt_text=f"Line chart of monthly {col} with fitted trend line",
+            data={
+                "x": labels,
+                "y": y_values,
+                "fit": {"y_fit": y_fit},
+            },
+            annotations=[
+                {"label": "Direction", "value": direction},
+                {"label": "Pattern strength", "value": round(float(r_squared), 4)},
+            ],
+            axis={**_unit_for(col, schema_blueprint), "x_granularity": "month",
+                  "y_label": titleize(col)},
+            priority=round(float(r_squared) * 100, 2),
+        ))
+    return specs
 
 
 def _idx_to_month_label(idx) -> str:
@@ -497,7 +528,10 @@ def _seasonality_pattern_spec(df, schema_blueprint) -> list[dict]:
 
 def _correlation_scatter_spec(df, stats) -> list[dict]:
     pairs = ((stats or {}).get("correlation") or {}).get("strong_pairs") or []
+    specs = []
     for pair in pairs:
+        if len(specs) >= MAX_SPECS_PER_FAMILY:
+            break
         col_x, col_y = pair.get("col1"), pair.get("col2")
         if not col_x or not col_y or col_x not in df.columns or col_y not in df.columns:
             continue
@@ -519,7 +553,7 @@ def _correlation_scatter_spec(df, stats) -> list[dict]:
         fit = [[round(float(xs.min()), 4), round(float(intercept + slope * xs.min()), 4)],
                [round(float(xs.max()), 4), round(float(intercept + slope * xs.max()), 4)]]
         direction = "rise together" if slope > 0 else "move in opposite directions"
-        return [make_spec(
+        specs.append(make_spec(
             spec_id=f"scatter_{col_x}_{col_y}",
             family="correlation_scatter",
             chart_type="scatter",
@@ -542,8 +576,8 @@ def _correlation_scatter_spec(df, stats) -> list[dict]:
             annotations=[{"label": "Link strength (r)", "value": round(float(pair.get("pearson_r") or 0), 3)}],
             axis={**_unit_for(col_x, {}), "x_label": titleize(col_x), "y_label": titleize(col_y)},
             priority=round(abs(float(pair.get("pearson_r") or 0)) * 100, 2),
-        )]
-    return []
+        ))
+    return specs
 
 
 # ── 7. crosstab heatmap (Cramér's V) ─────────────────────────────────────────
@@ -553,7 +587,7 @@ def _crosstab_spec(df, schema_blueprint) -> list[dict]:
             if df[c].nunique(dropna=True) <= CROSSTAB_MAX_UNIQUE]
     if len(cats) < 2:
         return []
-    best = None
+    scored = []
     for i in range(len(cats)):
         for j in range(i + 1, len(cats)):
             c1, c2 = cats[i], cats[j]
@@ -567,37 +601,40 @@ def _crosstab_spec(df, schema_blueprint) -> list[dict]:
             n = table.sum()
             denom = n * (min(table.shape) - 1)
             v = float(np.sqrt(chi2 / denom)) if denom else 0.0
-            if best is None or v > best[0]:
-                best = (v, c1, c2)
-    if not best or best[0] < 0.15:
+            if v >= 0.15:
+                scored.append((v, c1, c2))
+    if not scored:
         return []
-    v, c1, c2 = best
-    ct = pd.crosstab(df[c1].astype(str), df[c2].astype(str))
-    strength = "meaningful link" if v >= 0.3 else "some link"
-    return [make_spec(
-        spec_id=f"crosstab_{c1}_{c2}",
-        family="crosstab",
-        chart_type="heatmap",
-        title=f"Do {titleize(c1)} and {titleize(c2)} travel together?",
-        subtitle=f"record counts · {strength} detected",
-        why_it_matters=(
-            f"{titleize(c1)} and {titleize(c2)} show a {strength}: certain combinations occur far "
-            f"more often than chance, which is useful for targeting and planning."
-        ),
-        plain_summary=(
-            "Darker cells mark combinations that happen more often. Scan for dark rows/columns — "
-            "they reveal which mixtures dominate your data."
-        ),
-        alt_text=f"Heatmap of record counts between {c1} and {c2}",
-        data={
-            "rows": list(ct.index)[:CROSSTAB_MAX_UNIQUE],
-            "cols": list(ct.columns)[:CROSSTAB_MAX_UNIQUE],
-            "matrix": [[int(v_) for v_ in row][:CROSSTAB_MAX_UNIQUE] for row in ct.to_numpy()],
-        },
-        annotations=[{"label": "Link strength", "value": round(v, 3)}],
-        axis={"x_label": titleize(c2), "y_label": titleize(c1)},
-        priority=round(v * 90, 2),
-    )]
+    scored.sort(key=lambda t: t[0], reverse=True)
+    specs = []
+    for v, c1, c2 in scored[:MAX_SPECS_PER_FAMILY]:
+        ct = pd.crosstab(df[c1].astype(str), df[c2].astype(str))
+        strength = "meaningful link" if v >= 0.3 else "some link"
+        specs.append(make_spec(
+            spec_id=f"crosstab_{c1}_{c2}",
+            family="crosstab",
+            chart_type="heatmap",
+            title=f"Do {titleize(c1)} and {titleize(c2)} travel together?",
+            subtitle=f"record counts · {strength} detected",
+            why_it_matters=(
+                f"{titleize(c1)} and {titleize(c2)} show a {strength}: certain combinations occur far "
+                f"more often than chance, which is useful for targeting and planning."
+            ),
+            plain_summary=(
+                "Darker cells mark combinations that happen more often. Scan for dark rows/columns — "
+                "they reveal which mixtures dominate your data."
+            ),
+            alt_text=f"Heatmap of record counts between {c1} and {c2}",
+            data={
+                "rows": list(ct.index)[:CROSSTAB_MAX_UNIQUE],
+                "cols": list(ct.columns)[:CROSSTAB_MAX_UNIQUE],
+                "matrix": [[int(v_) for v_ in row][:CROSSTAB_MAX_UNIQUE] for row in ct.to_numpy()],
+            },
+            annotations=[{"label": "Link strength", "value": round(v, 3)}],
+            axis={"x_label": titleize(c2), "y_label": titleize(c1)},
+            priority=round(v * 90, 2),
+        ))
+    return specs
 
 
 # ── 8. anomaly watchlist ──────────────────────────────────────────────────────

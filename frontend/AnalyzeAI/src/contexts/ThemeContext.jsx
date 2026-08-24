@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 const ThemeContext = createContext(null);
-
 const STORAGE_KEY = "analyzeai_theme";
 
 function readInitialTheme() {
@@ -11,21 +10,14 @@ function readInitialTheme() {
   } catch {
     /* ignore */
   }
-  // Dark remains the default theme.
-  return "dark";
-}
-
-function applyThemeClass(theme) {
-  const root = document.documentElement;
-  if (theme === "light") root.classList.add("theme-light");
-  else root.classList.remove("theme-light");
+  return "dark"; // dark is the product's default canvas
 }
 
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(readInitialTheme);
 
   useEffect(() => {
-    applyThemeClass(theme);
+    document.documentElement.classList.toggle("theme-light", theme === "light");
     try {
       localStorage.setItem(STORAGE_KEY, theme);
     } catch {

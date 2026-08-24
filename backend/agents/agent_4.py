@@ -551,6 +551,7 @@ def _correlation(df, schema_blueprint):
         "flagged_columns": sorted(flagged_columns & set(cols)),
         "excluded_pairs":  excluded_pairs,
         "formulaic_pairs": formulaic_pairs,
+        "n":               len(corr_df),
     }
     chart_candidates = []
 
@@ -825,6 +826,7 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
             "top":    top_n.to_dict(orient="records"),
             "bottom": bottom_n.to_dict(orient="records"),
             "total_categories": len(grouped),
+            "metric_label": label,
         }
 
         fig, ax = plt.subplots(figsize=(8, max(3, len(top_n) * 0.6 + 1)))
@@ -888,6 +890,7 @@ def _profit_breakdown_by_dimension(df, schema_blueprint, n=5):
             "top": top_n.to_dict(orient="records"),
             "bottom": bottom_n.to_dict(orient="records"),
             "total_categories": len(grouped),
+            "metric_label": label,
         }
 
         fig, ax = plt.subplots(figsize=(8, max(3, len(top_n) * 0.6 + 1)))

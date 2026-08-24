@@ -52,18 +52,24 @@ async def download_report(
     return FileResponse(path=resolved, media_type=media_type, filename=filename)
 
 
-@router.get("/plots/{filename}")
+@router.get("/plots/{file_path:path}")
 async def get_plot(
-    filename: str,
+    file_path: str,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
-    """Serve a generated chart PNG from the charts directory."""
-    # Reject any path separators to prevent traversal.
-    if "/" in filename or "\\" in filename or filename in {"", ".", ".."}:
+    """Serve a generated chart PNG from the charts directory.
+
+    Charts may live flat in ``outputs/charts`` or in per-job subfolders
+    (``outputs/charts/<job_id>/…``); both resolve here. Path traversal is
+    rejected via :func:`_resolve_within`.
+    """
+    if not file_path or file_path.strip(".") in {"", "."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path.")
+    if "\\" in file_path or ".." in file_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename.")
 
-    resolved = _resolve_within(settings.charts_dir, Path(filename))
+    resolved = _resolve_within(settings.charts_dir, Path(file_path))
     if not resolved.exists() or not resolved.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chart not found: {filename}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Chart not found: {file_path}")
 
     return FileResponse(path=resolved, media_type="image/png")

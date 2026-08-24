@@ -44,6 +44,7 @@ class Job:
     rag_error: str | None = None
     rag_built_at: datetime | None = None
     rag_sample_info: dict[str, Any] = field(default_factory=dict)  # {total_rows, sampled_rows} for the row index
+    rag_progress: dict[str, Any] = field(default_factory=dict)  # {phase, embedded, total} live build progress
     errors: list[str] = field(default_factory=list)
     error: str | None = None  # fatal error message, if any
     created_at: datetime = field(default_factory=_utcnow)
@@ -69,6 +70,7 @@ class Job:
             "rag_error": self.rag_error,
             "rag_built_at": self.rag_built_at,
             "rag_sample_info": json_safe(self.rag_sample_info),
+            "rag_progress": json_safe(self.rag_progress),
             "errors": json_safe(self.errors),
             "error": self.error,
             "created_at": self.created_at,
@@ -100,6 +102,7 @@ class Job:
             rag_error=record.get("rag_error"),
             rag_built_at=_parse_dt(record["rag_built_at"]) if record.get("rag_built_at") else None,
             rag_sample_info=dict(record.get("rag_sample_info") or {}),
+            rag_progress=dict(record.get("rag_progress") or {}),
             errors=list(record.get("errors") or []),
             error=record.get("error"),
             created_at=_parse_dt(record.get("created_at")),
@@ -165,6 +168,18 @@ class JobManager:
                     self._jobs[job.job_id] = job
         with self._lock:
             return list(self._jobs.values())
+
+    def delete_job(self, job_id: str) -> bool:
+        """Forget a job entirely — memory and persistent store.
+
+        Returns True if the job was known. On-disk artifacts (uploads, charts,
+        reports) are cleaned up separately by the route layer.
+        """
+        with self._lock:
+            existed = self._jobs.pop(job_id, None) is not None
+        if self._store is not None and self._store.delete_job(job_id):
+            existed = True
+        return existed
 
     # ------------------------------------------------------------------
     # Mutations (each notifies SSE subscribers via the job condition)
@@ -265,10 +280,33 @@ class JobManager:
                 return False
             job.rag_status = "building"
             job.rag_error = None
+            job.rag_progress = {"phase": "preparing", "embedded": 0, "total": 0}
             job.updated_at = _utcnow()
             job.condition.notify_all()
         self._persist(job)
         return True
+
+    def set_rag_progress(
+        self,
+        job_id: str,
+        phase: str,
+        embedded: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        """Publish live RAG build progress (counter updates only — never partial inserts)."""
+        job = self.get_job(job_id)
+        if job is None:
+            return
+        with job.condition:
+            current = job.rag_progress or {}
+            job.rag_progress = {
+                "phase": phase,
+                "embedded": current.get("embedded", 0) if embedded is None else embedded,
+                "total": current.get("total", 0) if total is None else total,
+            }
+            job.updated_at = _utcnow()
+            job.condition.notify_all()
+        self._persist(job)
 
     def set_rag_status(
         self,
@@ -287,6 +325,19 @@ class JobManager:
                 job.rag_sample_info = sample_info
             if status == "ready":
                 job.rag_built_at = _utcnow()
+                progress = dict(job.rag_progress or {})
+                job.rag_progress = {
+                    "phase": "complete",
+                    "embedded": progress.get("total", 0),
+                    "total": progress.get("total", 0),
+                }
+            elif status == "failed":
+                progress = dict(job.rag_progress or {})
+                job.rag_progress = {
+                    "phase": "failed",
+                    "embedded": progress.get("embedded", 0),
+                    "total": progress.get("total", 0),
+                }
             job.updated_at = _utcnow()
             job.condition.notify_all()
         self._persist(job)

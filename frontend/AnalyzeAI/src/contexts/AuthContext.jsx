@@ -1,42 +1,54 @@
 import React, { createContext, useContext, useState } from "react";
 
+/**
+ * WARNING — WHAT THIS IS, AND IS NOT
+ *
+ * The backend (`POST /api/auth/login|signup`) verifies credentials against
+ * PostgreSQL but issues **no token, session cookie, or auth header**, and all
+ * `/api/*` data routes are currently unauthenticated. This context is therefore
+ * a **UI-level identity hint**: it remembers who signed in so the interface can
+ * personalize itself and route-guard private screens.
+ *
+ * It is NOT security. Route guards below prevent *accidental* exposure (e.g.
+ * an anonymous visitor landing on /history), but nothing stops a crafted
+ * request to the API. When the backend grows real sessions, this store should
+ * hold that credential and attach it in lib/api.js — until then, do not present
+ * this as account security anywhere in the UI.
+ */
 const AuthContext = createContext(null);
 
-function normalizeUser(userData) {
-  if (!userData) return null;
-  if (String(userData.email || "").toLowerCase() === "demo@analyzeai.io") {
+const STORAGE_KEY = "analyzeai_user";
+
+function readStoredUser() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
     return null;
   }
-  return {
-    ...userData,
-    joinedDate: userData.joinedDate || userData.created_at || userData.createdAt || null,
-  };
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem("analyzeai_user");
-      const parsed = stored ? normalizeUser(JSON.parse(stored)) : null;
-      if (!parsed && stored) {
-        localStorage.removeItem("analyzeai_user");
-      }
-      return parsed;
-    } catch {
-      localStorage.removeItem("analyzeai_user");
-      return null;
-    }
-  });
+  const [user, setUser] = useState(readStoredUser);
 
   const login = (userData) => {
-    const normalized = normalizeUser(userData);
-    setUser(normalized);
-    localStorage.setItem("analyzeai_user", JSON.stringify(normalized));
+    setUser(userData ?? null);
+    try {
+      if (userData) localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
+      else localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* storage unavailable — session stays in memory only */
+    }
   };
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem("analyzeai_user");
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
   };
 
   return (

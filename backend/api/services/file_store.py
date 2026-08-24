@@ -74,3 +74,11 @@ class FileJobStore:
     def list_jobs(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(record) for record in self._jobs.values()]
+
+    def delete_job(self, job_id: str) -> bool:
+        """Remove a job record. Returns True if it existed."""
+        with self._lock:
+            if self._jobs.pop(job_id, None) is None:
+                return False
+            self._flush()
+        return True

@@ -127,6 +127,24 @@ export async function fetchJob(jobId) {
   return parseJsonOrThrow(res);
 }
 
+/**
+ * DELETE /api/jobs/{job_id} — remove a past analysis from history,
+ * including its stored artifacts (upload, charts, report).
+ */
+export async function deleteJob(jobId) {
+  const res = await fetch(apiUrl(`/api/jobs/${jobId}`), { method: "DELETE" });
+  return parseJsonOrThrow(res);
+}
+
+/**
+ * DELETE /api/jobs — clear history. Returns { deleted, skipped }
+ * (running analyses are skipped by the backend).
+ */
+export async function deleteAllJobs() {
+  const res = await fetch(apiUrl("/api/jobs"), { method: "DELETE" });
+  return parseJsonOrThrow(res);
+}
+
 /** GET /api/analyze/{job_id}/chat — returns the stored Q&A transcript for a job. */
 export async function fetchChatHistory(jobId) {
   const res = await fetch(apiUrl(`/api/analyze/${jobId}/chat`));

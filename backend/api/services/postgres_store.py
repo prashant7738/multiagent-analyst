@@ -48,6 +48,7 @@ class PostgresJobStore:
                             rag_error TEXT,
                             rag_built_at TIMESTAMPTZ,
                             rag_sample_info JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                            rag_progress JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                             errors JSONB NOT NULL DEFAULT '[]'::jsonb,
                             error TEXT,
                             created_at TIMESTAMPTZ NOT NULL,
@@ -64,6 +65,7 @@ class PostgresJobStore:
                     "rag_error TEXT",
                     "rag_built_at TIMESTAMPTZ",
                     "rag_sample_info JSONB NOT NULL DEFAULT '{{}}'::jsonb",
+                    "rag_progress JSONB NOT NULL DEFAULT '{{}}'::jsonb",
                 ):
                     cur.execute(
                         sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS " + column_def + ";").format(
@@ -82,6 +84,7 @@ class PostgresJobStore:
             "result": Jsonb(json_safe(record.get("result"))) if record.get("result") is not None else None,
             "chat_history": Jsonb(json_safe(record.get("chat_history") or [])),
             "rag_sample_info": Jsonb(json_safe(record.get("rag_sample_info") or {})),
+            "rag_progress": Jsonb(json_safe(record.get("rag_progress") or {})),
             "errors": Jsonb(json_safe(record.get("errors") or [])),
         }
 
@@ -92,9 +95,9 @@ class PostgresJobStore:
                         """
                         INSERT INTO {}.{}
                         (job_id, filename, csv_path, status, progress, events, state, result, chat_history,
-                         rag_status, rag_error, rag_built_at, rag_sample_info, errors, error, created_at, updated_at, finished)
+                         rag_status, rag_error, rag_built_at, rag_sample_info, rag_progress, errors, error, created_at, updated_at, finished)
                         VALUES (%(job_id)s, %(filename)s, %(csv_path)s, %(status)s, %(progress)s, %(events)s, %(state)s, %(result)s, %(chat_history)s,
-                                %(rag_status)s, %(rag_error)s, %(rag_built_at)s, %(rag_sample_info)s, %(errors)s, %(error)s, %(created_at)s, %(updated_at)s, %(finished)s)
+                                %(rag_status)s, %(rag_error)s, %(rag_built_at)s, %(rag_sample_info)s, %(rag_progress)s, %(errors)s, %(error)s, %(created_at)s, %(updated_at)s, %(finished)s)
                         ON CONFLICT (job_id) DO UPDATE SET
                             filename = EXCLUDED.filename,
                             csv_path = EXCLUDED.csv_path,
@@ -108,6 +111,7 @@ class PostgresJobStore:
                             rag_error = EXCLUDED.rag_error,
                             rag_built_at = EXCLUDED.rag_built_at,
                             rag_sample_info = EXCLUDED.rag_sample_info,
+                            rag_progress = EXCLUDED.rag_progress,
                             errors = EXCLUDED.errors,
                             error = EXCLUDED.error,
                             created_at = EXCLUDED.created_at,
@@ -142,3 +146,16 @@ class PostgresJobStore:
                 )
                 rows = cur.fetchall()
         return [dict(row) for row in rows]
+
+    def delete_job(self, job_id: str) -> bool:
+        """Remove a job record. Returns True if it existed."""
+        self._ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("DELETE FROM {}.{} WHERE job_id = %s;").format(
+                        sql.Identifier(self.schema), sql.Identifier(self.table)
+                    ),
+                    (job_id,),
+                )
+                return cur.rowcount > 0

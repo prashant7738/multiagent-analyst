@@ -97,6 +97,20 @@ def dataframe_summary(df: Any) -> dict[str, Any]:
 
 
 def chart_url(path: str) -> dict[str, str]:
-    """Convert an agent chart path into a frontend URL under ``/plots``."""
-    filename = os.path.basename(str(path))
-    return {"name": filename, "url": f"/plots/{filename}"}
+    """Convert an agent chart path into a frontend URL under ``/plots``.
+
+    Charts may live flat (``outputs/charts/foo.png``) or per-job
+    (``outputs/charts/<job_id>/foo.png``); the subfolder is preserved so the
+    /plots route can resolve the file. Older absolute paths fall back to
+    basename-only.
+    """
+    normalized = str(path).replace("\\", "/")
+    marker = "charts/"
+    idx = normalized.find(marker)
+    if idx != -1:
+        rel = normalized[idx + len(marker):].lstrip("/")
+        if not rel or ".." in rel.split("/"):
+            rel = os.path.basename(normalized)
+    else:
+        rel = os.path.basename(normalized)
+    return {"name": os.path.basename(rel), "url": f"/plots/{rel}"}

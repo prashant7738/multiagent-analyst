@@ -37,9 +37,17 @@ def build_echarts_option(spec: dict) -> dict:
     if kind in ("bar", "pareto"):
         labels = data.get("labels") or []
         values = data.get("values") or []
+        bar_data = list(values)
+        if bar_data and kind != "pareto":
+            # Mirror chart_render_static's semantic emphasis so screen and print agree:
+            # watchlist charts flag their highest bar red (a concern), others green (a standout).
+            extreme_i = max(range(len(bar_data)),
+                            key=lambda i: bar_data[i] if bar_data[i] is not None else float("-inf"))
+            highlight = PALETTE["accent"] if spec.get("section") == "watchlist" else PALETTE["secondary"]
+            bar_data[extreme_i] = {"value": bar_data[extreme_i], "itemStyle": {"color": highlight}}
         series = [{
             "type": "bar",
-            "data": values,
+            "data": bar_data,
             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [3, 3, 0, 0]},
             "barMaxWidth": 46,
             "label": {"show": len(values) <= 12, "position": "top", "fontSize": 10,
@@ -73,13 +81,19 @@ def build_echarts_option(spec: dict) -> dict:
     if kind == "barh":
         labels = list(reversed(data.get("labels") or []))
         values = list(reversed(data.get("values") or []))
+        bar_data = list(values)
+        if bar_data:
+            extreme_i = max(range(len(bar_data)),
+                            key=lambda i: bar_data[i] if bar_data[i] is not None else float("-inf"))
+            highlight = PALETTE["accent"] if spec.get("section") == "watchlist" else PALETTE["secondary"]
+            bar_data[extreme_i] = {"value": bar_data[extreme_i], "itemStyle": {"color": highlight}}
         return {**base,
                 "xAxis": {"type": "value", "name": axis.get("y_label") or axis.get("x_label"),
                           "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "yAxis": {"type": "category", "data": labels,
                           "axisLabel": {"fontSize": 10, "width": 110, "overflow": "truncate"}},
-                "series": [{"type": "bar", "data": values, "barMaxWidth": 22,
+                "series": [{"type": "bar", "data": bar_data, "barMaxWidth": 22,
                             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [0, 3, 3, 0]},
                             "label": {"show": True, "position": "right", "fontSize": 9,
                                       "color": "#374151"}}]}

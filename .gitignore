@@ -31,4 +31,9 @@ backend/*.csv
 # Local tooling caches
 .graphify/
 
+# Local dev server run logs
+backend_run.log
+backend_run.log.err
+vite_run.log.err
+
 .pgdata

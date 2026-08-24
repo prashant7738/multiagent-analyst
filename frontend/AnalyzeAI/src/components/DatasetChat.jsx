@@ -1,5 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { askDatasetQuestion, fetchChatHistory, chartUrl } from "@/lib/api";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, CheckCircle2, Loader2, MessageCircleQuestion, Send, X } from "lucide-react";
+import { askDatasetQuestion, fetchChatHistory, fetchJob, chartUrl } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const SUGGESTED_QUESTIONS = [
   "What are the strongest correlations in this dataset?",
@@ -8,18 +11,88 @@ const SUGGESTED_QUESTIONS = [
   "How reliable is this analysis?",
 ];
 
+const PHASE_LABELS = {
+  preparing: "Preparing dataset for indexing…",
+  embedding: "Embedding rows",
+  saving: "Saving vector index…",
+};
+
 /**
- * Conversational Q&A panel for a completed analysis job. Answers are grounded
- * in the job's already-computed facts (see backend/api/services/chat_service.py);
- * the assistant may occasionally return a freshly generated chart image.
+ * GOAL: follow-up questions without losing your place in the results.
+ * Collapsed by default as a quiet floating action; opens as a right-docked
+ * panel (full-screen sheet on mobile) so results stay primary. Escape closes;
+ * focus moves into the panel on open and back to the trigger on close.
+ *
+ * Answers are grounded in the job's computed facts (backend chat_service) and
+ * may include a freshly generated chart.
  */
 export default function DatasetChat({ jobId }) {
+  const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState(null);
+  // RAG embedding-index state polled from GET /api/jobs/{id}
+  const [rag, setRag] = useState(null);
+
   const scrollRef = useRef(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // One-shot snapshot on mount so the FAB dot can show indexing state
+  // before the panel is ever opened.
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    fetchJob(jobId)
+      .then((job) => {
+        if (cancelled || !job) return;
+        setRag({
+          status: job.rag_status,
+          error: job.rag_error,
+          progress: job.rag_progress || {},
+          sampleInfo: job.rag_sample_info || {},
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  // While the panel is open, follow the RAG build live (2.5s cadence while
+  // building; stops once ready/failed). `ragPollNonce` forces an immediate
+  // refresh right after a chat reply reports index activity.
+  const [ragPollNonce, setRagPollNonce] = useState(0);
+  useEffect(() => {
+    if (!jobId || !open) return;
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        const job = await fetchJob(jobId);
+        if (cancelled) return;
+        setRag({
+          status: job.rag_status,
+          error: job.rag_error,
+          progress: job.rag_progress || {},
+          sampleInfo: job.rag_sample_info || {},
+        });
+        if (job.rag_status === "building") timer = setTimeout(tick, 2500);
+      } catch {
+        if (!cancelled) timer = setTimeout(tick, 4000);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [jobId, open, ragPollNonce]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -29,7 +102,7 @@ export default function DatasetChat({ jobId }) {
         const history = await fetchChatHistory(jobId);
         if (!cancelled) setMessages(Array.isArray(history) ? history : []);
       } catch {
-        // no history yet, or backend unreachable — start with an empty transcript
+        /* no transcript yet — start empty */
       } finally {
         if (!cancelled) setHistoryLoaded(true);
       }
@@ -40,8 +113,31 @@ export default function DatasetChat({ jobId }) {
   }, [jobId]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
+
+  // Focus management on open/close
+  useEffect(() => {
+    if (open) {
+      // Enter: focus the input after the drawer transition starts
+      const t = setTimeout(() => inputRef.current?.focus(), 120);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const closePanel = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
 
   const send = useCallback(
     async (question) => {
@@ -56,12 +152,11 @@ export default function DatasetChat({ jobId }) {
       try {
         const res = await askDatasetQuestion(jobId, text);
         setMessages((prev) => [...prev, { role: "assistant", content: res.answer, chart: res.chart || null }]);
+        // A reply with index_status means the RAG build just started or moved —
+        // refresh the indicator immediately instead of waiting for the next tick.
+        if (res.index_status) setRagPollNonce((n) => n + 1);
       } catch (err) {
         setError(err.message || "Failed to reach the chat service.");
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: err.message || "I couldn't get a response from the chat service.", chart: null },
-        ]);
       } finally {
         setLoading(false);
       }
@@ -69,93 +164,224 @@ export default function DatasetChat({ jobId }) {
     [input, loading, jobId]
   );
 
-  const onKeyDown = (evt) => {
-    if (evt.key === "Enter" && !evt.shiftKey) {
-      evt.preventDefault();
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       send();
     }
   };
 
+  // ── RAG indexing indicator state (derived) ──────────────────────────────
+  const ragBuilding = rag?.status === "building";
+  const ragReady = rag?.status === "ready";
+  const ragFailed = rag?.status === "failed";
+  const showRagStrip = open && (ragBuilding || ragReady || ragFailed);
+
+  let ragLabel = "Indexing dataset…";
+  if (ragBuilding) {
+    const phase = rag?.progress?.phase;
+    if (phase === "embedding") {
+      const embedded = Number(rag?.progress?.embedded ?? 0);
+      const total = Number(rag?.progress?.total ?? 0);
+      ragLabel =
+        total > 0
+          ? `Embedding rows… ${embedded.toLocaleString("en-US")} / ${total.toLocaleString("en-US")}`
+          : "Embedding rows…";
+    } else {
+      ragLabel = PHASE_LABELS[phase] || "Indexing dataset…";
+    }
+  }
+  const ragEmbedded = Number(rag?.progress?.embedded ?? 0);
+  const ragTotal = Number(rag?.progress?.total ?? 0);
+  const ragPct = ragTotal > 0 ? Math.min(100, Math.round((ragEmbedded / ragTotal) * 100)) : null;
+  const ragIndexedRows = Number(rag?.sampleInfo?.sampled_rows ?? 0);
+
   return (
-    <div className="rounded-3xl border border-white/8 bg-white/2 p-6">
-      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <div>
-          <h2 className="text-white font-semibold text-lg">Ask about this dataset</h2>
-          <p className="text-white/30 text-sm">Grounded answers from the computed stats — ask a follow-up any time.</p>
-        </div>
-        <span className="px-2.5 py-1 rounded-full border border-cyan-500/20 bg-cyan-500/8 text-cyan-300 text-[10px] font-mono uppercase tracking-[0.18em]">
-          live
+    <>
+      {/* Floating trigger — appears only after results exist */}
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(true)}
+        className={cn(
+          "pressable fixed bottom-6 right-6 z-40 inline-flex h-12 items-center gap-2 rounded-full",
+          "bg-accent px-5 text-sm font-medium text-white shadow-lg transition-colors hover:bg-accent-hover"
+        )}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
+        <span className="relative inline-flex">
+          <MessageCircleQuestion size={17} strokeWidth={1.75} aria-hidden="true" />
+          {ragBuilding && (
+            <span
+              className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full border-2 border-accent bg-white animate-pulse"
+              aria-hidden="true"
+            />
+          )}
         </span>
-      </div>
+        Ask about this dataset
+      </button>
 
-      <div ref={scrollRef} className="rounded-2xl border border-white/8 bg-black/20 p-4 max-h-96 overflow-auto space-y-3">
-        {historyLoaded && messages.length === 0 && (
-          <p className="text-white/30 text-sm">
-            No questions yet — try one of the suggestions below, or type your own.
-          </p>
-        )}
-        {messages.map((message, index) => (
-          <div key={index} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                message.role === "user"
-                  ? "bg-violet-600/90 text-white"
-                  : "bg-white/5 border border-white/8 text-white/80"
-              }`}
+      <AnimatePresence>
+        {open && (
+          <>
+            {/* Scrim (mobile only — the dock doesn't block the page on desktop) */}
+            <motion.div
+              key="scrim"
+              className="fixed inset-0 z-40 bg-black/50 md:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={closePanel}
+            />
+
+            <motion.aside
+              key="panel"
+              ref={panelRef}
+              role="dialog"
+              aria-label="Ask about this dataset"
+              className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-canvas sm:max-w-md"
+              initial={{ transform: "translateX(100%)" }}
+              animate={{ transform: "translateX(0%)" }}
+              exit={{ transform: "translateX(100%)" }}
+              transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
             >
-              {message.content}
-              {message.chart?.url && (
-                <a href={chartUrl(message.chart.url)} target="_blank" rel="noreferrer" className="block mt-3">
-                  <img
-                    src={chartUrl(message.chart.url)}
-                    alt={message.chart.name || "Generated chart"}
-                    className="rounded-xl border border-white/10 max-w-full"
-                  />
-                </a>
+              <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+                <div>
+                  <h2 className="font-heading text-base font-semibold text-ink">Ask about this dataset</h2>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
+                    Grounded in this run&apos;s verified stats — not raw data.
+                  </p>
+                </div>
+                <button
+                  onClick={closePanel}
+                  aria-label="Close chat panel"
+                  className="rounded-(--radius-control) p-1.5 text-ink-muted transition-colors hover:bg-raised hover:text-ink"
+                >
+                  <X size={18} />
+                </button>
+              </header>
+
+              <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+                {historyLoaded && messages.length === 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-ink-faint">Try one of these to start:</p>
+                    {SUGGESTED_QUESTIONS.map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => send(q)}
+                        className="rounded-(--radius-control) border border-line bg-surface px-3 py-2 text-left text-xs text-ink-secondary transition-colors hover:border-accent hover:text-ink"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {messages.map((message, index) => (
+                  <div key={index} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
+                    <div
+                      className={cn(
+                        "max-w-[85%] whitespace-pre-wrap rounded-panel px-4 py-3 text-sm leading-relaxed",
+                        message.role === "user"
+                          ? "bg-accent text-white"
+                          : "border border-line bg-surface text-ink-secondary"
+                      )}
+                    >
+                      {message.content}
+                      {message.chart?.url && (
+                        <a href={chartUrl(message.chart.url)} target="_blank" rel="noreferrer" className="mt-3 block">
+                          <img
+                            src={chartUrl(message.chart.url)}
+                            alt={message.chart.name || "Generated chart"}
+                            loading="lazy"
+                            className="w-full rounded-(--radius-control) border border-line"
+                          />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {loading && (
+                  <div className="flex justify-start">
+                    <div className="rounded-panel border border-line bg-surface px-4 py-3 text-sm text-ink-faint">
+                      Working out an answer…
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {showRagStrip && (
+                <div className="border-t border-line px-5 py-2.5 text-xs" role="status">
+                  {ragBuilding && (
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
+                        <span className="text-ink-secondary">{ragLabel}</span>
+                        {ragPct != null && <span className="ml-auto tabular-nums text-ink-faint">{ragPct}%</span>}
+                      </div>
+                      <div
+                        className="mt-1.5 h-1 overflow-hidden rounded-full bg-raised"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={ragPct ?? undefined}
+                        aria-label="Embedding progress"
+                      >
+                        <div
+                          className="h-full rounded-full bg-accent transition-[width] duration-500"
+                          style={{ width: `${ragPct ?? 5}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {ragReady && (
+                    <p className="flex items-center gap-2 text-success">
+                      <CheckCircle2 size={13} className="shrink-0" />
+                      Row-level index ready
+                      {ragIndexedRows > 0 && ` · ${ragIndexedRows.toLocaleString("en-US")} rows indexed`}
+                    </p>
+                  )}
+                  {ragFailed && (
+                    <p className="flex items-start gap-2 text-danger">
+                      <AlertTriangle size={13} className="mt-px shrink-0" />
+                      <span>Indexing failed — {(rag?.error || "unknown error").slice(0, 160)}</span>
+                    </p>
+                  )}
+                </div>
               )}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl px-4 py-3 text-sm bg-white/5 border border-white/8 text-white/40">
-              Thinking…
-            </div>
-          </div>
+
+              {error && (
+                <p role="alert" className="border-t border-line px-5 py-2 text-xs text-danger">
+                  {error}
+                </p>
+              )}
+
+              <div className="flex items-end gap-2 border-t border-line p-4">
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={onKeyDown}
+                  rows={1}
+                  placeholder="Ask a question about this dataset…"
+                  aria-label="Your question"
+                  className="max-h-32 min-h-[42px] flex-1 resize-none rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent"
+                />
+                <button
+                  onClick={() => send()}
+                  disabled={loading || !input.trim()}
+                  aria-label="Send question"
+                  className="pressable flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-(--radius-control) bg-accent text-white transition-colors hover:bg-accent-hover disabled:bg-raised disabled:text-ink-faint"
+                >
+                  <Send size={16} strokeWidth={1.75} />
+                </button>
+              </div>
+            </motion.aside>
+          </>
         )}
-      </div>
-
-      {error && <p className="mt-2 text-red-300 text-xs">{error}</p>}
-
-      {messages.length === 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {SUGGESTED_QUESTIONS.map((q) => (
-            <button
-              key={q}
-              onClick={() => send(q)}
-              className="px-3 py-1.5 rounded-full border border-white/8 bg-white/2 text-white/50 hover:text-white hover:border-violet-500/30 text-xs transition-all cursor-pointer">
-              {q}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-4 flex items-end gap-2">
-        <textarea
-          value={input}
-          onChange={(evt) => setInput(evt.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          placeholder="Ask a question about this dataset…"
-          className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all resize-none"
-        />
-        <button
-          onClick={() => send()}
-          disabled={loading || !input.trim()}
-          className="px-5 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors cursor-pointer shrink-0">
-          Send
-        </button>
-      </div>
-    </div>
+      </AnimatePresence>
+    </>
   );
 }

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Insight Report — {{ dataset_name }}</title>
 <script>(function(){try{var t=localStorage.getItem('ir-theme');if(t!=='dark'&&t!=='light'){t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script>document.documentElement.classList.add('js');</script>
 <style>
   /* ── design tokens ──────────────────────────────────────────────────── */
   :root {
@@ -209,12 +210,13 @@
   .modal-body .echart { height: 100%; }
   .modal-body img { max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; }
 
-  /* reveal-on-scroll */
-  [data-reveal] { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
-  [data-reveal].revealed { opacity: 1; transform: none; }
+  /* reveal-on-scroll — gated on html.js so content is NEVER hidden when the
+     init script fails or JS is disabled. Progressive enhancement only. */
+  .js [data-reveal] { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+  .js [data-reveal].revealed { opacity: 1; transform: none; }
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
-    [data-reveal] { opacity: 1; transform: none; transition: none; }
+    [data-reveal] { opacity: 1 !important; transform: none !important; transition: none !important; }
     .to-top { transition: none; }
   }
 
@@ -224,8 +226,58 @@
     .sidenav { display: none; }
   }
 
+  /* ── cover / title page ─────────────────────────────────────────────── */
+  .cover {
+    min-height: 62vh; display: flex; flex-direction: column; justify-content: center;
+    border-bottom: 3px solid var(--accent); padding: 3em 0 2.4em; margin-bottom: 1.5em;
+  }
+  .cover-kicker { font-size: 9.5pt; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+  .cover-title { font-size: 34pt; font-weight: 800; letter-spacing: -.02em; line-height: 1.12; margin: .25em 0 .1em; }
+  .cover-dataset { font-size: 14.5pt; font-weight: 600; color: var(--accent); margin-top: .4em; overflow-wrap: anywhere; }
+  .cover-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1.2em; }
+  .cover-stats { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 1.6em; }
+  .cover-stat .kpi-label { font-size: 8.5pt; }
+  .cover-stat .kpi-value { font-size: 21pt; }
+  .cover-foot { margin-top: auto; padding-top: 2em; font-size: 9pt; color: var(--muted); }
+
+  /* ── table of contents ─────────────────────────────────────────────── */
+  .toc ol { list-style: none; margin: .6em 0 0; padding: 0; max-width: 720px; }
+  .toc li { margin: 0; border-bottom: 1px dotted var(--border); }
+  .toc a { display: flex; align-items: baseline; gap: 8px; text-decoration: none; color: var(--text); padding: .32em 0; }
+  .toc a:hover { color: var(--accent); }
+  .toc .toc-num { color: var(--muted); font-size: 9pt; width: 1.6em; flex: 0 0 auto; }
+
+  /* ── recommendation priority badges ────────────────────────────────── */
+  .rec-row { display: flex; align-items: flex-start; gap: 10px; }
+  .badge.pri-high { background: var(--good); }
+  .badge.pri-medium { background: var(--warn); }
+  .badge.pri-low { background: #6b7280; }
+  .rec-pri { flex: 0 0 auto; margin-top: 2px; white-space: nowrap; }
+
+  /* ── methodology & limitations ─────────────────────────────────────── */
+  .method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: .8em; }
+  .method-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 15px; page-break-inside: avoid; }
+  .method-card h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .method-card ul { margin-bottom: 0; }
+  .threshold-table td:first-child { font-weight: 600; }
+  .lim-list li { margin-bottom: .5em; }
+  .provenance-note { font-size: 9.5pt; color: var(--muted); margin-top: .8em; }
+
   /* ── print / PDF ────────────────────────────────────────────────────── */
-  @page { size: A4; margin: 1.6cm 1.4cm; }
+  /* Page-number footers and TOC dot-leaders rely on CSS paged-media features
+     (margin boxes + target-counter). WeasyPrint — which produces the PDF
+     deliverable — honors them; browsers ignore @page margin boxes safely. */
+  @page {
+    size: A4;
+    margin: 1.6cm 1.4cm;
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 8pt;
+      color: #6b7280;
+    }
+  }
+  @page :first { @bottom-center { content: none; } }
   @media print {
     :root { --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f4f6; --border:#d1d5db;
             --text:#111827; --muted:#4b5563; --accent:#1e3a8a; --accent-soft:#eff6ff; --shadow:none; }
@@ -238,6 +290,18 @@
     .chart-static { display: block !important; margin: 4px auto; }
     .kpi-card, .panel, .chart-card, details.tech { box-shadow: none; }
     .section-blurb, .footer { color: var(--muted); }
+    /* The cover opens the printed document; everything else starts on a fresh page. */
+    .cover { min-height: 78vh; page-break-after: always; border-bottom: none; }
+    .toc { page-break-after: always; }
+    .toc a::after {
+      content: leader(".") " " target-counter(attr(href), page);
+      color: var(--muted);
+      margin-left: auto;
+      padding-left: 8px;
+    }
+    .toc a { display: flex; }
+    .section-head, h2 { page-break-after: avoid; }
+    .panel, .two-col { page-break-inside: avoid; }
   }
 </style>
 </head>
@@ -247,6 +311,8 @@
   .echart { display: none !important; }
   .chart-static { display: block !important; }
   .needs-js { display: none !important; }
+  [data-reveal] { opacity: 1 !important; transform: none !important; }
+</style>
 </style>
 </noscript>
 
@@ -291,6 +357,67 @@
 </aside>
 
 <main class="page">
+
+<section class="cover" id="cover">
+  <p class="cover-kicker">Automated analysis &middot; Agents 1&ndash;6 pipeline</p>
+  <h1 class="cover-title">Data Insight Report</h1>
+  <p class="cover-dataset">{{ dataset_name }}</p>
+  {% set cover_quality = facts.data_quality.overall_quality_score %}
+  <div class="badge-row">
+    <span class="chip">Generated {{ generated_at }}</span>
+    {% if cover_quality is not none %}
+      {% if cover_quality >= 80 %}<span class="badge good">Quality {{ cover_quality }}/100</span>
+      {% elif cover_quality >= 50 %}<span class="badge warn">Quality {{ cover_quality }}/100</span>
+      {% else %}<span class="badge bad">Quality {{ cover_quality }}/100</span>{% endif %}
+    {% endif %}
+    {% if facts.validation.passed %}
+      <span class="badge good">Validation passed</span>
+    {% else %}
+      <span class="badge bad">Validation issues</span>
+    {% endif %}
+  </div>
+  <div class="cover-stats">
+    {% for card in kpis[:4] %}
+    <div class="cover-stat">
+      <div class="kpi-label">{{ card.label }}</div>
+      <div class="kpi-value">{{ card.value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="cover-foot">
+    Prepared automatically from the uploaded dataset. Every figure is computed by the
+    deterministic pipeline and cross-checked against it; see Methodology &amp; Provenance
+    for how this report was produced.
+  </p>
+</section>
+
+<nav class="toc" id="contents" aria-label="Table of contents">
+  <h2 style="border-bottom:none;">Contents</h2>
+  <ol>
+    <li><a href="#overview"><span class="toc-num">{{ 1 }}.</span> Overview</a></li>
+    {% if narrative.plain_language_insights or narrative.bottom_line %}
+    <li><a href="#plain-english"><span class="toc-num">{{ 2 }}.</span> In Plain English</a></li>
+    {% endif %}
+    {% if story and story.get('what_happened') %}
+    <li><a href="#the-story"><span class="toc-num">{{ 3 }}.</span> The Story</a></li>
+    {% endif %}
+    <li><a href="#findings"><span class="toc-num">{{ 4 }}.</span> Executive Summary &amp; Key Findings</a></li>
+    {% if limitations %}
+    <li><a href="#limitations"><span class="toc-num">{{ 5 }}.</span> Assumptions &amp; Limitations</a></li>
+    {% endif %}
+    {% for key, sec in chart_sections %}
+    <li><a href="#sec-{{ key }}"><span class="toc-num">&sect;</span> {{ sec.heading }}</a></li>
+    {% endfor %}
+    {% if narrative.recommendations %}
+    <li><a href="#recommendations"><span class="toc-num">&sect;</span> Recommendations</a></li>
+    {% endif %}
+    {% if methodology %}
+    <li><a href="#methodology"><span class="toc-num">&sect;</span> Methodology &amp; Data Provenance</a></li>
+    {% endif %}
+    <li><a href="#appendix"><span class="toc-num">&sect;</span> Technical Appendix</a></li>
+    <li><a href="#glossary"><span class="toc-num">&sect;</span> Glossary</a></li>
+  </ol>
+</nav>
 
 <section id="overview">
   <h1>Data Insight Report</h1>
@@ -594,7 +721,7 @@
 {% for cat_col, data in facts.rankings.items() %}
 <h3>{{ cat_col }} (showing {{ data.top | length + data.bottom | length }} of {{ data.total_categories }} categories)</h3>
 <table>
-  <tr><th>Rank</th><th>{{ cat_col }}</th><th>Total Revenue</th><th>Share %</th></tr>
+  <tr><th>Rank</th><th>{{ cat_col }}</th><th>Total {{ data.metric_label or "Revenue" }}</th><th>Share %</th></tr>
   {% for row in data.top %}
   <tr><td>Top</td><td>{{ row[cat_col] }}</td><td>{{ row.total_revenue }}</td><td>{{ row.revenue_share_pct }}</td></tr>
   {% endfor %}
@@ -852,6 +979,13 @@
     };
   }
 
+  /* One broken widget must never take down the page: every init block below
+     runs inside safe(), so a missing element or throwing library degrades
+     that widget only — sections stay visible and static images stay usable. */
+  function safe(block) {
+    try { block(); } catch (err) { if (window.console) console.warn('report init:', err); }
+  }
+
   var instances = [];
   document.querySelectorAll('.echart').forEach(function (el) {
     try {
@@ -882,63 +1016,80 @@
   });
 
   // ── theme toggle ────────────────────────────────────────────────────────
-  var themeBtn = document.getElementById('themeToggle');
-  function syncThemeIcon() {
-    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    themeBtn.textContent = dark ? '☾' : '☀';
-  }
-  themeBtn.addEventListener('click', function () {
-    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    var next = dark ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('ir-theme', next); } catch (e) {}
+  safe(function () {
+    var themeBtn = document.getElementById('themeToggle');
+    if (!themeBtn) return;
+    function syncThemeIcon() {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      themeBtn.textContent = dark ? '☾' : '☀';
+    }
+    themeBtn.addEventListener('click', function () {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      var next = dark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('ir-theme', next); } catch (e) {}
+      syncThemeIcon();
+    });
     syncThemeIcon();
   });
-  syncThemeIcon();
 
   // ── reading progress + back-to-top ─────────────────────────────────────
-  var bar = document.getElementById('progressBar');
-  var toTop = document.getElementById('toTop');
-  function onScroll() {
-    var doc = document.documentElement;
-    var max = doc.scrollHeight - window.innerHeight;
-    bar.style.width = (max > 0 ? Math.min(100, (window.scrollY / max) * 100) : 0) + '%';
-    toTop.classList.toggle('show', window.scrollY > 600);
-  }
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-  toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  safe(function () {
+    var bar = document.getElementById('progressBar');
+    var toTop = document.getElementById('toTop');
+    if (!bar || !toTop) return;
+    function onScroll() {
+      var doc = document.documentElement;
+      var max = doc.scrollHeight - window.innerHeight;
+      bar.style.width = (max > 0 ? Math.min(100, (window.scrollY / max) * 100) : 0) + '%';
+      toTop.classList.toggle('show', window.scrollY > 600);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    toTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+  });
 
   // ── scrollspy (topnav + sidenav) ───────────────────────────────────────
-  var links = Array.prototype.slice.call(document.querySelectorAll('[data-target]'));
-  var targets = links.map(function (l) { return document.getElementById(l.getAttribute('data-target')); })
-                     .filter(Boolean);
-  if ('IntersectionObserver' in window && targets.length) {
-    var spy = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (!entry.isIntersecting) return;
-        var id = entry.target.id;
-        links.forEach(function (l) { l.classList.toggle('active', l.getAttribute('data-target') === id); });
-      });
-    }, { rootMargin: '-70px 0px -66% 0px', threshold: 0 });
-    targets.forEach(function (t) { spy.observe(t); });
-  }
+  safe(function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('[data-target]'));
+    var targets = links.map(function (l) { return document.getElementById(l.getAttribute('data-target')); })
+                       .filter(Boolean);
+    if ('IntersectionObserver' in window && targets.length) {
+      var spy = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          var id = entry.target.id;
+          links.forEach(function (l) { l.classList.toggle('active', l.getAttribute('data-target') === id); });
+        });
+      }, { rootMargin: '-70px 0px -66% 0px', threshold: 0 });
+      targets.forEach(function (t) { spy.observe(t); });
+    }
+  });
 
   // ── reveal on scroll ───────────────────────────────────────────────────
-  var revealEls = document.querySelectorAll('[data-reveal]');
-  if ('IntersectionObserver' in window) {
-    var revealer = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) { entry.target.classList.add('revealed'); revealer.unobserve(entry.target); }
-      });
-    }, { threshold: 0.08 });
-    revealEls.forEach(function (el) { revealer.observe(el); });
-  } else {
-    revealEls.forEach(function (el) { el.classList.add('revealed'); });
-  }
+  /* Content visibility must never depend on this succeeding: a fallback
+     timer force-reveals anything the observer missed (or that never ran). */
+  safe(function () {
+    var revealEls = Array.prototype.slice.call(document.querySelectorAll('[data-reveal]:not(.revealed)'));
+    function revealAll() { revealEls.forEach(function (el) { el.classList.add('revealed'); }); }
+    if ('IntersectionObserver' in window) {
+      try {
+        var revealer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) { entry.target.classList.add('revealed'); revealer.unobserve(entry.target); }
+          });
+        }, { threshold: 0.08 });
+        revealEls.forEach(function (el) { revealer.observe(el); });
+        setTimeout(revealAll, 4000); // absolute backstop — nothing stays hidden
+      } catch (e) { revealAll(); }
+    } else {
+      revealAll();
+    }
+  });
 
   // ── animated KPI counters (pure-number values only) ────────────────────
-  var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  safe(function () {
+    var reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (!reduceMotion && 'IntersectionObserver' in window) {
     var counterObs = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
@@ -960,74 +1111,85 @@
     }, { threshold: 0.4 });
     document.querySelectorAll('.kpi-value').forEach(function (el) { counterObs.observe(el); });
   }
+  });
 
   // ── appendix table filters ─────────────────────────────────────────────
   document.querySelectorAll('.search-box').forEach(function (box) {
-    var container = box.closest('details');
-    var note = container.querySelector('.no-match-note');
-    box.addEventListener('input', function () {
-      var q = box.value.trim().toLowerCase();
-      var anyRow = false, anyVisible = false;
-      container.querySelectorAll('table tr').forEach(function (row) {
-        if (row.querySelector('th')) return;
-        anyRow = true;
-        var show = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
-        row.style.display = show ? '' : 'none';
-        if (show) anyVisible = true;
+    safe(function () {
+      var container = box.closest('details');
+      if (!container) return;
+      var note = container.querySelector('.no-match-note');
+      box.addEventListener('input', function () {
+        var q = box.value.trim().toLowerCase();
+        var anyRow = false, anyVisible = false;
+        container.querySelectorAll('table tr').forEach(function (row) {
+          if (row.querySelector('th')) return;
+          anyRow = true;
+          var show = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+          row.style.display = show ? '' : 'none';
+          if (show) anyVisible = true;
+        });
+        if (note) note.style.display = (anyRow && q && !anyVisible) ? 'inline' : 'none';
       });
-      if (note) note.style.display = (anyRow && q && !anyVisible) ? 'inline' : 'none';
     });
   });
 
   // ── chart fullscreen modal ──────────────────────────────────────────────
-  var modal = document.getElementById('chartModal');
-  var modalBody = document.getElementById('modalBody');
-  var modalTitle = document.getElementById('modalTitle');
-  var movedEl = null, movedFromParent = null, movedNextSibling = null;
+  safe(function () {
+    var modal = document.getElementById('chartModal');
+    var modalBody = document.getElementById('modalBody');
+    var modalTitle = document.getElementById('modalTitle');
+    if (!modal || !modalBody || !modalTitle) return;
+    var movedEl = null, movedFromParent = null, movedNextSibling = null;
 
-  function closeModal() {
-    if (movedEl) {
-      if (movedNextSibling && movedNextSibling.parentNode === movedFromParent) {
-        movedFromParent.insertBefore(movedEl, movedNextSibling);
-      } else if (movedFromParent) {
-        movedFromParent.appendChild(movedEl);
-      }
-      if (movedEl.classList.contains('echart') && movedEl.__chartInstance) movedEl.__chartInstance.resize();
-    }
-    movedEl = movedFromParent = movedNextSibling = null;
-    modal.hidden = true;
-    document.body.style.overflow = '';
-  }
-  modal.querySelectorAll('[data-close-modal]').forEach(function (el) { el.addEventListener('click', closeModal); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
-
-  document.querySelectorAll('.expand-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var card = document.getElementById('chart-' + btn.getAttribute('data-expand'));
-      if (!card) return;
-      modalTitle.textContent = btn.getAttribute('data-title') || 'Chart';
-      var holder = card.querySelector('.echart');
-      if (holder) {
-        movedEl = holder; movedFromParent = holder.parentNode;
-        movedNextSibling = holder.nextElementSibling;
-        modalBody.innerHTML = '';
-        modalBody.appendChild(holder);
-        if (holder.__chartInstance) holder.__chartInstance.resize();
-      } else {
-        var img = card.querySelector('img');
-        modalBody.innerHTML = '';
-        if (img) {
-          var clone = img.cloneNode();
-          clone.className = ''; clone.style.cssText = 'max-width:100%;max-height:100%;margin:auto;';
-          modalBody.appendChild(clone);
+    function closeModal() {
+      if (movedEl) {
+        if (movedNextSibling && movedNextSibling.parentNode === movedFromParent) {
+          movedFromParent.insertBefore(movedEl, movedNextSibling);
+        } else if (movedFromParent) {
+          movedFromParent.appendChild(movedEl);
         }
+        if (movedEl.classList.contains('echart') && movedEl.__chartInstance) movedEl.__chartInstance.resize();
       }
-      modal.hidden = false;
-      document.body.style.overflow = 'hidden';
+      movedEl = movedFromParent = movedNextSibling = null;
+      modal.hidden = true;
+      document.body.style.overflow = '';
+    }
+    modal.querySelectorAll('[data-close-modal]').forEach(function (el) { el.addEventListener('click', closeModal); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+
+    document.querySelectorAll('.expand-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        try {
+          var card = document.getElementById('chart-' + btn.getAttribute('data-expand'));
+          if (!card) return;
+          modalTitle.textContent = btn.getAttribute('data-title') || 'Chart';
+          var holder = card.querySelector('.echart');
+          if (holder) {
+            movedEl = holder; movedFromParent = holder.parentNode;
+            movedNextSibling = holder.nextElementSibling;
+            modalBody.innerHTML = '';
+            modalBody.appendChild(holder);
+            if (holder.__chartInstance) holder.__chartInstance.resize();
+          } else {
+            var img = card.querySelector('img');
+            modalBody.innerHTML = '';
+            if (img) {
+              var clone = img.cloneNode();
+              clone.className = ''; clone.style.cssText = 'max-width:100%;max-height:100%;margin:auto;';
+              modalBody.appendChild(clone);
+            }
+          }
+          modal.hidden = false;
+          document.body.style.overflow = 'hidden';
+        } catch (err) { if (window.console) console.warn('chart expand:', err); }
+      });
+    });
+
+    safe(function () {
+      window.addEventListener('resize', function () { instances.forEach(function (c) { c.resize(); }); });
     });
   });
-
-  window.addEventListener('resize', function () { instances.forEach(function (c) { c.resize(); }); });
 })();
 </script>
 {% endif %}

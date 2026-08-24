@@ -35,9 +35,16 @@ class AgentStatus(str, Enum):
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+class LLMHealthStatus(BaseModel):
+    groq: str = Field(default="unknown", description="Groq API status: healthy, unreachable, or error")
+    gemini: str = Field(default="unknown", description="Gemini API status: healthy, unreachable, or error")
+    huggingface: str = Field(default="unknown", description="Hugging Face API status: healthy, unreachable, or error")
+
+
 class HealthResponse(BaseModel):
     status: str = Field(default="healthy")
     version: str = Field(default="1.0.0")
+    llm: LLMHealthStatus = Field(default_factory=LLMHealthStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +97,11 @@ class JobSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     error: str | None = None
+    # RAG embedding-index state (drives the chat panel's indexing indicator).
+    rag_status: str = "not_built"  # not_built | building | ready | failed
+    rag_error: str | None = None
+    rag_sample_info: dict[str, Any] = Field(default_factory=dict)  # {total_rows, sampled_rows}
+    rag_progress: dict[str, Any] = Field(default_factory=dict)  # {phase, embedded, total} while building
 
 
 # ---------------------------------------------------------------------------

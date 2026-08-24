@@ -8,6 +8,7 @@ from api.models.schemas import (  # noqa: F401
     HealthResponse,
     JobStatus,
     JobSummary,
+    LLMHealthStatus,
     ProgressEvent,
     ReliabilityModel,
     ReportModel,

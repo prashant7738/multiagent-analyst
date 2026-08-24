@@ -83,6 +83,24 @@ DEFAULT_GLOSSARY = {
     "quality score": "A 0–100 health check on the data itself — missing values, duplicates and rule violations lower it.",
 }
 
+# Definitions for every term the jargon linter (`_JARGON_PATTERNS`) can catch, so a
+# glossary entry exists whenever one of these slips through into the final text.
+EXTENDED_GLOSSARY = {
+    "r-squared": "A 0-1 score showing how much of the change in one number is explained by another — closer to 1 means a tighter fit.",
+    "p-value": "A statistical check for whether a pattern is likely real or just chance — the smaller it is, the more confident we are it's real.",
+    "z-score": "How many typical steps away from average a value is — a large one flags an unusually high or low record.",
+    "standard deviation": "A measure of how spread out the numbers are around the average — bigger means more variation record-to-record.",
+    "correlation coefficient": "A number from -1 to 1 showing how closely two things move together; near 0 means little relationship.",
+    "regression": "A statistical technique for describing how one number tends to change as another one does.",
+    "iqr": "The range covering the middle 50% of records, used to judge what counts as typical versus unusual.",
+    "pearson": "The standard method used here to measure how closely two numeric columns move together.",
+    "quartile": "One of four equal groups the data falls into when sorted from lowest to highest.",
+    "kappa": "A score showing how much two independent checks agree, beyond what chance alone would produce.",
+    "variance": "A measure of how much the numbers differ from the average — the basis for standard deviation.",
+    "outlier": "A record whose value sits far outside the typical range for that column.",
+    "coefficient": "A number in a formula that measures how strongly one thing influences another.",
+}
+
 
 def _verbose_logging_enabled():
     val = os.getenv("PIPELINE_VERBOSE", "0").strip().lower()
@@ -415,9 +433,11 @@ def _extract_correlation_facts(stats):
     # `strong_pairs` already excludes pairs involving Agent 4's leakage-flagged
     # columns (agent_4.flag_leakage_columns) - flagged columns are surfaced
     # separately via _extract_excluded_columns_facts instead of as findings here.
-    strong_pairs = (stats.get("correlation", {}) or {}).get("strong_pairs", []) or []
+    correlation = stats.get("correlation", {}) or {}
+    strong_pairs = correlation.get("strong_pairs", []) or []
+    sample_size = correlation.get("n")  # rows actually used for this pair, for plain-language framing
     ranked = sorted(strong_pairs, key=lambda p: abs(p.get("pearson_r", 0)), reverse=True)
-    return ranked[:TOP_CORRELATIONS_LIMIT]
+    return [{**pair, "n": sample_size} for pair in ranked[:TOP_CORRELATIONS_LIMIT]]
 
 
 def _extract_excluded_columns_facts(stats):
@@ -501,6 +521,7 @@ def _slice_top_bottom_rows(cat_col, data, limit=TOP_RANKING_LIMIT):
         "top": top_rows,
         "bottom": bottom_sliced,
         "total_categories": data.get("total_categories"),
+        "metric_label": data.get("metric_label"),
     }
 
 
@@ -943,6 +964,7 @@ def _plain_language_fallback(insight_facts: dict):
         )
 
     for cat_col, data in (insight_facts.get("rankings") or {}).items():
+        metric_label = (data.get("metric_label") or "revenue").lower()
         top = (data.get("top") or [None])[0]
         if top:
             name = top.get(cat_col)
@@ -950,7 +972,7 @@ def _plain_language_fallback(insight_facts: dict):
             if name is not None and share is not None:
                 bullets.append(
                     f"'{name}' is your best performer in {cat_col}, bringing in "
-                    f"{share}% of total revenue on its own."
+                    f"{share}% of total {metric_label} on its own."
                 )
         bottom = (data.get("bottom") or [None])[0]
         if bottom:
@@ -959,7 +981,7 @@ def _plain_language_fallback(insight_facts: dict):
             if name is not None and share is not None:
                 bullets.append(
                     f"'{name}' is your weakest performer in {cat_col}, contributing only "
-                    f"{share}% of total revenue - worth a closer look."
+                    f"{share}% of total {metric_label} - worth a closer look."
                 )
 
     growth = insight_facts.get("growth") or {}
@@ -980,8 +1002,10 @@ def _plain_language_fallback(insight_facts: dict):
 
     for pair in insight_facts.get("top_correlations", [])[:3]:
         verb = "tend to rise together" if pair.get("direction") == "positive" else "tend to move in opposite directions"
+        sample_n = pair.get("n")
+        sample_note = f" (seen across {sample_n:,} records)" if sample_n else ""
         bullets.append(
-            f"{pair['col1']} and {pair['col2']} {verb} - a change in one is a good early "
+            f"{pair['col1']} and {pair['col2']} {verb}{sample_note} - a change in one is a good early "
             f"warning sign for the other."
         )
 
@@ -1051,9 +1075,11 @@ def _fallback_narrative(insight_facts: dict) -> dict:
 
     key_findings = []
     for pair in insight_facts.get("top_correlations", []):
+        sample_n = pair.get("n")
+        sample_note = f", n={sample_n:,}" if sample_n else ""
         key_findings.append(
             f"{pair['col1']} and {pair['col2']} show a {pair['strength']} {pair['direction']} "
-            f"correlation (r={pair['pearson_r']})."
+            f"correlation (r={pair['pearson_r']}{sample_note})."
         )
     for trend in insight_facts.get("significant_trends", []):
         key_findings.append(
@@ -1135,9 +1161,10 @@ def _fallback_story(insight_facts: dict) -> dict:
     for cat_col, data in (insight_facts.get("rankings") or {}).items():
         top = (data.get("top") or [None])[0]
         if top and top.get("revenue_share_pct") is not None:
+            metric_label = (data.get("metric_label") or "revenue").lower()
             what_parts.append(
                 f"'{top.get(cat_col)}' is the strongest {cat_col}, contributing "
-                f"{top.get('revenue_share_pct')}% of revenue"
+                f"{top.get('revenue_share_pct')}% of {metric_label}"
             )
             break
     best_month = growth.get("best_month")
@@ -1191,6 +1218,42 @@ def _jargon_hits(text) -> list[str]:
         if match:
             hits.append(match.group(0))
     return hits
+
+
+def _narrative_text_blob(narrative: dict) -> str:
+    """Flatten every reader-facing narrative field into one lowercase blob,
+    used to decide which glossary terms are actually worth showing."""
+    parts = [narrative.get("executive_summary"), narrative.get("bottom_line")]
+    parts.extend(narrative.get("key_findings") or [])
+    parts.extend(narrative.get("plain_language_insights") or [])
+    parts.extend(narrative.get("risks_and_caveats") or [])
+    parts.extend(narrative.get("recommendations") or [])
+    story = narrative.get("story") or {}
+    if isinstance(story, dict):
+        parts.extend(story.values())
+    captions = narrative.get("chart_captions") or {}
+    if isinstance(captions, dict):
+        parts.extend(captions.values())
+    return " ".join(str(p) for p in parts if isinstance(p, str)).lower()
+
+
+def _build_dynamic_glossary(narrative: dict) -> dict:
+    """Only surface a glossary tooltip for terms that actually appear in the
+    final rendered narrative - an always-on static glossary shows definitions
+    for words ('skewed', 'link strength'...) that may never occur in a given
+    report, which is clutter, not clarity."""
+    candidates = {**DEFAULT_GLOSSARY, **EXTENDED_GLOSSARY}
+    raw_terms = narrative.get("glossary_terms")
+    if isinstance(raw_terms, dict):
+        candidates.update(raw_terms)
+    elif isinstance(raw_terms, list):
+        for entry in raw_terms:
+            if isinstance(entry, dict) and entry.get("term") and entry.get("plain_explanation"):
+                candidates[str(entry["term"]).strip()] = str(entry["plain_explanation"]).strip()
+
+    text = _narrative_text_blob(narrative)
+    matched = {term: definition for term, definition in candidates.items() if term.lower() in text}
+    return dict(list(matched.items())[:12])
 
 
 def _valid_story(story) -> dict | None:
@@ -1254,14 +1317,10 @@ def _compose_hybrid_narrative(llm_narrative: dict, deterministic: dict, facts: d
                 captions[cid] = caption.strip()
     merged["chart_captions"] = dict(list(captions.items())[:MAX_CHART_CAPTIONS_FROM_LLM])
 
-    # 4 — glossary: LLM terms appended to defaults, capped.
-    glossary = dict(DEFAULT_GLOSSARY)
-    raw_terms = llm_narrative.get("glossary_terms")
-    if isinstance(raw_terms, list):
-        for entry in raw_terms:
-            if isinstance(entry, dict) and entry.get("term") and entry.get("plain_explanation"):
-                glossary[str(entry["term"]).strip()] = str(entry["plain_explanation"]).strip()
-    merged["glossary_terms"] = dict(list(glossary.items())[:12])
+    # 4 — glossary: raw LLM terms pass through as-is; final filtering down to
+    # only the terms that actually appear in the rendered text happens once
+    # per-request in _build_dynamic_glossary, after linting/grounding settle.
+    merged["glossary_terms"] = llm_narrative.get("glossary_terms") or []
     return merged
 
 
@@ -1394,6 +1453,7 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
             "llm_caption": captions.get(spec.get("id"), ""),
             "alt_text": spec.get("alt_text") or spec.get("title", ""),
             "section": spec.get("section", "what_matters"),
+            "priority": spec.get("priority") or 0.0,
             "render": spec.get("render", "image"),
             "annotations": spec.get("annotations") or [],
             "option_json": "",
@@ -1409,7 +1469,9 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
 
 
 def _group_by_section(chart_entries: list[dict]) -> list[tuple[str, list[dict]]]:
-    """Order sections narratively and drop empties."""
+    """Order sections by the combined signal strength of the charts placed in them,
+    so a dataset dominated by (say) trends leads with "Direction of travel" instead of
+    always opening with "What matters most" regardless of what's actually strongest."""
     order = ["what_matters", "shape", "direction", "relationships", "watchlist"]
     headings = {
         "what_matters": ("What matters most", "The groups and items that carry the business."),
@@ -1418,13 +1480,17 @@ def _group_by_section(chart_entries: list[dict]) -> list[tuple[str, list[dict]]]
         "relationships": ("How things connect", "Where two measures move together."),
         "watchlist": ("Worth double-checking", "Unusual records and risk pockets to review."),
     }
-    grouped = []
-    for section in order:
+    sections = []
+    for position, section in enumerate(order):
         items = [c for c in chart_entries if c["section"] == section]
-        if items:
-            title, blurb = headings.get(section, (section.replace("_", " ").title(), ""))
-            grouped.append((section, {"heading": title, "blurb": blurb, "charts": items}))
-    return grouped
+        if not items:
+            continue
+        items.sort(key=lambda c: c.get("priority") or 0.0, reverse=True)
+        signal = sum(c.get("priority") or 0.0 for c in items)
+        title, blurb = headings.get(section, (section.replace("_", " ").title(), ""))
+        sections.append((signal, position, section, {"heading": title, "blurb": blurb, "charts": items}))
+    sections.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [(section, payload) for _, _, section, payload in sections]
 
 
 def _kpi_cards(facts: dict) -> list[dict]:
@@ -1498,7 +1564,7 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         facts=insight_facts,
         narrative=narrative,
         story=narrative.get("story") or {},
-        glossary=narrative.get("glossary_terms") or DEFAULT_GLOSSARY,
+        glossary=narrative.get("glossary_terms") or {},
         kpis=_kpi_cards(insight_facts),
         chart_sections=_group_by_section(entries),
         has_interactive=bool(echarts_lib),
@@ -1691,6 +1757,7 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         print(f"[Agent 6] Jargon linter replaced {lint_replacements} plain-language line(s)")
 
     narrative["recommendations"] = _ground_recommendations(insight_facts, narrative)
+    narrative["glossary_terms"] = _build_dynamic_glossary(narrative)
 
     claims_grounding = _check_narrative_grounding(insight_facts, narrative)
     narrative["claims_grounding"] = claims_grounding

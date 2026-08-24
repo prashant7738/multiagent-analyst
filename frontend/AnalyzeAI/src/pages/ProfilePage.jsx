@@ -1,367 +1,251 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { GlowBorderCard } from "@/components/ui/glow-border-card";
-import { AnimatedNumber } from "@/components/ui/animated-number";
-import { FlipText } from "@/components/ui/flip-text";
-import { LightLines } from "@/components/ui/light-lines";
-import AppNavbar from "@/components/AppNavbar";
+import { Trash2 } from "lucide-react";
+import AppLayout from "@/layouts/AppLayout";
+import Button from "@/components/ui/button";
+import useJobHistory from "@/hooks/useJobHistory";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchJobs, fetchJobResult, reportDownloadUrl } from "@/lib/api";
 
-const AGENTS_INFO = [
-  { id: 1, name: "Structural Profiler",     icon: "🔍", color: "violet" },
-  { id: 2, name: "Semantic Tagging",         icon: "🏷️", color: "blue" },
-  { id: 3, name: "Preprocessing",            icon: "⚙️", color: "cyan" },
-  { id: 4, name: "Statistics & Viz",         icon: "📊", color: "emerald" },
-  { id: 5, name: "Quality Guardrail",        icon: "🛡️", color: "amber" },
-  { id: 6, name: "Report Assembly",          icon: "📄", color: "violet" },
-];
-
+/**
+ * GOAL: "what have I done, and how well is it going?" One overview: identity,
+ * honest account info (no fake Save), and the same job table as History via
+ * the shared hook.
+ *
+ * Settings tab note: display name/email are read-only on purpose — the auth
+ * backend exposes no update endpoint (and no sessions at all; see
+ * AuthContext). Showing disabled inputs beats a Save button that lies.
+ */
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { jobs, loading, error, partial, removeJob, deletingIds } = useJobHistory();
   const [activeTab, setActiveTab] = useState("overview");
-  const [history, setHistory] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const jobs = await fetchJobs();
-        const enriched = await Promise.all(
-          jobs.map(async (job) => {
-            let rows = null;
-            let cols = null;
-            let quality = null;
-            let confidence = null;
-            let reportAvailable = false;
-            if (job.status === "completed") {
-              try {
-                const result = await fetchJobResult(job.job_id);
-                rows = result?.summary?.rows ?? null;
-                cols = result?.summary?.columns ?? null;
-                quality = result?.summary?.quality_score ?? null;
-                confidence = result?.summary?.overall_confidence ?? null;
-                reportAvailable = Boolean(result?.report?.available);
-              } catch {
-                // ignore jobs whose result is no longer available
-              }
-            }
-            return {
-              id: job.job_id,
-              file: job.filename || "unknown.csv",
-              rows,
-              cols,
-              quality,
-              confidence,
-              profile: job.analysis_config?.preprocessing_profile || "balanced",
-              date: job.created_at?.slice(0, 10) ?? "—",
-              duration: `${Math.max(0, Math.round((new Date(job.updated_at) - new Date(job.created_at)) / 1000))}s`,
-              status: job.status === "completed" ? "done" : job.status === "failed" ? "error" : job.status,
-              reportAvailable,
-            };
-          })
-        );
-        if (!cancelled) setHistory(enriched);
-      } catch {
-        if (!cancelled) setHistory([]);
-      } finally {
-        if (!cancelled) setHistoryLoading(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, []);
-
-  const doneCount = history.filter((item) => item.status === "done").length;
-  const avgQuality = history.filter((item) => item.quality != null).reduce((sum, item) => sum + item.quality, 0);
-  const avgQualityScore = history.filter((item) => item.quality != null).length > 0
-    ? Math.round(avgQuality / history.filter((item) => item.quality != null).length)
-    : 0;
-  const avgConfidence = history.filter((item) => item.confidence != null).reduce((sum, item) => sum + item.confidence, 0);
-  const avgConfidenceScore = history.filter((item) => item.confidence != null).length > 0
-    ? Math.round((avgConfidence / history.filter((item) => item.confidence != null).length) * 100)
-    : 0;
 
   if (!user) {
     return (
-      <div className="dark min-h-screen bg-black font-sans antialiased text-white flex flex-col">
-        <AppNavbar />
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center px-6">
-          <span className="text-6xl">🔒</span>
-          <h2 className="text-3xl font-black text-white">Sign in to view your profile</h2>
-          <p className="text-white/40 text-sm max-w-sm">
-            Your analyses, reports, and account settings are only accessible when you&apos;re logged in.
+      <AppLayout size="content">
+        <div className="py-24 text-center">
+          <h1 className="font-heading text-2xl font-bold text-ink">Sign in to view your profile</h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-ink-muted">
+            Your analyses and reports are only listed when you&apos;re signed in.
           </p>
-          <div className="flex gap-3">
-            <button onClick={() => navigate("/login")}
-              className="px-6 py-3 rounded-full bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-colors cursor-pointer">
-              Sign In
-            </button>
-            <button onClick={() => navigate("/signup")}
-              className="px-6 py-3 rounded-full border border-white/10 hover:border-white/30 text-white/60 hover:text-white text-sm transition-colors cursor-pointer">
-              Create Account
-            </button>
-          </div>
+          <Button className="mt-6" onClick={() => navigate("/login")}>
+            Sign in
+          </Button>
         </div>
-      </div>
+      </AppLayout>
     );
   }
 
   const initial = user.name?.[0]?.toUpperCase() ?? "U";
-  const joinedYear = user.joinedDate ? new Date(user.joinedDate).getFullYear() : "2026";
+  const joinedYear = user.joinedDate ? new Date(user.joinedDate).getFullYear() : null;
+
+  const doneJobs = jobs.filter((j) => j.status === "done");
+  const failedJobs = jobs.filter((j) => j.status === "error");
+  const confidenceValues = doneJobs.filter((j) => j.confidence != null);
+  const avgConfidence =
+    confidenceValues.length > 0
+      ? Math.round(
+          (confidenceValues.reduce((sum, j) => sum + j.confidence, 0) / confidenceValues.length) * 100
+        )
+      : null;
+  const qualityValues = doneJobs.filter((j) => j.quality != null);
+  const avgQuality =
+    qualityValues.length > 0
+      ? Math.round(qualityValues.reduce((sum, j) => sum + j.quality, 0) / qualityValues.length)
+      : null;
+
+  const TABS = ["overview", "history", "settings"];
 
   return (
-    <div className="dark min-h-screen bg-black font-sans antialiased text-white flex flex-col">
-      <AppNavbar />
-
-      {/* Profile hero */}
-      <div className="relative overflow-hidden border-b border-white/5">
-        <div className="absolute inset-0 z-0 opacity-40">
-          <LightLines
-            gradientFrom="#4f46e5"
-            gradientTo="#7c3aed"
-            lightColor="#a78bfa"
-            lineColor="#6d28d9"
-            linesOpacity={0.03}
-            lightsOpacity={0.5}
-          />
-        </div>
-        <div className="absolute inset-0 z-1 bg-linear-to-b from-black/20 to-black pointer-events-none" />
-        <div className="relative z-10 max-w-5xl mx-auto px-6 py-12 flex flex-col sm:flex-row items-center sm:items-end gap-6">
-          {/* Avatar */}
-          <div className="w-20 h-20 rounded-2xl bg-violet-600 border-2 border-violet-500/50 flex items-center justify-center text-4xl font-black text-white shadow-[0_0_32px_rgba(139,92,246,0.5)]">
+    <AppLayout size="wide">
+      {/* Identity row */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent font-heading text-xl font-bold text-white">
             {initial}
+          </span>
+          <div>
+            <h1 className="font-heading text-2xl font-bold tracking-tight text-ink">{user.name}</h1>
+            <p className="text-sm text-ink-muted">
+              {user.email}
+              {joinedYear ? ` · Member since ${joinedYear}` : ""}
+            </p>
           </div>
-          {/* Info */}
-          <div className="flex-1 text-center sm:text-left">
-            <FlipText className="text-3xl font-black text-white tracking-tight" duration={2} loop={false}>
-              {user.name}
-            </FlipText>
-            <p className="text-white/40 text-sm mt-1">{user.email} · Member since {joinedYear}</p>
-          </div>
-          {/* Actions */}
-          <div className="flex gap-3">
-            <button onClick={() => navigate("/analyze")}
-              className="px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors cursor-pointer shadow-[0_0_16px_rgba(139,92,246,0.4)]">
-              New Analysis →
-            </button>
-            <button
-              onClick={() => { logout(); navigate("/"); }}
-              className="px-5 py-2.5 rounded-full border border-white/10 hover:border-red-500/30 text-white/40 hover:text-red-400 text-sm transition-all duration-200 cursor-pointer">
-              Log Out
-            </button>
-          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => navigate("/analyze")}>New analysis</Button>
+          <Button variant="secondary" onClick={() => { logout(); navigate("/"); }}>
+            Log out
+          </Button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-white/5 bg-black/60 backdrop-blur-sm sticky top-16 z-40">
-        <div className="max-w-5xl mx-auto px-6 flex gap-0">
-          {["overview", "history", "settings"].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-5 py-3.5 text-sm font-medium capitalize transition-all duration-200 border-b-2 cursor-pointer
-                ${activeTab === tab
-                  ? "text-white border-violet-500"
-                  : "text-white/30 border-transparent hover:text-white/60"
-                }`}>
-              {tab}
-            </button>
-          ))}
-        </div>
+      <div role="tablist" aria-label="Profile sections" className="mt-8 flex gap-1 border-b border-line">
+        {TABS.map((tab) => (
+          <button
+            key={tab}
+            role="tab"
+            aria-selected={activeTab === tab}
+            onClick={() => setActiveTab(tab)}
+            className={`-mb-px border-b-2 px-4 py-2.5 text-sm capitalize transition-colors ${
+              activeTab === tab
+                ? "border-accent font-medium text-ink"
+                : "border-transparent text-ink-muted hover:text-ink"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 py-10 w-full">
-
-        {/* ── Overview tab ── */}
+      <div className="mt-8">
+        {/* ── Overview ── */}
         {activeTab === "overview" && (
-          <div className="flex flex-col gap-8">
-            {/* Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          <>
+            <dl className="grid grid-cols-2 divide-line rounded-panel border border-line bg-surface sm:grid-cols-4 sm:divide-x">
               {[
-                { value: history.length, label: "Analyses Run", suffix: "", preset: "aurora" },
-                { value: doneCount, label: "Reports Generated", suffix: "", preset: "ocean" },
-                { value: avgQualityScore || avgConfidenceScore || 0, label: "Avg Quality / Confidence", suffix: "%", preset: "sunset" },
+                { label: "Analyses run", value: jobs.length },
+                { label: "Reports generated", value: doneJobs.length },
+                { label: "Avg quality", value: avgQuality != null ? `${avgQuality}%` : "—" },
+                { label: "Avg confidence", value: avgConfidence != null ? `${avgConfidence}%` : "—" },
               ].map((s) => (
-                <GlowBorderCard key={s.label} colorPreset={s.preset}
-                  width="100%" height="auto" aspectRatio="unset"
-                  animationDuration={5} className="bg-[#0a0a0a]">
-                  <div className="p-6 flex flex-col gap-1">
-                    <div className="flex items-end gap-0.5">
-                      <AnimatedNumber value={s.value} className="text-5xl font-black text-white tabular-nums" />
-                      <span className="text-2xl font-bold text-white/30 mb-1">{s.suffix}</span>
-                    </div>
-                    <p className="text-white/40 text-sm">{s.label}</p>
-                  </div>
-                </GlowBorderCard>
+                <div key={s.label} className="px-5 py-4">
+                  <dd className="tnum font-heading text-2xl font-bold text-ink">{s.value}</dd>
+                  <dt className="mt-0.5 text-xs text-ink-faint">{s.label}</dt>
+                </div>
               ))}
-            </div>
+            </dl>
 
-            {/* Agent pipeline status */}
-            <div>
-              <h2 className="text-white font-bold text-lg mb-4">Your Pipeline Agents</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                {AGENTS_INFO.map((a) => (
-                  <div key={a.id}
-                    className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-white/5 bg-white/2 hover:border-violet-500/20 hover:bg-violet-500/5 transition-all duration-200">
-                    <span className="text-2xl">{a.icon}</span>
-                    <span className="text-white/50 text-xs text-center leading-snug">{a.name}</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+            <h2 className="mt-10 font-heading text-base font-semibold text-ink">Recent runs</h2>
+            <ul className="mt-3 divide-y divide-line rounded-panel border border-line bg-surface">
+              {jobs.slice(0, 4).map((job) => (
+                <li key={job.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{job.file}</p>
+                    <p className="tnum mt-0.5 text-xs text-ink-muted">
+                      {job.date} · {job.duration} ·{" "}
+                      {job.status === "done" ? "complete" : job.status === "error" ? "failed" : job.status}
+                    </p>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Recent analyses */}
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-white font-bold text-lg">Recent Analyses</h2>
-                <button onClick={() => setActiveTab("history")}
-                  className="text-violet-400 hover:text-violet-300 text-xs transition-colors cursor-pointer">
-                  View all →
-                </button>
-              </div>
-              <div className="flex flex-col gap-3">
-                {history.slice(0, 3).map((item) => (
-                  <div key={item.id}
-                    className="flex items-center justify-between p-4 rounded-xl border border-white/5 bg-white/2 hover:border-white/10 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">📁</span>
-                      <div>
-                        <p className="text-white/80 text-sm font-medium">{item.file}</p>
-                        <p className="text-white/30 text-xs">
-                          {item.rows != null ? item.rows.toLocaleString() : "—"} rows · {item.cols ?? "—"} cols · {item.profile} · {item.date} · {item.duration}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {item.status === "done" ? (
-                        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs">✓ Complete</span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 text-xs">✗ Error</span>
-                      )}
-                      {item.status === "done" && (
-                        <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
-                          className="text-violet-400 hover:text-violet-300 text-xs transition-colors cursor-pointer">
-                          Download →
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {!historyLoading && history.length === 0 && (
-                  <div className="p-4 rounded-xl border border-white/5 bg-white/2 text-white/30 text-sm">
-                    No runs yet. Start an analysis to populate your account history.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+                  <button
+                    onClick={() => navigate(`/analyze/${job.id}`)}
+                    className="shrink-0 text-xs font-medium text-accent-ink transition-colors hover:text-accent"
+                  >
+                    Open
+                  </button>
+                </li>
+              ))}
+              {!loading && jobs.length === 0 && (
+                <li className="px-5 py-6 text-sm text-ink-faint">
+                  No runs yet — start your first analysis.
+                </li>
+              )}
+              {loading && (
+                <li className="px-5 py-6 text-xs text-ink-faint">Loading…</li>
+              )}
+            </ul>
+          </>
         )}
 
-        {/* ── History tab ── */}
+        {/* ── History ── */}
         {activeTab === "history" && (
-          <div className="flex flex-col gap-6">
-            {/* Summary stat chips */}
-            <div className="flex flex-wrap gap-3">
-              {[
-                { label: "Total Runs",    value: history.length,                                                             color: "border-white/10 text-white/50" },
-                { label: "Successful",    value: history.filter(h => h.status === "done").length,                          color: "border-emerald-500/25 text-emerald-300" },
-                { label: "Failed",        value: history.filter(h => h.status === "error").length,                         color: "border-red-500/25 text-red-300" },
-                { label: "Rows Analyzed", value: history.reduce((s, h) => s + (h.rows || 0), 0).toLocaleString(),           color: "border-violet-500/25 text-violet-300" },
-              ].map(s => (
-                <div key={s.label} className={`px-4 py-2 rounded-xl border bg-white/2 flex items-center gap-2 ${s.color}`}>
-                  <span className="font-black text-sm">{s.value}</span>
-                  <span className="text-white/30 text-xs">{s.label}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between">
-              <h2 className="text-white font-bold text-lg">All Analyses</h2>
-              <button onClick={() => navigate("/analyze")}
-                className="px-5 py-2 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors cursor-pointer">
-                New Analysis →
-              </button>
-            </div>
-            <div className="rounded-2xl border border-white/5 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-white/5 bg-white/2">
-                    <th className="text-left px-5 py-4 text-white/30 font-medium">File</th>
-                    <th className="text-left px-4 py-4 text-white/30 font-medium">Rows</th>
-                    <th className="text-left px-4 py-4 text-white/30 font-medium">Cols</th>
-                    <th className="text-left px-4 py-4 text-white/30 font-medium">Date</th>
-                    <th className="text-left px-4 py-4 text-white/30 font-medium">Time</th>
-                    <th className="text-left px-4 py-4 text-white/30 font-medium">Status</th>
-                    <th className="px-4 py-4" />
+          <div className="overflow-x-auto rounded-panel border border-line bg-surface">
+            <table className="w-full min-w-[680px] text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
+                  <th scope="col" className="px-5 py-3.5 font-medium">File</th>
+                  <th scope="col" className="px-4 py-3.5 font-medium">Rows</th>
+                  <th scope="col" className="px-4 py-3.5 font-medium">Confidence</th>
+                  <th scope="col" className="px-4 py-3.5 font-medium">Date</th>
+                  <th scope="col" className="px-4 py-3.5 font-medium">Status</th>
+                  <th scope="col" className="px-4 py-3.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {jobs.map((job) => (
+                  <tr key={job.id}>
+                    <td className="px-5 py-3.5 font-medium text-ink">{job.file}</td>
+                    <td className="tnum px-4 py-3.5 text-ink-muted">
+                      {job.rows != null && !job.enrichFailed ? job.rows.toLocaleString() : "—"}
+                    </td>
+                    <td className="tnum px-4 py-3.5 text-ink-muted">
+                      {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}
+                    </td>
+                    <td className="tnum px-4 py-3.5 text-ink-muted">{job.date}</td>
+                    <td className="px-4 py-3.5 capitalize text-ink-muted">{job.status}</td>
+                    <td className="px-4 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-4 whitespace-nowrap">
+                        {job.status === "done" && (
+                          <button
+                            onClick={() => navigate(`/analyze/${job.id}`)}
+                            className="text-xs font-medium text-accent-ink transition-colors hover:text-accent"
+                          >
+                            Open
+                          </button>
+                        )}
+                        {job.status !== "done" && job.status !== "error" ? null : (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Delete "${job.file}" from history? Its report and charts are removed too.`)) {
+                                removeJob(job.id).catch(() => {});
+                              }
+                            }}
+                            disabled={deletingIds.has(job.id)}
+                            aria-label={`Delete analysis for ${job.file}`}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-danger transition-opacity hover:opacity-70 disabled:opacity-40"
+                          >
+                            <Trash2 size={12} aria-hidden="true" /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {history.map((item, i) => (
-                    <tr key={item.id}
-                      className={`border-b border-white/5 hover:bg-white/2 transition-colors ${i === history.length - 1 ? "border-b-0" : ""}`}>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <span className="text-lg">📁</span>
-                          <span className="text-white/80 font-medium">{item.file}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-white/40">{item.rows != null ? item.rows.toLocaleString() : "—"}</td>
-                      <td className="px-4 py-4 text-white/40">{item.cols ?? "—"}</td>
-                      <td className="px-4 py-4 text-white/40 capitalize">{item.profile}</td>
-                      <td className="px-4 py-4 text-white/40">{item.confidence != null ? `${Math.round(item.confidence * 100)}%` : "—"}</td>
-                      <td className="px-4 py-4 text-white/40">{item.date}</td>
-                      <td className="px-4 py-4 text-white/40">{item.duration}</td>
-                      <td className="px-4 py-4">
-                        {item.status === "done" ? (
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium">✓ Complete</span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 text-xs font-medium">✗ Error</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-4">
-                        {item.status === "done" && item.reportAvailable && (
-                          <a href={reportDownloadUrl(item.id)} target="_blank" rel="noreferrer"
-                            className="text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors cursor-pointer">
-                            Download →
-                          </a>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
+            {loading && <p className="px-6 py-8 text-center text-xs text-ink-faint">Loading…</p>}
           </div>
         )}
 
-        {/* ── Settings tab ── */}
+        {/* ── Settings: honest read-only account info ── */}
         {activeTab === "settings" && (
-          <div className="flex flex-col gap-6 max-w-lg">
-            <h2 className="text-white font-bold text-lg">Account Settings</h2>
-            <GlowBorderCard colorPreset="custom" width="100%" height="auto"
-              aspectRatio="unset" animationDuration={8} className="bg-[#0a0a0a]">
-              <div className="p-6 flex flex-col gap-5">
-                <div className="flex flex-col gap-2">
-                  <label className="text-white/50 text-xs font-semibold tracking-widest uppercase">Display Name</label>
-                  <input defaultValue={user.name}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-text" />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-white/50 text-xs font-semibold tracking-widest uppercase">Email</label>
-                  <input defaultValue={user.email} type="email"
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-violet-500/60 transition-all cursor-text" />
-                </div>
-                <button className="self-start px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold transition-colors cursor-pointer">
-                  Save Changes
-                </button>
+          <div className="max-w-md rounded-panel border border-line bg-surface p-6">
+            <h2 className="font-heading text-base font-semibold text-ink">Account</h2>
+            <p className="mt-1 text-xs leading-relaxed text-ink-faint">
+              Sign-in currently identifies you for this browser only — the backend doesn&apos;t
+              support profile updates or password changes yet.
+            </p>
+            <dl className="mt-5 space-y-4">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">Display name</dt>
+                <dd className="mt-1 rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink">
+                  {user.name || "—"}
+                </dd>
               </div>
-            </GlowBorderCard>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">Email</dt>
+                <dd className="mt-1 rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink">
+                  {user.email || "—"}
+                </dd>
+              </div>
+            </dl>
+            {(failedJobs.length > 0 || partial) && (
+              <p className="mt-5 text-xs leading-relaxed text-ink-muted">
+                {failedJobs.length > 0 && `${failedJobs.length} run(s) ended in errors.`}{" "}
+                {partial && "Some stored results have expired."}
+              </p>
+            )}
           </div>
+        )}
+
+        {(error || partial) && activeTab !== "settings" && (
+          <p role="status" className="mt-6 text-xs text-warning">
+            {error ? error : "Note: some older results have expired from storage."}
+          </p>
         )}
       </div>
-    </div>
+    </AppLayout>
   );
 }

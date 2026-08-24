@@ -48,6 +48,18 @@ if TYPE_CHECKING:
 _SCHEMA_READY = False
 _MAX_EMBED_RETRIES = 4
 _MAX_BACKOFF_SECONDS = 90
+_ALWAYS_INCLUDE_FACT_TYPES = (
+    "dataset_summary",
+    "narrative_summary",
+    "key_finding",
+    "anomaly_summary",
+    "quality_validation",
+    "existing_charts",
+    "correlation",
+    "trend",
+    "ranking",
+)
+_MAX_ALWAYS_INCLUDED_FACTS = 60
 
 # BAAI/bge-* models are asymmetric: queries need this instruction prefix, documents don't.
 _HF_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
@@ -465,7 +477,11 @@ def start_rag_build(manager: "JobManager", job: "Job") -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
-    """Semantically retrieve the row + fact documents most relevant to ``question``."""
+    """Retrieve rows semantically and preserve dataset-wide facts for synthesis.
+
+    Dataset-wide insight documents are always included because broad questions
+    do not reliably match one narrow fact by vector similarity.
+    """
     _ensure_schema()
     settings = get_settings()
     question_vector = embed_texts([question], task_type="RETRIEVAL_QUERY")[0]
@@ -488,24 +504,24 @@ def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
             cur.execute(
                 sql.SQL(
                     "SELECT doc_type, doc_text, metadata, row_index FROM {} "
-                    "WHERE job_id = %s AND doc_type != 'row' "
-                    "ORDER BY embedding <=> %s::vector LIMIT %s;"
+                    "WHERE job_id = %s AND doc_type = ANY(%s) "
+                    "ORDER BY doc_type, row_index NULLS FIRST LIMIT %s;"
                 ).format(_table()),
-                (job_id, vector_str, settings.rag_top_k_facts),
+                (job_id, list(_ALWAYS_INCLUDE_FACT_TYPES), _MAX_ALWAYS_INCLUDED_FACTS),
             )
-            fact_docs = cur.fetchall()
+            always_included_facts = cur.fetchall()
 
             cur.execute(
                 sql.SQL(
                     "SELECT doc_type, doc_text, metadata, row_index FROM {} "
-                    "WHERE job_id = %s AND doc_type = 'dataset_summary' LIMIT 1;"
+                    "WHERE job_id = %s AND doc_type IN ('column_meta', 'descriptive_stat') "
+                    "ORDER BY embedding <=> %s::vector LIMIT %s;"
                 ).format(_table()),
-                (job_id,),
+                (job_id, vector_str, settings.rag_top_k_facts),
             )
-            summary_doc = cur.fetchone()
+            column_facts = cur.fetchall()
 
-    if summary_doc and not any(d["doc_type"] == "dataset_summary" for d in fact_docs):
-        fact_docs = [summary_doc] + list(fact_docs)
+    fact_docs = list(always_included_facts) + list(column_facts)
 
     return {"facts": fact_docs, "rows": row_docs}
 

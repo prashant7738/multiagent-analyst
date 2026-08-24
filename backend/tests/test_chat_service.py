@@ -4,10 +4,75 @@ from unittest.mock import patch
 import pandas as pd
 
 from api.services import chat_service
+from api.services import rag_service
 from api.services.job_manager import Job, JobManager
 
 
 class TestChatServiceFacts(unittest.TestCase):
+    def test_retrieve_always_includes_dataset_wide_insight_facts(self):
+        class FakeCursor:
+            def __init__(self):
+                self.executed = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, query, params):
+                self.executed.append(str(query))
+
+            def fetchall(self):
+                query = self.executed[-1]
+                if "doc_type = 'row'" in query:
+                    return []
+                if "doc_type != 'row'" in query:
+                    return [{
+                        "doc_type": "descriptive_stat",
+                        "doc_text": "revenue mean=10",
+                        "metadata": {},
+                        "row_index": None,
+                    }]
+                return [{
+                    "doc_type": "correlation",
+                    "doc_text": "revenue and returns are strongly negatively correlated",
+                    "metadata": {},
+                    "row_index": None,
+                }]
+
+            def fetchone(self):
+                return None
+
+        class FakeConnection:
+            def __init__(self, cursor):
+                self.cursor_value = cursor
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def cursor(self):
+                return self.cursor_value
+
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        settings = type("Settings", (), {
+            "rag_embeddings_table": "dataset_embeddings",
+            "rag_top_k_rows": 8,
+            "rag_top_k_facts": 1,
+        })()
+
+        with patch.object(rag_service, "_ensure_schema"), \
+                patch.object(rag_service, "_connect", return_value=connection), \
+                patch.object(rag_service, "embed_texts", return_value=[[0.1, 0.2]]), \
+                patch.object(rag_service, "get_settings", return_value=settings):
+            retrieved = rag_service.retrieve("job-1", "Give me a meaningful insight")
+
+        self.assertIn("correlation", [doc["doc_type"] for doc in retrieved["facts"]])
+
     def test_build_dataset_context_condenses_result(self):
         result = {
             "summary": {"filename": "sample.csv", "rows": 100, "columns": 5, "quality_score": 88.0},
@@ -32,6 +97,18 @@ class TestChatServiceFacts(unittest.TestCase):
         self.assertIn("revenue", context["significant_trends"])
         self.assertEqual(context["existing_charts"], ["chart1.png"])
         self.assertEqual(context["executive_summary"], "Solid dataset.")
+
+    def test_build_dataset_context_caps_significant_trends(self):
+        regression = {
+            f"column_{index}": {"significant": True, "r_squared": index / 10}
+            for index in range(10)
+        }
+
+        context = chat_service.build_dataset_context({"stats": {"regression": regression}})
+
+        self.assertEqual(len(context["significant_trends"]), 8)
+        self.assertNotIn("column_0", context["significant_trends"])
+        self.assertIn("column_9", context["significant_trends"])
 
     def test_build_rag_user_content_is_compacted_for_large_contexts(self):
         facts = [

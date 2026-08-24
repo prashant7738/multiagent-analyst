@@ -91,6 +91,15 @@ def build_dataset_context(result: dict[str, Any]) -> dict[str, Any]:
         for col, meta in schema_blueprint.items()
         if isinstance(meta, dict) and col != "__metadata__"
     }
+    significant_trends = {
+        col: metrics for col, metrics in regression.items()
+        if isinstance(metrics, dict) and metrics.get("significant")
+    }
+    significant_trends = dict(sorted(
+        significant_trends.items(),
+        key=lambda item: float(item[1].get("r_squared") or 0),
+        reverse=True,
+    )[:8])
 
     return {
         "dataset": {
@@ -107,10 +116,7 @@ def build_dataset_context(result: dict[str, Any]) -> dict[str, Any]:
         "seasonality": stats.get("seasonality", {}),
         "top_bottom_rankings": stats.get("top_bottom", {}),
         "anomaly_summary": stats.get("anomaly_summary", {}),
-        "significant_trends": {
-            col: metrics for col, metrics in regression.items()
-            if isinstance(metrics, dict) and metrics.get("significant")
-        },
+        "significant_trends": significant_trends,
         "category_distributions": stats.get("distributions", {}),
         "validation": result.get("validation", {}),
         "reliability": result.get("reliability", {}),

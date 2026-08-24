@@ -140,6 +140,8 @@ CORRELATION_HEATMAP_MIN_R = 0.3
 # Global cap on total charts across all families, applied by informativeness
 # ranking rather than truncating whichever family happens to run last.
 MAX_CHARTS_PER_REPORT = int(os.getenv("MAX_CHARTS_PER_REPORT", "16"))
+DERIVED_TAUTOLOGY_MIN_R = 0.98
+MATERIAL_LEADER_RATIO = 1.5
 
 
 def _numeric_cols(df, schema_blueprint):
@@ -543,6 +545,19 @@ def _correlation(df, schema_blueprint):
     max_abs_r = 0.0
     excluded_pairs = []
     formulaic_pairs = []
+    derived_quality_flags = []
+    derived_cols = [col for col in cols if col.startswith("derived_")]
+    for i, c1 in enumerate(derived_cols):
+        for c2 in derived_cols[i + 1:]:
+            r = pearson.loc[c1, c2]
+            if abs(r) >= DERIVED_TAUTOLOGY_MIN_R:
+                pair = {
+                    "col1": c1,
+                    "col2": c2,
+                    "pearson_r": round(float(r), 4),
+                    "message": "Near-lockstep derived metrics may indicate missing, zeroed, or duplicated cost data.",
+                }
+                derived_quality_flags.append(pair)
     for i, c1 in enumerate(cols):
         for c2 in cols[i+1:]:
             r = pearson.loc[c1, c2]
@@ -554,7 +569,9 @@ def _correlation(df, schema_blueprint):
                     "direction": "positive" if r > 0 else "negative",
                     "strength":  "strong" if abs(r) >= 0.7 else "moderate",
                 }
-                if _is_formulaic_pair(c1, c2, derivation_map, raw_formula_relationships) or _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
+                if any({c1, c2} == {item["col1"], item["col2"]} for item in derived_quality_flags):
+                    excluded_pairs.append({**pair, "exclusion_reason": "derived_quality_signal"})
+                elif _is_formulaic_pair(c1, c2, derivation_map, raw_formula_relationships) or _is_exact_derived_pair(c1, c2, corr_df, derivation_map):
                     formulaic_pairs.append(pair)
                 elif c1 in flagged_columns or c2 in flagged_columns:
                     excluded_pairs.append(pair)
@@ -569,6 +586,7 @@ def _correlation(df, schema_blueprint):
         "flagged_columns": sorted(flagged_columns & set(cols)),
         "excluded_pairs":  excluded_pairs,
         "formulaic_pairs": formulaic_pairs,
+        "derived_quality_flags": derived_quality_flags,
         "n":               len(corr_df),
     }
     chart_candidates = []
@@ -832,6 +850,10 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
             grouped["total_revenue"] / grouped["total_revenue"].sum() * 100
         ).round(2)
 
+        shares = grouped["revenue_share_pct"].sort_values(ascending=False).tolist()
+        effect_size_ratio = round(shares[0] / shares[1], 3) if len(shares) > 1 and shares[1] > 0 else None
+        is_material = bool(effect_size_ratio is None or effect_size_ratio >= MATERIAL_LEADER_RATIO)
+
         top_n    = grouped.head(n)
         bottom_n = grouped.tail(n)
 
@@ -840,6 +862,8 @@ def _top_bottom_rankings(df, schema_blueprint, n=5):
             "bottom": bottom_n.to_dict(orient="records"),
             "total_categories": len(grouped),
             "metric_label": label,
+            "effect_size_ratio": effect_size_ratio,
+            "is_material": is_material,
         }
 
         fig, ax = plt.subplots(figsize=(8, max(3, len(top_n) * 0.6 + 1)))
@@ -1250,6 +1274,32 @@ def _detect_data_quality_issues(df, schema_blueprint):
         if order_col is not None and order_col != return_col:
             rules_checked.add(f"{return_col} <= {order_col}")
             _record(r > _num(order_col), f"{return_col} > {order_col}")
+
+    date_columns = {"order": None, "ship": None, "delivery": None}
+    for col in df.columns:
+        tokens = _tokens(col)
+        if "date" not in tokens and not any(token.endswith("date") for token in tokens):
+            continue
+        if {"order", "ordered"} & tokens and date_columns["order"] is None:
+            date_columns["order"] = col
+        elif "ship" in tokens and date_columns["ship"] is None:
+            date_columns["ship"] = col
+        elif ({"delivery", "delivered"} & tokens) and date_columns["delivery"] is None:
+            date_columns["delivery"] = col
+
+    if date_columns["order"] and (date_columns["ship"] or date_columns["delivery"]):
+        order_dates = pd.to_datetime(df[date_columns["order"]], errors="coerce")
+        sequence_violated = pd.Series(False, index=df.index)
+        if date_columns["ship"]:
+            ship_dates = pd.to_datetime(df[date_columns["ship"]], errors="coerce")
+            sequence_violated |= ship_dates < order_dates
+        if date_columns["delivery"]:
+            delivery_dates = pd.to_datetime(df[date_columns["delivery"]], errors="coerce")
+            sequence_violated |= delivery_dates < order_dates
+            if date_columns["ship"]:
+                sequence_violated |= delivery_dates < ship_dates
+        rules_checked.add("temporal_sequence_violated")
+        _record(sequence_violated, "temporal_sequence_violated")
 
     n = max(len(df), 1)
     return {

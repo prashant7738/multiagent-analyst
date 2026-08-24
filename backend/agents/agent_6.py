@@ -311,6 +311,7 @@ def _extract_quality_facts(state):
         "derived_metric_reconciliation": [
             r for r in (data_quality.get("derived_metric_reconciliation") or []) if r.get("diverged")
         ],
+        "text_quality_flags": data_quality.get("text_quality_flags") or {},
     }
 
 
@@ -452,6 +453,11 @@ def _extract_excluded_columns_facts(stats):
         "flagged_columns": correlation.get("flagged_columns", []) or [],
         "excluded_pairs": (correlation.get("excluded_pairs", []) or [])[:TOP_CORRELATIONS_LIMIT],
     }
+
+
+def _extract_derived_quality_facts(stats):
+    correlation = stats.get("correlation", {}) or {}
+    return correlation.get("derived_quality_flags", []) or []
 
 
 def _extract_formulaic_pairs_facts(stats):
@@ -687,6 +693,7 @@ def _extract_insight_facts(state):
         "data_quality_detail": _extract_data_quality_detail(state),
         "top_correlations": _extract_correlation_facts(stats),
         "excluded_columns": _extract_excluded_columns_facts(stats),
+        "derived_quality_flags": _extract_derived_quality_facts(stats),
         "formulaic_pairs": _extract_formulaic_pairs_facts(stats),
         "growth": _extract_growth_facts(stats),
         "rankings": _extract_ranking_facts(stats),
@@ -753,6 +760,76 @@ def _extract_numeric_claims(text: str) -> list[float]:
     return claims
 
 
+_EVIDENCE_TYPES = {"fact", "inference", "hypothesis", "recommendation"}
+_EVIDENCE_CONFIDENCE = {"high", "medium", "low"}
+
+
+def _narrative_entry_text(entry) -> str:
+    if isinstance(entry, dict):
+        return str(entry.get("claim") or entry.get("text") or "")
+    return str(entry or "")
+
+
+def _normalize_narrative_evidence_tags(narrative: dict) -> dict:
+    """Give every list-based reader-facing sentence an explicit evidence type."""
+    normalized = dict(narrative)
+    for field, default_type in (
+        ("key_findings", "fact"),
+        ("plain_language_insights", "inference"),
+        ("risks_and_caveats", "fact"),
+        ("recommendations", "recommendation"),
+    ):
+        entries = []
+        for entry in narrative.get(field) or []:
+            if isinstance(entry, dict):
+                claim = _narrative_entry_text(entry).strip()
+                evidence_type = str(entry.get("type") or default_type).lower()
+                confidence = str(entry.get("confidence") or ("high" if evidence_type == "fact" else "medium")).lower()
+            else:
+                claim = str(entry).strip()
+                evidence_type = default_type
+                confidence = "high" if default_type == "fact" else "medium"
+            if claim:
+                entries.append({
+                    "claim": claim,
+                    "type": evidence_type if evidence_type in _EVIDENCE_TYPES else default_type,
+                    "confidence": confidence if confidence in _EVIDENCE_CONFIDENCE else "medium",
+                })
+        normalized[field] = entries
+    return normalized
+
+
+def _detect_narrative_contradictions(narrative: dict) -> list[dict]:
+    """Flag nearby sections that make opposite claims about the same topic."""
+    sections = []
+    story = narrative.get("story") or {}
+    for key in ("what_happened", "why_it_matters", "what_to_do_next"):
+        text = _narrative_entry_text(story.get(key))
+        if text:
+            sections.append((f"story.{key}", text))
+    for field in ("executive_summary", "bottom_line"):
+        if narrative.get(field):
+            sections.append((field, _narrative_entry_text(narrative[field])))
+
+    positive = {"solid", "healthy", "good", "safe", "confidence", "trust", "reliable", "ready"}
+    negative = {"broken", "defect", "defects", "problem", "problems", "unreliable", "invalid", "serious", "cannot"}
+    contradictions = []
+    for index, (left_name, left_text) in enumerate(sections):
+        left_words = set(re.findall(r"[a-z]+", left_text.lower()))
+        for right_name, right_text in sections[index + 1:]:
+            right_words = set(re.findall(r"[a-z]+", right_text.lower()))
+            shared_topics = left_words & right_words & {"data", "quality", "results", "numbers", "findings"}
+            left_polarity = bool(left_words & positive) - bool(left_words & negative)
+            right_polarity = bool(right_words & positive) - bool(right_words & negative)
+            if shared_topics and left_polarity * right_polarity < 0:
+                contradictions.append({
+                    "sections": [left_name, right_name],
+                    "claims": [left_text, right_text],
+                    "topic": sorted(shared_topics)[0],
+                })
+    return contradictions
+
+
 def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: float = CLAIM_GROUNDING_TOLERANCE) -> dict:
     """Verify that numbers cited in the LLM narrative actually appear in the
     deterministic facts it was given, within a small tolerance for rounding.
@@ -766,7 +843,7 @@ def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: 
     if narrative.get("executive_summary"):
         sections.append(("executive_summary", narrative["executive_summary"]))
     for index, finding in enumerate(narrative.get("key_findings") or []):
-        sections.append((f"key_finding[{index}]", finding))
+        sections.append((f"key_finding[{index}]", _narrative_entry_text(finding)))
     story = narrative.get("story")
     if isinstance(story, dict):
         for key in ("what_happened", "why_it_matters", "what_to_do_next"):
@@ -827,6 +904,12 @@ which can have a different (often larger, due to one-hot encoding and feature en
 column count. When the executive summary states "the dataset contains X rows and Y columns", \
 X and Y MUST be raw_rows/raw_cols. If you also mention the post-processing column count, label \
 it explicitly (e.g. "expanded to N features for analysis") - never present it as the raw shape.
+- Treat `derived_quality_flags` as data-quality warnings, never as business correlations.
+- Use ranking `is_material` and `effect_size_ratio` fields. Do not call a group a clear leader, \
+"dominant", or say customers "prefer" it unless `is_material` is true. For near-equal shares, \
+say that the groups are broadly even and avoid a recommendation based on a tiny difference.
+- Every list entry must be an object with `claim`, `type`, and `confidence`. `type` must be one of \
+fact, inference, hypothesis, recommendation; `confidence` must be high, medium, or low.
 
 You must also write a "plain_language_insights" section aimed at a completely non-technical \
 reader (e.g. a small business owner or manager with no statistics background). This is the \
@@ -850,7 +933,7 @@ useful takeaway.
 Return ONLY a JSON object with exactly these keys:
 {
   "executive_summary": "2-4 sentence overview of the dataset and its most important signal",
-  "key_findings": ["4-6 bullet strings, each citing a concrete number from the facts"],
+    "key_findings": [{"claim": "4-6 bullets, each citing a concrete number from the facts", "type": "fact", "confidence": "high"}],
   "story": {
     "what_happened": "2-3 plain sentences describing the main movements in the data",
     "why_it_matters": "1-3 sentences on the business consequence of those movements",
@@ -862,10 +945,10 @@ Return ONLY a JSON object with exactly these keys:
   "glossary_terms": [
     {"term": "a technical term you were forced to use elsewhere", "plain_explanation": "one-sentence explanation a non-technical reader understands"}
   ],
-  "plain_language_insights": ["4-6 bullet strings for non-technical readers, following the rules above"],
+    "plain_language_insights": [{"claim": "4-6 bullets for non-technical readers, following the rules above", "type": "inference", "confidence": "medium"}],
   "bottom_line": "1 sentence, plain English, the single most useful takeaway for a non-technical reader",
-  "risks_and_caveats": ["1-3 bullet strings about data quality/validation concerns, if any"],
-  "recommendations": ["3-5 concrete, actionable bullet strings grounded in the findings"]
+    "risks_and_caveats": [{"claim": "1-3 bullets about data quality/validation concerns, if any", "type": "fact", "confidence": "high"}],
+    "recommendations": [{"claim": "3-5 concrete, actionable bullets grounded in the findings", "type": "recommendation", "confidence": "medium"}]
 }
 
 Rules for the new keys:
@@ -1105,10 +1188,16 @@ def _plain_language_fallback(insight_facts: dict):
             name = top.get(cat_col)
             share = top.get("revenue_share_pct")
             if name is not None and share is not None:
-                bullets.append(
-                    f"'{name}' is your best performer in {cat_col}, bringing in "
-                    f"{share}% of total {metric_label} on its own."
-                )
+                if data.get("is_material", True):
+                    bullets.append(
+                        f"'{name}' is your best performer in {cat_col}, bringing in "
+                        f"{share}% of total {metric_label} on its own."
+                    )
+                else:
+                    bullets.append(
+                        f"{cat_col} is broadly spread across its leading groups; the top group "
+                        f"accounts for {share}% of total {metric_label}, so no clear leader emerges."
+                    )
         bottom = (data.get("bottom") or [None])[0]
         if bottom:
             name = bottom.get(cat_col)
@@ -1204,7 +1293,7 @@ def _fallback_narrative(insight_facts: dict) -> dict:
     validation = insight_facts.get("validation", {})
 
     executive_summary = (
-        f"Dataset with {dataset.get('cleaned_rows')} rows and {dataset.get('cleaned_cols')} columns "
+        f"Dataset with {dataset.get('raw_rows')} rows and {dataset.get('raw_cols')} columns "
         f"after cleaning, with an overall data quality score of {quality.get('overall_quality_score')}."
     )
 
@@ -1297,10 +1386,16 @@ def _fallback_story(insight_facts: dict) -> dict:
         top = (data.get("top") or [None])[0]
         if top and top.get("revenue_share_pct") is not None:
             metric_label = (data.get("metric_label") or "revenue").lower()
-            what_parts.append(
-                f"'{top.get(cat_col)}' is the strongest {cat_col}, contributing "
-                f"{top.get('revenue_share_pct')}% of {metric_label}"
-            )
+            if data.get("is_material", True):
+                what_parts.append(
+                    f"'{top.get(cat_col)}' is the strongest {cat_col}, contributing "
+                    f"{top.get('revenue_share_pct')}% of {metric_label}"
+                )
+            else:
+                what_parts.append(
+                    f"the leading {cat_col} groups are broadly even, with the top group "
+                    f"contributing {top.get('revenue_share_pct')}% of {metric_label}"
+                )
             break
     best_month = growth.get("best_month")
     if best_month and best_month.get("month"):
@@ -1319,6 +1414,8 @@ def _fallback_story(insight_facts: dict) -> dict:
     score = quality.get("overall_quality_score")
     if score is not None:
         why_parts.append(
+            "the data is broadly usable, but the structural checks still need review"
+            if score >= 80 and anomalies.get("data_quality_issue_rows") else
             "the data is solid enough to act on with confidence"
             if score >= 80 else
             f"the data scores {score}/100 for quality, so treat the figures as directional"
@@ -1905,6 +2002,13 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         print(f"[Agent 6] Jargon linter replaced {lint_replacements} plain-language line(s)")
 
     narrative["recommendations"] = _ground_recommendations(insight_facts, narrative)
+    narrative = _normalize_narrative_evidence_tags(narrative)
+    contradictions = _detect_narrative_contradictions(narrative)
+    if contradictions:
+        errors.append(f"Agent6: narrative contradiction detected: {contradictions[0]['sections']}")
+        narrative = dict(deterministic)
+        narrative = _normalize_narrative_evidence_tags(narrative)
+    narrative["contradictions"] = contradictions
     narrative["glossary_terms"] = _build_dynamic_glossary(narrative)
 
     claims_grounding = _check_narrative_grounding(insight_facts, narrative)

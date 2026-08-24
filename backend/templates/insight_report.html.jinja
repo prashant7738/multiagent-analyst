@@ -115,6 +115,11 @@
     font-size: 9.5pt; font-weight: 700; color: white;
   }
   .badge.good { background: var(--good); } .badge.warn { background: var(--warn); } .badge.bad { background: var(--bad); }
+  .evidence-badge { display: inline-block; margin-right: .45em; padding: .16em .42em; border-radius: 3px; font-size: .68em; font-weight: 700; letter-spacing: .04em; vertical-align: .12em; }
+  .evidence-fact { background: #dbeafe; color: #1e40af; }
+  .evidence-inference { background: #fef3c7; color: #92400e; }
+  .evidence-hypothesis { background: #fce7f3; color: #9d174d; }
+  .evidence-recommendation { background: #dcfce7; color: #166534; }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 8px; }
   .kpi-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -472,7 +477,7 @@
   {% if narrative.plain_language_insights %}
   <ul>
     {% for insight in narrative.plain_language_insights %}
-    <li>{{ insight | abbr_glossary(glossary) }}</li>
+    <li>{% if insight is mapping %}<span class="evidence-badge evidence-{{ insight.type }}" title="Evidence: {{ insight.confidence }} confidence">{{ insight.type | upper }}</span>{{ insight.claim | abbr_glossary(glossary) }}{% else %}{{ insight | abbr_glossary(glossary) }}{% endif %}</li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -506,7 +511,7 @@
   {% if narrative.key_findings %}
   <ul>
     {% for finding in narrative.key_findings %}
-    <li>{{ finding | abbr_glossary(glossary) }}</li>
+    <li>{% if finding is mapping %}<span class="evidence-badge evidence-{{ finding.type }}" title="Evidence: {{ finding.confidence }} confidence">{{ finding.type | upper }}</span>{{ finding.claim | abbr_glossary(glossary) }}{% else %}{{ finding | abbr_glossary(glossary) }}{% endif %}</li>
     {% endfor %}
   </ul>
   {% else %}
@@ -557,7 +562,7 @@
     <h3>Risks &amp; Caveats</h3>
     <ul>
       {% for risk in narrative.risks_and_caveats %}
-      <li>{{ risk }}</li>
+      <li>{% if risk is mapping %}<span class="evidence-badge evidence-{{ risk.type }}" title="Evidence: {{ risk.confidence }} confidence">{{ risk.type | upper }}</span>{{ risk.claim | abbr_glossary(glossary) }}{% else %}{{ risk }}{% endif %}</li>
       {% endfor %}
     </ul>
   </div>
@@ -567,7 +572,7 @@
     <h3>Recommendations</h3>
     <ul>
       {% for rec in narrative.recommendations %}
-      <li>{{ rec | abbr_glossary(glossary) }}</li>
+      <li>{% if rec is mapping %}<span class="evidence-badge evidence-{{ rec.type }}" title="Evidence: {{ rec.confidence }} confidence">{{ rec.type | upper }}</span>{{ rec.claim | abbr_glossary(glossary) }}{% else %}{{ rec | abbr_glossary(glossary) }}{% endif %}</li>
       {% endfor %}
     </ul>
   </div>
@@ -578,6 +583,13 @@
 <div id="appendix" data-reveal>
 <h2>Technical Appendix</h2>
 <p class="empty-note">Detailed workings behind the summary above — open a section when you need the underlying tables.</p>
+{% if facts.derived_quality_flags %}
+<section class="panel" data-reveal>
+  <h3>Data Trust Warnings</h3>
+  <p>These derived metrics move almost in lockstep. Check whether cost data is missing, zeroed out, or duplicated before relying on profit conclusions.</p>
+  <ul>{% for item in facts.derived_quality_flags %}<li>{{ item.col1 }} and {{ item.col2 }} (r={{ item.pearson_r }})</li>{% endfor %}</ul>
+</section>
+{% endif %}
 
 {% macro filter_box() %}
 <input class="search-box needs-js" type="search" placeholder="Filter rows…" aria-label="Filter table rows">

@@ -685,6 +685,46 @@ def _standardize_text_columns(df, schema_blueprint):
     return df, notes
 
 
+def _detect_unusable_text_fields(df, schema_blueprint):
+    """Identify low-information text dimensions without guessing from names.
+
+    A field is flagged only when it is both highly repetitive and dominated by
+    short, lowercase common-word tokens. Properly cased business labels and
+    genuinely varied free text remain eligible for analysis.
+    """
+    common_tokens = {
+        "a", "an", "and", "bit", "by", "for", "i", "in", "maintain",
+        "of", "school", "step", "the", "to", "trouble", "without",
+    }
+    flags = {}
+    for col, meta in schema_blueprint.items():
+        if col not in df.columns or meta.get("is_identifier"):
+            continue
+        if meta.get("intended_type") not in ("string", "category"):
+            continue
+        values = df[col].dropna().astype(str).str.strip()
+        if values.empty:
+            continue
+        unique_values = values.nunique()
+        unique_rate = unique_values / len(values)
+        lowercase_single_words = values.map(lambda value: value == value.lower() and " " not in value).mean()
+        common_word_rate = values.map(lambda value: value in common_tokens).mean()
+        likely_unusable = bool(
+            unique_values >= 3
+            and unique_rate <= 0.30
+            and lowercase_single_words >= 0.80
+            and common_word_rate >= 0.60
+        )
+        if likely_unusable:
+            flags[col] = {
+                "likely_unusable": True,
+                "unique_count": int(unique_values),
+                "unique_rate": round(unique_rate, 4),
+                "reason": "repetitive lowercase placeholder-like tokens",
+            }
+    return flags
+
+
 def _dedup_after_canonicalization(df):
     deduped, removed_count, samples = dedup_exact_rows(df)
     return deduped, removed_count, samples
@@ -1908,6 +1948,14 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     df, notes = _standardize_text_columns(df, schema_blueprint)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3"))
+    text_quality_flags = _detect_unusable_text_fields(df, schema_blueprint)
+    if text_quality_flags:
+        for column, flag in text_quality_flags.items():
+            schema_blueprint.setdefault(column, {})["analysis_allowed"] = False
+            schema_blueprint[column]["text_quality_flag"] = flag
+            preprocessing_log.append(
+                f"{column}: excluded from categorical analysis ({flag['reason']})"
+            )
     if verbose:
         print(f"[Agent 3] Step 3 - Text standardization done ({len(notes)} columns)")
 
@@ -2049,6 +2097,7 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
     )
     data_quality["rule_manifest"] = rule_manifest()
     data_quality["derived_metric_reconciliation"] = derived_divergences
+    data_quality["text_quality_flags"] = text_quality_flags
 
     preprocessing_log.append(
         f"Data quality score: {data_quality['overall_quality_score']}/100 "

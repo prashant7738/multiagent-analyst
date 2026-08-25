@@ -45,9 +45,10 @@ def _check_gemini_health() -> str:
             logger.debug("Gemini: API key not configured")
             return "not_configured"
         
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        list(genai.list_models())
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        list(client.models.list())
         logger.debug("Gemini: Health check passed")
         return "healthy"
     except Exception as e:

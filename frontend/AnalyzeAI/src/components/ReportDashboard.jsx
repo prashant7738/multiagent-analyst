@@ -3,6 +3,28 @@ import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, AlertCircle, AlertTri
 import { motion } from 'framer-motion';
 import DownloadReportModal from './DownloadReportModal';
 
+// Module scope, not inside ReportDashboard: a component defined inside another
+// component's render body gets a new identity every render, so React remounts it
+// and resets its state (here, `count`) on every parent re-render - the animation
+// never got a chance to finish counting up before being reset back to 0.
+const AnimatedCounter = ({ end, animate, suffix = '' }) => {
+  const [count, setCount] = React.useState(0);
+  React.useEffect(() => {
+    if (!animate) return;
+    let startTime;
+    let frameId;
+    const step = (timestamp) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / 2000, 1);
+      setCount(Math.floor(progress * end));
+      if (progress < 1) frameId = requestAnimationFrame(step);
+    };
+    frameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frameId);
+  }, [end, animate]);
+  return `${count}${suffix}`;
+};
+
 const ReportDashboard = ({ reportData }) => {
   const [expandedSections, setExpandedSections] = useState({
     overview: true,
@@ -63,22 +85,6 @@ const ReportDashboard = ({ reportData }) => {
   // failed, so metadata-only heuristics were used instead) — see agent_2.py / result_builder.py.
   const taggingSource = summary.semantic_tagging_source;
   const taggingFellBack = taggingSource === "fallback";
-
-  const AnimatedCounter = ({ end, suffix = '' }) => {
-    const [count, setCount] = React.useState(0);
-    React.useEffect(() => {
-      if (!animateNumbers) return;
-      let startTime;
-      const animate = (timestamp) => {
-        if (!startTime) startTime = timestamp;
-        const progress = Math.min((timestamp - startTime) / 2000, 1);
-        setCount(Math.floor(progress * end));
-        if (progress < 1) requestAnimationFrame(animate);
-      };
-      requestAnimationFrame(animate);
-    }, [end, animateNumbers]);
-    return `${count}${suffix}`;
-  };
 
   const SectionCard = ({ title, icon: Icon, children, sectionKey }) => (
     <motion.div
@@ -147,7 +153,7 @@ const ReportDashboard = ({ reportData }) => {
           >
             <p className="text-xs font-medium uppercase tracking-widest text-black dark:text-neutral-300 mb-3">Data Quality</p>
             <p className="text-5xl font-bold text-black dark:text-white font-mono mb-2">
-              {animateNumbers ? <AnimatedCounter end={Math.round(quality)} /> : Math.round(quality)}
+              {animateNumbers ? <AnimatedCounter end={Math.round(quality)} animate={animateNumbers} /> : Math.round(quality)}
             </p>
             <p className="text-xs text-black dark:text-neutral-300 font-medium">
               {quality >= 80 ? 'Excellent' : quality >= 60 ? 'Good' : 'Fair'}
@@ -161,7 +167,7 @@ const ReportDashboard = ({ reportData }) => {
           >
             <p className="text-xs font-medium uppercase tracking-widest text-black dark:text-neutral-300 mb-3" style={{ color: 'black' }}>Validation</p>
             <p className="text-5xl font-bold text-black dark:text-white font-mono mb-2" style={{ color: 'black' }}>
-              {animateNumbers ? <AnimatedCounter end={Math.round(validationScore)} /> : Math.round(validationScore)}
+              {animateNumbers ? <AnimatedCounter end={Math.round(validationScore)} animate={animateNumbers} /> : Math.round(validationScore)}
             </p>
             <p className="text-xs text-black dark:text-neutral-300 font-medium" style={{ color: 'black' }}>
               {validationScore >= 60 ? 'Verified' : 'Review Required'}
@@ -175,7 +181,7 @@ const ReportDashboard = ({ reportData }) => {
           >
             <p className="text-xs font-medium uppercase tracking-widest text-black dark:text-neutral-300 mb-3" style={{ color: 'black' }}>Confidence</p>
             <p className="text-5xl font-bold text-black dark:text-white font-mono mb-2" style={{ color: 'black' }}>
-              {animateNumbers ? <AnimatedCounter end={Math.round(confidence * 100)} suffix="%" /> : `${Math.round(confidence * 100)}%`}
+              {animateNumbers ? <AnimatedCounter end={Math.round(confidence * 100)} animate={animateNumbers} suffix="%" /> : `${Math.round(confidence * 100)}%`}
             </p>
             <p className="text-xs text-black dark:text-neutral-300 font-medium" style={{ color: 'black' }}>Analysis Ready</p>
           </motion.div>

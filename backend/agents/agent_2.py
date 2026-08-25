@@ -9,11 +9,18 @@ available or returns invalid JSON.
 import re
 import os
 import hashlib
+import time
 import pandas as pd
 import json
 import numpy as np
 
-from groq import Groq
+from groq import (
+    APIConnectionError as GroqAPIConnectionError,
+    APITimeoutError as GroqAPITimeoutError,
+    Groq,
+    InternalServerError as GroqInternalServerError,
+    RateLimitError as GroqRateLimitError,
+)
 
 from agents.key_indicator import (
     drain_capture,
@@ -269,6 +276,13 @@ GROQ_MODEL = "qwen/qwen3.6-27b"
 # a strict JSON response, and reasoning tokens would either break that parse or burn budget
 # for nothing. Verified: reasoning_effort="none" returns clean JSON with no thinking block.
 GROQ_REASONING_EFFORT = "none"
+# Retried once with a short backoff before falling through to Gemini/heuristics - a single
+# transient 429/connection blip (e.g. several analysis jobs starting at once, all hitting
+# Groq's rate limit simultaneously) shouldn't permanently downgrade a job's semantic tagging
+# to metadata-only heuristics when a two-second wait would have succeeded.
+GROQ_TRANSIENT_ERRORS = (GroqRateLimitError, GroqAPIConnectionError, GroqAPITimeoutError, GroqInternalServerError)
+GROQ_MAX_TRANSIENT_RETRIES = 2
+GROQ_RETRY_BACKOFF_SECONDS = 3
 GEMINI_MODEL = "gemini-flash-latest"
 # gemini-2.5-flash/-lite and gemini-2.0-flash 404 on this project; use current Gemini 3.x stable IDs instead
 GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
@@ -864,24 +878,38 @@ def _call_llm_for_schema_blueprint(
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
     user_content = f"Produce schema blueprint for these columns:\n{user_prompt}"
 
-    try:
-        response = _get_groq_client().chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.1,
-            max_tokens=LLM_MAX_TOKENS,
-            reasoning_effort=GROQ_REASONING_EFFORT,
-        )
-        record_key_use(
-            "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
-            purpose="schema blueprint", model=GROQ_MODEL,
-        )
-        raw_text = response.choices[0].message.content.strip()
-        return _parse_schema_blueprint_response(raw_text)
-    except Exception as groq_error:
+    groq_error: Exception | None = None
+    for attempt in range(GROQ_MAX_TRANSIENT_RETRIES):
+        try:
+            response = _get_groq_client().chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": SEMANTIC_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                max_tokens=LLM_MAX_TOKENS,
+                reasoning_effort=GROQ_REASONING_EFFORT,
+            )
+            record_key_use(
+                "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
+                purpose="schema blueprint", model=GROQ_MODEL,
+            )
+            raw_text = response.choices[0].message.content.strip()
+            return _parse_schema_blueprint_response(raw_text)
+        except GROQ_TRANSIENT_ERRORS as exc:
+            groq_error = exc
+            if attempt < GROQ_MAX_TRANSIENT_RETRIES - 1:
+                print(
+                    f"[Agent 2] Groq transient error ({type(exc).__name__}), "
+                    f"retrying in {GROQ_RETRY_BACKOFF_SECONDS}s: {exc}"
+                )
+                time.sleep(GROQ_RETRY_BACKOFF_SECONDS)
+        except Exception as exc:  # noqa: BLE001 — non-transient (bad request, auth, etc.) - don't retry
+            groq_error = exc
+            break
+
+    if groq_error is not None:
         print(f"[Agent 2] Groq unavailable; trying Gemini: {groq_error}")
 
     try:

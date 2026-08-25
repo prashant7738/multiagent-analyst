@@ -133,9 +133,24 @@ export default function AnalyzePage() {
 
         setJobId(routeJobId);
         setLoadedJobName(job?.filename || "historical analysis");
+        setElapsedTotal(0);
+
+        // Mirrors the live-run "pipeline_finished" handling below: an agent can catch
+        // its own error and the pipeline still reaches END "successfully" with no
+        // report (see agent_3.py's dedup-survival guardrail for a concrete example).
+        // job.status is "completed" either way, so without this check a job that
+        // aborted mid-run renders as a normal, silently empty report here — no
+        // charts, no quality score, no indication anything went wrong.
+        const errs = data?.errors;
+        if (Array.isArray(errs) && errs.length > 0 && !data?.report?.available) {
+          runStatusRef.current = "error";
+          setErrorMessage(errs[0] || "Analysis failed.");
+          setPhase("error");
+          return;
+        }
+
         setResult(data);
         setAgentStates(AGENTS.map((a) => ({ ...a, status: DONE, duration: null, summary: null })));
-        setElapsedTotal(0);
         runStatusRef.current = "done";
         setPhase("done");
       } catch (err) {

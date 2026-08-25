@@ -62,11 +62,17 @@ async def download_report(
     if not resolved.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file no longer exists on disk.")
 
-    # If HTML is requested, return directly
-    if format == "html" or resolved.suffix.lower() == ".pdf":
-        media_type = "application/pdf" if resolved.suffix.lower() == ".pdf" else "text/html"
-        filename = f"insight_report_{job_id[:8]}{resolved.suffix}"
-        return FileResponse(path=resolved, media_type=media_type, filename=filename)
+    if format == "html":
+        if resolved.suffix.lower() == ".pdf":
+            resolved = resolved.with_suffix(".html")
+        if not resolved.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="HTML report file no longer exists on disk.")
+        filename = f"insight_report_{job_id[:8]}.html"
+        return FileResponse(path=resolved, media_type="text/html", filename=filename)
+
+    if resolved.suffix.lower() == ".pdf":
+        filename = f"insight_report_{job_id[:8]}.pdf"
+        return FileResponse(path=resolved, media_type="application/pdf", filename=filename)
 
     # If PDF is requested and we have WeasyPrint, convert HTML to PDF
     if format == "pdf" and HAS_WEASYPRINT and resolved.suffix.lower() == ".html":

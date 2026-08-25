@@ -171,15 +171,16 @@ export default function AnalyzePage() {
     try {
       const data = await fetchJobResult(id);
       setResult(data);
-    } catch (err) {
-      setErrorMessage(err.message || "Failed to load the analysis result.");
-    } finally {
       setPhase("done");
       // Move the URL to /analyze/:jobId now that there's a finished report to
       // show at it — matches how History/Profile link to a completed job, and
       // means refreshing or sharing the link lands back on this report instead
       // of a blank upload screen.
       if (!routeJobId) navigate(`/analyze/${id}`, { replace: true });
+    } catch (err) {
+      runStatusRef.current = "error";
+      setErrorMessage(err.message || "Failed to load the analysis result.");
+      setPhase("error");
     }
   };
 

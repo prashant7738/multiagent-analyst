@@ -36,7 +36,7 @@ from agents.agent_2 import (
 )
 from api.config import get_settings
 from api.services import rag_service
-from api.utils.serialization import chart_url
+from api.utils.serialization import chart_url, json_safe
 
 if TYPE_CHECKING:
     from api.services.job_manager import Job, JobManager
@@ -61,6 +61,14 @@ MAX_LLM_ROW_TEXT_CHARS = 600
 MAX_LLM_USER_CONTENT_CHARS = 12000
 GEMINI_COOLDOWN_SECONDS = 60
 ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
+
+# Data-query engine (see "6 - AD-HOC DATA QUERIES" below): a fixed whitelist of pandas
+# operations/filter operators the LLM can request by name. The LLM never supplies code -
+# only these validated parameters - so there's no eval/exec surface here.
+ALLOWED_QUERY_OPERATIONS = {"count", "sum", "mean", "median", "min", "max", "nunique"}
+ALLOWED_QUERY_FILTER_OPS = {"==", "!=", ">", ">=", "<", "<=", "contains"}
+MAX_QUERY_FILTERS = 5
+MAX_QUERY_GROUP_RESULTS = 20
 
 _GEMINI_RETRY_AT = 0.0
 _GEMINI_DISABLED_BY_QUOTA = False
@@ -172,7 +180,7 @@ def _quota_retry_delay_seconds(exc: Exception) -> int:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2 — RAG CHAT (Groq -> Gemini fallback, same provider chain as Agent 6)
+# 2 — RAG CHAT (Groq to Gemini fallback, same provider chain as Agent 6)
 # ─────────────────────────────────────────────────────────────────────────────
 
 RAG_CHAT_SYSTEM_PROMPT = """You are a data analyst assistant answering questions about one \
@@ -188,10 +196,34 @@ them). Use these ONLY for concrete record-level lookups or examples. NEVER claim
 answer is complete or exhaustive beyond what is shown here - if the retrieved rows don't contain \
 the specific record asked about, say honestly that it isn't among the indexed sample.
 
+IMPORTANT - before you say a precise number is unavailable, check this first: if the question \
+asks for a PRECISE count, sum, average, min/max, or a filtered/grouped aggregate that ISN'T \
+verbatim in the retrieved facts (e.g. "how many orders were cancelled", "average discount for \
+Electronics", "total revenue from UPI payments", "orders over 20% discount") - this is NOT a case \
+of "not enough information". Do NOT estimate it from the small row sample, and do NOT say it's \
+unavailable. Set "needs_data_query" to true and fill "data_query" using ONLY column names \
+mentioned in the retrieved documents; it will be computed exactly against the full dataset and \
+your answer will be regenerated with the real number afterward. Set "answer" to a brief holding \
+message like "Let me get the exact number for you." in this case.
+
+Example - question: "How many orders in the Electronics category had a discount over 20%?"
+{
+  "answer": "Let me get the exact number for you.",
+  "needs_new_chart": false, "chart_request": null,
+  "needs_data_query": true,
+  "data_query": {
+    "operation": "count", "column": null,
+    "filters": [{"column": "category", "op": "==", "value": "Electronics"},
+                {"column": "discount", "op": ">", "value": "0.2"}],
+    "group_by": null
+  }
+}
+
 Rules:
-- Use ONLY the numbers, column names, and facts present in the retrieved documents. Never invent \
-a number, column, or record that isn't there.
-- If the retrieved context doesn't contain enough information, say so honestly instead of guessing.
+- Use ONLY the numbers, column names, and facts present in the retrieved documents (or a \
+requested data_query result). Never invent a number, column, or record that isn't there.
+- If the question is genuinely unanswerable from the dataset (not a data_query case above), say \
+so honestly instead of guessing.
 - Be concise, conversational, and business-readable.
 - If an existing chart (see the "existing_charts" fact) already answers the question, reference \
 it and do not request a new one.
@@ -209,6 +241,13 @@ Return ONLY a JSON object with exactly these keys:
     "group_by": "column name, or null",
     "aggregation": "sum" | "mean" | "count" | "median",
     "title": "short chart title"
+  } or null,
+  "needs_data_query": true or false,
+  "data_query": {
+    "operation": "count" | "sum" | "mean" | "median" | "min" | "max" | "nunique",
+    "column": "column name to aggregate, or null for a plain row count",
+    "filters": [{"column": "column name", "op": "==" | "!=" | ">" | ">=" | "<" | "<=" | "contains", "value": "..."}],
+    "group_by": "column name for a per-group breakdown, or null for a single overall number"
   } or null
 }
 """
@@ -259,19 +298,28 @@ def _build_rag_user_content(retrieved: dict[str, Any], question: str, history: l
     return user_content
 
 
-def _call_llm_for_rag_chat(retrieved: dict[str, Any], question: str, history: list[dict[str, str]]) -> dict[str, Any]:
-    """Ask Groq for a grounded RAG chat answer, falling back to Gemini on provider failure."""
-    user_content = _build_rag_user_content(retrieved, question, history)
+def _call_groq_then_gemini_json(
+    *,
+    system_prompt: str,
+    user_content: str,
+    groq_max_tokens: int = 1024,
+    gemini_max_tokens: int = 512,
+    temperature: float = 0.3,
+) -> dict[str, Any]:
+    """Ask Groq for a JSON response, falling back to Gemini on provider failure.
 
+    Shared by the main RAG chat turn and the data-query answer-rephrasing follow-up
+    call below - same provider chain, same quota/cooldown handling, different prompt.
+    """
     try:
         response = _get_groq_client().chat.completions.create(
             model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": RAG_CHAT_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            temperature=0.3,
-            max_tokens=1024,
+            temperature=temperature,
+            max_tokens=groq_max_tokens,
             reasoning_effort=GROQ_REASONING_EFFORT,
         )
         raw_text = response.choices[0].message.content.strip()
@@ -293,9 +341,9 @@ def _call_llm_for_rag_chat(retrieved: dict[str, Any], question: str, history: li
     try:
         parsed = _call_gemini_json_with_failover(
             contents=user_content,
-            system_instruction=RAG_CHAT_SYSTEM_PROMPT,
-            temperature=0.3,
-            max_output_tokens=512,
+            system_instruction=system_prompt,
+            temperature=temperature,
+            max_output_tokens=gemini_max_tokens,
         )
         parsed["source"] = "gemini"
         return parsed
@@ -303,6 +351,18 @@ def _call_llm_for_rag_chat(retrieved: dict[str, Any], question: str, history: li
         if _is_quota_error(gemini_error):
             _disable_gemini_due_to_quota(str(gemini_error))
         raise
+
+
+def _call_llm_for_rag_chat(retrieved: dict[str, Any], question: str, history: list[dict[str, str]]) -> dict[str, Any]:
+    """Ask Groq for a grounded RAG chat answer, falling back to Gemini on provider failure."""
+    user_content = _build_rag_user_content(retrieved, question, history)
+    return _call_groq_then_gemini_json(
+        system_prompt=RAG_CHAT_SYSTEM_PROMPT,
+        user_content=user_content,
+        groq_max_tokens=1024,
+        gemini_max_tokens=512,
+        temperature=0.3,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,7 +538,249 @@ def render_chart_request(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5 — PUBLIC ENTRYPOINT
+# 5 — AD-HOC DATA QUERIES (constrained aggregate/filter queries, no arbitrary code)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Facts and the 8-row sample can't answer precise counts/sums/filtered aggregates
+# ("how many orders were cancelled", "average discount for Electronics") - facts only
+# cover what Agents 1-6 already precomputed, and the row sample is too small and too
+# narrow (only ~30% of rows by default) to aggregate from reliably. This runs a real,
+# validated pandas query against the job's FULL original dataset instead.
+#
+# Reads job.csv_path (not Agent 3's cleaned export) for the same reason
+# rag_service.py's row embedding does: cleaned_csv_path is a single file shared across
+# EVERY job (see agent_3.py _export_cleaned_dataset), so relying on it here could
+# silently query a different job's data. This means only the dataset's ORIGINAL
+# columns are queryable, not Agent 3's derived/one-hot columns - a real limitation,
+# not an oversight, and one worth knowing about.
+
+_QUERY_DF_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}  # job_id -> (csv mtime, df)
+
+
+def _load_job_dataframe(job: "Job") -> pd.DataFrame | None:
+    """Load (and cache) the job's original per-job CSV for data queries.
+
+    Cached per job_id, invalidated by the file's mtime - cheap repeat questions in the
+    same chat session don't re-read the CSV from disk every time.
+    """
+    if not job.csv_path or not os.path.exists(job.csv_path):
+        return None
+    mtime = os.path.getmtime(job.csv_path)
+    cached = _QUERY_DF_CACHE.get(job.job_id)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    df = pd.read_csv(job.csv_path, low_memory=False)
+    _QUERY_DF_CACHE[job.job_id] = (mtime, df)
+    return df
+
+
+def _coerce_numeric(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors="coerce")
+
+
+def _apply_query_filter(df: pd.DataFrame, column: str, op: str, value: Any) -> pd.Series:
+    """Return a boolean mask for one filter clause. Numeric comparison when the column
+    and value both parse as numbers, case-insensitive text match otherwise."""
+    series = df[column]
+    if op == "contains":
+        return series.astype(str).str.contains(str(value), case=False, na=False)
+
+    numeric_series = _coerce_numeric(series)
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        numeric_value = None
+
+    if numeric_value is not None and numeric_series.notna().any():
+        if op == "==":
+            return numeric_series == numeric_value
+        if op == "!=":
+            return numeric_series != numeric_value
+        if op == ">":
+            return numeric_series > numeric_value
+        if op == ">=":
+            return numeric_series >= numeric_value
+        if op == "<":
+            return numeric_series < numeric_value
+        if op == "<=":
+            return numeric_series <= numeric_value
+
+    str_series = series.astype(str).str.strip().str.lower()
+    str_value = str(value).strip().lower()
+    if op == "==":
+        return str_series == str_value
+    if op == "!=":
+        return str_series != str_value
+    raise ValueError(f"operator '{op}' requires a numeric column, but '{column}' isn't one")
+
+
+def run_data_query(job: "Job", schema_blueprint: dict, query: dict[str, Any]) -> tuple[bool, Any]:
+    """Validate and execute a constrained aggregate query against the job's full dataset.
+
+    No arbitrary code execution: column names must exist in the schema blueprint AND the
+    actual CSV (rejecting Agent 3's derived-only columns); operations and filter operators
+    come from a fixed whitelist and are dispatched through explicit branches, never through
+    a dynamic eval of LLM-supplied text. The LLM only ever supplies these structured
+    parameters - never code.
+
+    Returns (True, result_dict) on success or (False, reason) on validation/execution failure.
+    """
+    df = _load_job_dataframe(job)
+    if df is None:
+        return False, "the original dataset file for this job is no longer available"
+
+    operation = str(query.get("operation") or "").lower()
+    column = query.get("column")
+    group_by = query.get("group_by")
+    filters = query.get("filters") or []
+
+    if operation not in ALLOWED_QUERY_OPERATIONS:
+        return False, f"unsupported operation '{operation}'"
+    if column and (column not in df.columns or not _column_usable(df, schema_blueprint, column)):
+        return False, f"column '{column}' is not usable for queries"
+    if group_by and (group_by not in df.columns or not _column_usable(df, schema_blueprint, group_by)):
+        return False, f"column '{group_by}' is not usable for queries"
+    if operation != "count" and not column:
+        return False, f"operation '{operation}' requires a column"
+    if not isinstance(filters, list) or len(filters) > MAX_QUERY_FILTERS:
+        return False, f"too many filters (max {MAX_QUERY_FILTERS})"
+
+    working = df
+    applied_filters: list[str] = []
+    for f in filters:
+        if not isinstance(f, dict):
+            continue
+        fcol, fop, fval = f.get("column"), str(f.get("op") or "").lower(), f.get("value")
+        if fcol not in df.columns or not _column_usable(df, schema_blueprint, fcol):
+            return False, f"invalid filter column '{fcol}'"
+        if fop not in ALLOWED_QUERY_FILTER_OPS:
+            return False, f"invalid filter operator '{fop}'"
+        try:
+            mask = _apply_query_filter(working, fcol, fop, fval)
+        except Exception as exc:  # noqa: BLE001 — surfaced as a clean validation failure
+            return False, f"filter on '{fcol}' failed ({exc})"
+        working = working[mask]
+        applied_filters.append(f"{fcol} {fop} {fval}")
+
+    try:
+        if group_by:
+            if operation == "count":
+                series = working.groupby(group_by).size()
+            elif operation == "nunique":
+                series = working.groupby(group_by)[column].nunique()
+            else:
+                series = _coerce_numeric(working[column]).groupby(working[group_by]).agg(operation)
+            series = series.sort_values(ascending=False).head(MAX_QUERY_GROUP_RESULTS)
+            result: Any = {str(k): v for k, v in series.items()}
+        elif operation == "count":
+            result = len(working)
+        elif operation == "nunique":
+            result = working[column].nunique()
+        else:
+            result = getattr(_coerce_numeric(working[column]), operation)()
+    except Exception as exc:  # noqa: BLE001 — a query must never crash the chat request
+        return False, f"query execution failed ({exc})"
+
+    return True, json_safe({
+        "operation": operation,
+        "column": column,
+        "group_by": group_by,
+        "filters_applied": applied_filters,
+        "matched_rows": len(working),
+        "result": result,
+    })
+
+
+DATA_QUERY_ANSWER_SYSTEM_PROMPT = """You are a data analyst. You previously requested a precise \
+computed result to answer the user's question, and it has now been computed exactly from the \
+FULL dataset (not a sample). Write a short, conversational final answer using ONLY this computed \
+result plus the other retrieved facts already provided - do not invent, recompute, or \
+second-guess any number.
+
+If "group_by" is set on the computed result, "result" is a dict of {group value: aggregated \
+value} for the top groups only (sorted highest first) - say so if you're only showing part of it.
+
+Return ONLY a JSON object with exactly this key:
+{"answer": "conversational final answer to the user's original question"}
+"""
+
+
+def _call_llm_for_query_answer(
+    question: str,
+    computed_result: dict[str, Any],
+    retrieved: dict[str, Any],
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Ask Groq/Gemini to phrase the final answer now that the exact number is known."""
+    import json
+
+    compact_facts = [
+        {"type": doc.get("doc_type"), "text": _truncate_text(doc.get("doc_text"), 320)}
+        for doc in (retrieved.get("facts") or [])
+        if doc.get("doc_text")
+    ]
+    compact_history = [
+        {"role": turn.get("role"), "content": _truncate_text(turn.get("content"), 400)}
+        for turn in history[-4:]
+        if turn.get("role") in ("user", "assistant") and turn.get("content")
+    ]
+    user_content = (
+        f"Original question: {question}\n\n"
+        f"Computed result (exact, from the full dataset):\n"
+        f"{json.dumps(computed_result, separators=(',', ':'), default=str)}\n\n"
+        f"Other retrieved facts:\n{json.dumps(compact_facts, separators=(',', ':'), default=str)}\n\n"
+        f"Conversation so far:\n{json.dumps(compact_history, separators=(',', ':'), default=str)}"
+    )
+    return _call_groq_then_gemini_json(
+        system_prompt=DATA_QUERY_ANSWER_SYSTEM_PROMPT,
+        user_content=user_content,
+        groq_max_tokens=512,
+        gemini_max_tokens=256,
+        temperature=0.2,
+    )
+
+
+def _apply_data_query(
+    job: "Job",
+    question: str,
+    answer: str,
+    source: str,
+    llm_out: dict[str, Any],
+    retrieved: dict[str, Any],
+    history: list[dict[str, str]],
+) -> tuple[str, str]:
+    """Execute a requested data query (if any) and rephrase the answer with the exact result.
+
+    A data query must never hard-fail a chat turn: an invalid request, an execution error,
+    or both LLM providers failing on the rephrasing call all fall back to leaving the
+    first-pass answer in place (with a short explanatory note) rather than raising.
+    """
+    if not (llm_out.get("needs_data_query") and llm_out.get("data_query")):
+        return answer, source
+
+    state = job.state or {}
+    schema_blueprint = state.get("schema_blueprint", {}) or {}
+    ok, result_or_reason = run_data_query(job, schema_blueprint, llm_out["data_query"])
+    if not ok:
+        return answer + f"\n\n(I couldn't compute that precisely — {result_or_reason}.)", source
+
+    try:
+        phrased = _call_llm_for_query_answer(question, result_or_reason, retrieved, history)
+        new_answer = phrased.get("answer")
+        if new_answer:
+            return new_answer, phrased.get("source", source)
+    except Exception as exc:  # noqa: BLE001 — never hard-fail on the rephrasing call
+        print(f"[Chat] Data query computed but rephrasing failed, using raw result: {exc}")
+
+    return (
+        answer + f"\n\n(Computed result: {result_or_reason.get('result')!r}, "
+        f"from {result_or_reason.get('matched_rows')} matching row(s).)",
+        source,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6 — PUBLIC ENTRYPOINT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_chart_request(job: "Job", answer: str, llm_out: dict[str, Any]) -> tuple[str, dict[str, str] | None, bool]:
@@ -577,6 +879,7 @@ def ask_question(manager: "JobManager", job: "Job", question: str) -> dict[str, 
 
     answer = llm_out.get("answer") or "I couldn't generate an answer for that question."
     source = llm_out.get("source", "fallback")
+    answer, source = _apply_data_query(job, question, answer, source, llm_out, retrieved, history)
     answer, chart_dict, chart_generated = _apply_chart_request(job, answer, llm_out)
 
     return {

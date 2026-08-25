@@ -1,6 +1,6 @@
 \documentclass[12pt,a4paper,openany]{report}
 
-% -------------------- PACKAGES --------------------
+% PACKAGES
 \usepackage[a4paper,left=1.5in,right=1in,top=1in,bottom=1in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{amsmath}
@@ -22,11 +22,11 @@
 \hypersetup{hidelinks}
 \emergencystretch=2em
 
-% -------------------- FIGURE/TABLE NUMBERING (HYPHEN FORMAT) --------------------
+% FIGURE/TABLE NUMBERING (HYPHEN FORMAT)
 \renewcommand{\thefigure}{\arabic{chapter}-\arabic{figure}}
 \renewcommand{\thetable}{\arabic{chapter}-\arabic{table}}
 
-% -------------------- LIST OF FIGURES / TABLES ENTRY FORMAT --------------------
+% LIST OF FIGURES / TABLES ENTRY FORMAT
 % Prefix entries with "Figure"/"Table" and a colon, e.g. "Figure 4-1: ..."
 \renewcommand{\cftfigpresnum}{Figure~}
 \renewcommand{\cftfigaftersnum}{:}
@@ -48,7 +48,7 @@
 \setlength{\cftbeforelottitleskip}{0pt}
 \setlength{\cftafterlottitleskip}{12pt}
 
-% -------------------- CAPTION SETUP --------------------
+% CAPTION SETUP
 \captionsetup{%
   justification=centering,
   font={small, bf},
@@ -56,7 +56,7 @@
   singlelinecheck=false
 }
 
-% -------------------- CODE LISTING STYLE --------------------
+% CODE LISTING STYLE
 \definecolor{codebg}{gray}{0.96}
 \definecolor{codekw}{RGB}{0,0,180}
 \definecolor{codecomment}{RGB}{0,128,0}
@@ -86,7 +86,7 @@
 	literate={-}{-}1
 }
 
-% -------------------- LINE SPACING --------------------
+% LINE SPACING
 \onehalfspacing
 
 % Footer distance: 0.5 inch from bottom as required by template
@@ -96,7 +96,7 @@
 \captionsetup[table]{position=top, font=small, labelfont=bf, labelsep=period}
 \captionsetup[figure]{position=bottom, font=small, labelfont=bf, labelsep=period}
 
-% -------------------- PAGE STYLE --------------------
+% PAGE STYLE
 \pagestyle{fancy}
 \fancyhf{}
 \cfoot{\thepage}
@@ -114,7 +114,7 @@
 \let\ps@plain\ps@fancy
 \makeatother
 
-% -------------------- HEADING FORMATS --------------------
+% HEADING FORMATS
 \titleformat{\chapter}[block]
 	{\normalfont\bfseries\fontsize{12}{14}\selectfont}
 	{\thechapter.}{0.8em}{\MakeUppercase}
@@ -135,13 +135,13 @@
 	{\thesubsection.}{1em}{}
 \titlespacing*{\subsection}{0pt}{0pt}{8pt}
 
-% -------------------- TITLES --------------------
+% TITLES
 \renewcommand{\contentsname}{TABLE OF CONTENTS}
 \renewcommand{\listfigurename}{LIST OF FIGURES}
 \renewcommand{\listtablename}{LIST OF TABLES}
 \renewcommand{\bibname}{REFERENCES}
 
-% -------------------- DOCUMENT --------------------
+% DOCUMENT
 \begin{document}
 \sloppy
 
@@ -240,12 +240,12 @@
 \pagenumbering{roman}
 \setcounter{page}{1}
 
-% --- DECLARATION ---
+% DECLARATION
 \chapter*{DECLARATION}
 \addcontentsline{toc}{chapter}{DECLARATION}
 \phantomsection
 
-We hereby declare that the report of the project entitled \textbf{``Multi-Agent Data Analysis and Insight Generation Platform for Financial and Sales Data''} which is being submitted to the \textbf{Department of Electronics and Computer Engineering, IOE, Thapathali Campus}, in the partial fulfillment of the requirements for the award of the Degree of Bachelor of Engineering in \textbf{Computer Engineering}, is a bonafide report of the work carried out by us. The materials contained in this report have not been submitted to any University or Institution for the award of any degree and we are the only authors of this complete work and no sources other than the listed here have been used in this work.
+We declare that the project report entitled \textbf{``Multi-Agent Data Analysis and Insight Generation Platform for Financial and Sales Data''}, submitted to the \textbf{Department of Electronics and Computer Engineering, IOE, Thapathali Campus} in partial fulfillment of the requirements for the Bachelor of Engineering degree in \textbf{Computer Engineering}, is a bonafide record of our work. The material in this report has not been submitted to any university or institution for the award of any degree, and no sources other than those listed here have been used.
 
 \vspace{2em}
 \noindent Prashant Kafle (THA080BCT026)\\
@@ -258,14 +258,14 @@ Sushil Bhatta (THA080BCT048)
 
 \clearpage
 
-% --- CERTIFICATE OF APPROVAL ---
+% CERTIFICATE OF APPROVAL
 \chapter*{CERTIFICATE OF APPROVAL}
 \addcontentsline{toc}{chapter}{CERTIFICATE OF APPROVAL}
 \phantomsection
 
-The undersigned certify that they have read and recommended to the \textbf{Department of Electronics and Computer Engineering, IOE, Thapathali Campus}, a project work entitled \textbf{``Multi-Agent Data Analysis and Insight Generation Platform for Financial and Sales Data''} submitted by \textbf{Prashant Kafle (THA080BCT026), Roshan Poudel (THA080BCT036), Santosh Khadka (THA080BCT039), and Sushil Bhatta (THA080BCT048)} in partial fulfillment for the award of Bachelor's Degree in \textbf{Computer Engineering}. The Project was carried out under special supervision and within the time frame prescribed by the syllabus.
+The undersigned certify that they have read and recommended to the \textbf{Department of Electronics and Computer Engineering, IOE, Thapathali Campus} the project work entitled \textbf{``Multi-Agent Data Analysis and Insight Generation Platform for Financial and Sales Data''}, submitted by \textbf{Prashant Kafle (THA080BCT026), Roshan Poudel (THA080BCT036), Santosh Khadka (THA080BCT039), and Sushil Bhatta (THA080BCT048)} in partial fulfillment of the requirements for the Bachelor's Degree in \textbf{Computer Engineering}. The project was carried out under supervision and within the time frame prescribed by the syllabus.
 
-We found the students to be hardworking, skilled and ready to undertake any related work to their field of study and hence we recommend the award of partial fulfillment of Bachelor's degree of Computer Engineering.
+We found the students hardworking and skilled, and we recommend the acceptance of this work for partial fulfillment of the Bachelor's Degree in Computer Engineering.
 
 \vspace{2em}
 \noindent Project Supervisor\\
@@ -291,28 +291,28 @@ Department of Electronics and Computer Engineering, Thapathali Campus
 
 \clearpage
 
-% --- COPYRIGHT ---
+% COPYRIGHT
 \chapter*{COPYRIGHT}
 \addcontentsline{toc}{chapter}{COPYRIGHT}
 \phantomsection
 
-The author has agreed that the library, Department of Electronics and Computer Engineering, Thapathali Campus, may make this report freely available for inspection. Moreover, the author has agreed that the permission for extensive copying of this project work for scholarly purpose may be granted by the professor/lecturer, who supervised the project work recorded herein or, in their absence, by the head of the department. It is understood that the recognition will be given to the author of this report and to the Department of Electronics and Computer Engineering, IOE, Thapathali Campus in any use of the material of this report. Copying of publication or other use of this report for financial gain without approval of the Department of Electronics and Computer Engineering, IOE, Thapathali Campus and author's written permission is prohibited.
+The author agrees that the library of the Department of Electronics and Computer Engineering, Thapathali Campus, may make this report available for inspection. Permission for extensive copying of this project work for scholarly purposes may be granted by the supervising professor or lecturer, or in their absence, by the head of the department. Any use of material from this report must acknowledge the author and the Department of Electronics and Computer Engineering, IOE, Thapathali Campus. Copying, publication, or other use of this report for financial gain is prohibited without approval from the department and written permission from the author.
 
-Request for permission to copy or to make any use of the material in this project in whole or part should be addressed to department of Electronics and Computer Engineering, IOE, Thapathali Campus.
+Requests for permission to copy or use this project material, in whole or in part, should be addressed to the Department of Electronics and Computer Engineering, IOE, Thapathali Campus.
 
 \clearpage
 
-% --- ACKNOWLEDGEMENT ---
+% ACKNOWLEDGEMENT
 \chapter*{ACKNOWLEDGEMENT}
 \addcontentsline{toc}{chapter}{ACKNOWLEDGEMENT}
 \phantomsection
 
 \begin{small}
-We would like to express our sincere gratitude to the Department of Electronics and Computer Engineering, Thapathali Campus, Institute of Engineering, Tribhuvan University, for providing us the opportunity to work on this project.
+We thank the Department of Electronics and Computer Engineering, Thapathali Campus, Institute of Engineering, Tribhuvan University, for giving us the opportunity to work on this project.
 
-We are deeply indebted to our supervisor, Er. Rajad Shakya, for his guidance, constructive feedback, and continuous encouragement throughout the development of this project. His suggestions have helped us refine both the technical design and the report structure.
+We are grateful to our supervisor, Er. Rajad Shakya, for his guidance, constructive feedback, and encouragement throughout the project. His suggestions helped us refine both the technical design and the report structure.
 
-We also thank the faculty members of the department for creating an academic environment that supports practical engineering work. Finally, we are grateful to our friends and families for their patience and support during this phase of the project.
+We also thank the faculty members of the department for supporting practical engineering work. We are grateful to our friends and families for their patience and support during this phase of the project.
 
 \vspace{2em}
 \noindent\textbf{Submitted By:}\\
@@ -327,13 +327,13 @@ Sushil Bhatta (THA080BCT048)
 
 \clearpage
 
-% --- ABSTRACT ---
+% ABSTRACT
 \chapter*{ABSTRACT}
 \addcontentsline{toc}{chapter}{ABSTRACT}
 \phantomsection
 
 \begin{small}
-This project presents a complete end-to-end multi-agent system that transforms raw CSV-based financial and sales data into validated, professionally formatted analytical reports with interactive charts and grounded plain-language insights. The system is built around a LangGraph pipeline of six specialized agents: structural profiling, semantic tagging, context-aware preprocessing, statistical analysis and visualization, deterministic output validation with a Cohen's kappa gate, and hybrid report generation with claim grounding. A FastAPI backend provides secure file uploads, job management with PostgreSQL persistence, and Server-Sent Events (SSE) for live progress streaming. A React 19 frontend offers a no-code web interface for uploading datasets, monitoring agent execution, viewing interactive charts, downloading HTML/PDF reports, and querying data via a retrieval-augmented generation (RAG) chat. The system is dataset-agnostic, accepting arbitrary tabular CSV files of financial and sales data; as a representative demonstration, a sample sales dataset is processed end-to-end through all six agents to produce a comprehensive report with KPI summaries, correlation matrices, trend analyses, anomaly detection, and validated findings. The system achieves end-to-end automation while maintaining auditability through logged transformations, confidence propagation, and rigorous validation checks, including Tier-1 contract enforcement and LLM--heuristic agreement scoring. This work demonstrates that agentic orchestration, combined with deterministic data processing and controlled LLM reasoning, can deliver reliable, accessible, and automated data analysis for small to medium organizations.
+This project presents a multi-agent system that converts raw CSV-based financial and sales data into validated analytical reports with interactive charts and grounded plain-language insights. The system uses a LangGraph pipeline with six specialized agents: structural profiling, semantic tagging, context-aware preprocessing, statistical analysis and visualization, deterministic output validation with a Cohen's kappa check, and hybrid report generation with claim grounding. A FastAPI backend handles file uploads, job management with PostgreSQL persistence, and Server-Sent Events (SSE) for live progress updates. A React 19 frontend lets users upload datasets, monitor agent execution, view interactive charts, download HTML/PDF reports, and query data through retrieval-augmented generation (RAG) chat. The system accepts arbitrary tabular CSV files of financial and sales data; for demonstration, the report processes a sample sales dataset through all six agents and produces KPI summaries, correlation matrices, trend analyses, anomaly detection, and validated findings. Auditability is maintained through logged transformations, confidence propagation, Tier-1 contract checks, and LLM-to-heuristic agreement scoring. The result is a practical pipeline that combines deterministic data processing with controlled LLM reasoning for small to medium organizations.
 \end{small}
 
 \vspace{1em}
@@ -341,7 +341,7 @@ This project presents a complete end-to-end multi-agent system that transforms r
 
 \clearpage
 
-% --- TABLE OF CONTENTS (single spacing) ---
+% TABLE OF CONTENTS (single spacing)
 \begin{singlespace}
 \tableofcontents
 \end{singlespace}
@@ -379,7 +379,7 @@ This project presents a complete end-to-end multi-agent system that transforms r
 \textbf{IQR} & Interquartile Range \\
 \textbf{JSON} & JavaScript Object Notation \\
 \textbf{JWT} & JSON Web Token \\
-\textbf{KS} & Kolmogorov–Smirnov \\
+\textbf{KS} & Kolmogorov-Smirnov \\
 \textbf{KV} & Key-Value (cache) \\
 \textbf{LLM} & Large Language Model \\
 \textbf{LPU} & Language Processing Unit \\
@@ -404,22 +404,22 @@ This project presents a complete end-to-end multi-agent system that transforms r
 
 \section{Background}
 
-Data-driven decision-making has become a foundational requirement for organizational effectiveness in health, agriculture, education, and commerce. In Nepal, the government's Digital Nepal Framework explicitly prioritizes data-centric governance across these sectors. However, the operational reality for most organizations particularly those outside the Kathmandu Valley remains characterized by manual spreadsheet management and underutilized datasets. The technical barrier to entry for modern analytics is high: tools demand proficiency in query languages, schema design, or statistical software, while enterprise platforms carry licensing costs that are unsustainable for donor-funded non-governmental organizations (NGOs) and municipal bodies. The emergence of LLMs and agentic orchestration frameworks has created a new design space for autonomous software systems \cite{dwivedi2023}. LLMs can now interpret column semantics and narrate statistical findings in natural language, while agentic frameworks such as LangGraph enable reliable, stateful, multi-step automation. The convergence of these technologies makes it feasible to build a pipeline that replicates the workflow of a human data analyst validation, cleaning, profiling, visualization, statistical testing, interpretation, and reporting without requiring human intervention at each step.
+Data-driven decision making is now part of work in health, agriculture, education, and commerce. In Nepal, the government's Digital Nepal Framework gives priority to data-centric governance across these sectors. In practice, many organizations, especially outside the Kathmandu Valley, still manage spreadsheets manually and leave much of their data unused. Modern analytics tools also create a high entry barrier because users often need query languages, schema design, or statistical software skills. Enterprise platforms can also be too expensive for donor-funded non-governmental organizations (NGOs) and municipal bodies. Large Language Models (LLMs) and agentic orchestration frameworks now make a more automated approach possible \cite{dwivedi2023}. LLMs can interpret column semantics and explain statistical findings in natural language, while frameworks such as LangGraph support reliable, stateful, multi-step workflows. Together, these tools can automate much of a human analyst's workflow: validation, cleaning, profiling, visualization, statistical testing, interpretation, and reporting.
 
 \section{Motivation}
 
-The motivation for this project is based on the following points:
+This project is motivated by the following problems:
 
 \begin{itemize}
 	\item Despite the availability of data, many organizations lack the technical expertise required to analyze and interpret it effectively.
 	\item Traditional data analysis tools often require statistical knowledge, programming skills, or manual report interpretation.
-	\item Existing AI-based systems using LLMs may generate unverified or hallucinated insights, leading to unreliable conclusions.
+	\item Existing LLM-based systems may generate unverified or hallucinated insights, leading to unreliable conclusions.
 	\item Recent advances in Artificial Intelligence and Multi-Agent Systems provide an opportunity to automate complex analytical tasks.
 \end{itemize}
 
 \section{Problem Definition}
 
-Organizations accumulate data daily sales records, transaction logs, expense sheets, customer information yet cannot efficiently convert this data into insights that drive strategy and decision-making.
+Organizations accumulate data every day, including sales records, transaction logs, expense sheets, and customer information. Many still cannot convert that data efficiently into insights for strategy and decision making.
 
 Existing challenges:
 
@@ -432,16 +432,16 @@ Existing challenges:
 
 \end{enumerate}
 
-This project proposes an end-to-end automated system that takes raw sales and financial CSV data and produces validated, auditable, professionally formatted reports with trend insights and recommendations.
+This project proposes an automated system that takes raw sales and financial CSV data and produces validated, auditable reports with trend insights and recommendations.
 
 \section{Objectives}
 
 The primary objectives of this project are:
 
 \begin{enumerate}
-	\item Develop an autonomous multi-agent system that converts raw sales and financial data (CSV format) into professional analytical reports and forecasts without manual coding
+	\item Develop an autonomous multi-agent system that converts raw sales and financial data into professional analytical reports, trend summaries, and recommendations without manual coding
 
-	\item Democratize basic financial analytics and sales optimization for small to medium businesses and organizations through a no-code web interface
+	\item Make basic financial analytics and sales optimization accessible to small and medium businesses through a web interface that does not require coding
 \end{enumerate}
 
 \section{Scope and Applications}
@@ -449,19 +449,19 @@ The primary objectives of this project are:
 \hspace*{\parindent}\textbf{Technical Scope:}
 
 \begin{itemize}
-	\item Supports common business data types: sales records, transaction logs, expense sheets, in CSV format (with additional Excel loader path available)
-	\item A complete six-agent pipeline (profiling, semantic tagging, preprocessing, statistical analysis, validation, and report generation) is implemented end-to-end
+	\item Supports common business data types such as sales records, transaction logs, and expense sheets. The web upload route currently accepts CSV files, while the internal Agent~1 loader also supports Excel, JSON/JSONL, and Parquet inputs when invoked directly.
+	\item A six-agent pipeline (profiling, semantic tagging, preprocessing, statistical analysis, validation, and report generation) is implemented from input to report output
 	\item Runs as a web application with FastAPI backend and React frontend, without requiring users to download additional software
 \end{itemize}
 
 \textbf{Primary Use Cases:}
 
 \begin{enumerate}
-	\item \textbf{Sales Performance Tracking:} Automated analysis of sales data to identify trends, top-performing products, seasonal patterns, and revenue forecasts for planning
+	\item \textbf{Sales Performance Tracking:} Automated analysis of sales data to identify trends, top-performing products, seasonal patterns, and revenue drivers for planning
 
 	\item \textbf{Financial Reporting \& Budgeting:} Generation of expense summaries, income vs. expenditure analysis, budget tracking, and monthly/quarterly financial reports for small to medium organizations
 
-	\item \textbf{Retail \& E-commerce Analytics:} Customer purchase behavior, inventory turnover analysis, demand forecasting, and sales channel comparison
+	\item \textbf{Retail \& E-commerce Analytics:} Customer purchase behavior, inventory turnover analysis, sales channel comparison, and category performance review
 
 	\item \textbf{Small Business Operations:} Cash flow trends, profit margin analysis, supplier/payment tracking, and operational dashboards without requiring accounting software expertise
 
@@ -470,47 +470,47 @@ The primary objectives of this project are:
 
 \section{Report Organization}
 
-The remainder of this report is organized as follows. Chapter 2 reviews existing literature on traditional BI platforms, AI-assisted analytics, automated visualization, multi-agent frameworks, and positions the project within the research gap. Chapter 3 presents the requirement analysis, including functional and non-functional requirements, feasibility study, dataset analysis, and the current implementation status. Chapter 4 describes the theoretical approach, focusing on the Qwen3-27B language model and its architecture. Chapter 5 explains the overall system architecture, including the LangGraph pipeline, shared state, reliability propagation, backend services, and frontend workflow. Chapter 6 provides detailed implementation descriptions for each of the six agents, the FastAPI backend, and the React frontend. Chapter 7 presents the results and analysis from a complete run on the sample dataset, with tables, charts, and validation metrics. Chapter 8 discusses future enhancements and potential extensions. Chapter 9 concludes the report with a summary of contributions and achievements. Finally, the appendices provide additional technical details, cost estimates, timeline, and sample outputs.
+The rest of this report is organized as follows. Chapter 2 reviews related work on BI platforms, AI-assisted analytics, automated visualization, and multi-agent frameworks, then identifies the research gap addressed by this project. Chapter 3 covers requirements, feasibility, dataset analysis, and implementation status. Chapter 4 explains the Qwen3-27B language model and the LLM inference process used in the system. Chapter 5 describes the system architecture, including the LangGraph pipeline, shared state, reliability propagation, backend services, and frontend workflow. Chapter 6 explains the implementation of the six agents, the FastAPI backend, and the React frontend. Chapter 7 reports the results from a complete run on the sample dataset, including tables, charts, and validation metrics. Chapter 8 lists planned extensions. Chapter 9 summarizes the project's contributions. The appendices include technical details, cost estimates, the timeline, and sample outputs.
 
 \chapter{LITERATURE REVIEW}
 
 \section{Traditional Data Analytics Platforms}
-Platforms for Business Intelligence like Microsoft Power BI, Tableau, and Google Looker Studio are popular choices when it comes to data visualization, creation of dashboards, and decision making. These technologies offer a variety of data connectivity options, visualization functions, and reporting features, helping companies track their key performance indicators and business processes. With all their ecosystem and integration possibilities, these BI systems can be used by large corporations. However, there is a number of disadvantages of BI systems as well. First of all, users need to know database schema, configure their dashboards, and prepare the data themselves. Moreover, licensing and other infrastructure expenses may prove to be expensive for small companies, educational institutions, and non-profit organizations lacking funds. However, one of the major drawbacks of traditional BI systems is their lack of automation in interpretation, relying only on visualization.
-According to Dwivedi et al. \cite{dwivedi2023}, large language models are changing data analytics. LLMs let us interact naturally, reason automatically, and get smart decision support. The authors argue that we need to progress from static dashboards to AI systems that offer insightful auto-recommendations. This points out an important research gap. To address it, we should develop intelligent, multi-agent data analyst systems.
+Business Intelligence platforms such as Microsoft Power BI, Tableau, and Google Looker Studio are widely used for visualization, dashboards, and reporting. They offer data connectors, charting tools, and reporting features that help organizations track performance indicators and business processes. These platforms work well in large organizations with the budget and staff to configure them. They are harder to adopt in smaller organizations because users still need to understand schemas, prepare data, and design dashboards. Licensing and infrastructure costs can also be difficult for small companies, educational institutions, non-profit organizations, and municipal bodies. A further limitation is that traditional BI tools usually visualize results but do not automate interpretation.
+Dwivedi et al. \cite{dwivedi2023} describe how large language models are changing data analytics through natural language interaction, automated reasoning, and decision support. Their work supports the move from static dashboards toward AI systems that can explain and recommend actions from data. This project addresses that gap through a multi-agent data analyst system.
 
 \section{AI-Assisted Analytics and Large Language Model-Based Data Analysis}
-LLMs are changing data analytics with their ability to chat naturally about data \cite{dwivedi2023}. Tools like ChatGPT with Code Interpreter and other assistant-style systems let people upload datasets and get back code, charts, stats analyses, and plain text explanations \cite{openai2024}. This is big because it makes data analysis easier for those without a ton of technical skills.
+LLMs make it possible to interact with data using natural language \cite{dwivedi2023}. Tools such as ChatGPT with Code Interpreter and other assistant-style systems allow users to upload datasets and receive code, charts, statistical analysis, and plain text explanations \cite{openai2024}. This reduces the technical effort needed for basic data analysis.
 
-One huge plus is how easy these platforms are to use. Regular folks can talk to a dataset without needing loads of coding knowledge. Researchers show that LLMs can handle lots of jobs, like cleaning data, doing exploratory analysis, spitting out visuals, and even putting together reports \cite{sun2024}.
+Their main advantage is accessibility. Users can ask questions about a dataset without writing code, and recent research shows that LLMs can support tasks such as cleaning data, exploratory analysis, visualization, and report generation \cite{sun2024}.
 
-Still, there are some downsides. For one, getting the same result each time is tricky since outcomes rely heavily on the questions you ask. You might phrase things differently and end up with entirely distinct findings. Also, these systems tend to be single agent setups that don’t follow a strict workflow or include checks for accuracy. There’s no built-in QA process, and sometimes the code generated can have errors or missing steps \cite{liu2023chatgpt, maynez2020faithfulness}. This really drives the need for more complex systems that employ different agents for doing analysis, verifying results, and generating reports. Recent work on retrieval-augmented generation (RAG) has shown promise in grounding LLM responses in external knowledge bases, reducing hallucinations and improving factual accuracy \cite{lewis2020rag}. This approach is particularly relevant for the dataset chat and claim-grounding features implemented in this project.
+These systems also have limits. Results can vary with prompt wording, and many assistant-style tools operate as single-agent systems without a fixed workflow or independent checks. Generated code can contain errors or omit steps \cite{liu2023chatgpt, maynez2020faithfulness}. These issues support the need for systems that separate analysis, verification, and reporting into different stages. Retrieval-augmented generation (RAG) also helps ground LLM responses in external knowledge sources, reducing hallucinations and improving factual accuracy \cite{lewis2020rag}. That idea is used in this project through dataset chat and claim grounding.
 
 \section{Automated Data Visualization from Tabular/CSV Data}
-Several studies have investigated automated visualization generation from structured datasets. Data2Vis \cite{dibia2019} proposed a sequence-to-sequence neural architecture that translates datasets into Vega-Lite visualization specifications. VizML \cite{hu2019} applied machine learning to learn visualization design choices from over one million dataset-visualization pairs. Draco \cite{moritz2018} formalized visualization design knowledge as logical constraints to recommend effective visual encodings. DeepEye \cite{luo2018} further automated chart generation and ranking. These studies collectively demonstrate the feasibility of automated visualization generation and provide strong theoretical support for the Visualization Agent proposed in this research.
+Several studies have examined automated visualization generation from structured datasets. Data2Vis \cite{dibia2019} proposed a sequence-to-sequence neural architecture that translates datasets into Vega-Lite visualization specifications. VizML \cite{hu2019} used machine learning to learn visualization design choices from more than one million dataset-visualization pairs. Draco \cite{moritz2018} represented visualization design knowledge as logical constraints for recommending visual encodings. DeepEye \cite{luo2018} automated chart generation and ranking. These studies support the use of an analysis agent that selects visualizations from the structure and semantics of tabular data.
 
-The main insight from this line of work is that visualization creation can be treated as a recommendation or generation task rather than a purely manual design task. This is especially relevant for CSV-based analysis workflows, where the system must decide whether to use bar charts, line charts, scatter plots, or other encodings based on the structure and semantics of the tabular data. The proposed project adopts this idea by using an agent that converts cleaned tabular outputs into appropriate static visualizations for reports.
+This work shows that visualization can be treated as a recommendation or generation task rather than a fully manual design task. That is relevant for CSV-based analysis workflows, where the system must choose bar charts, line charts, scatter plots, or other encodings based on the dataset. This project follows the same direction by using an agent that converts cleaned tabular outputs into report-ready visualizations.
 
 \section{Agentic AI Frameworks and Multi-Agent Systems}
-The newest stuff in Agentic AI includes LangGraph, CrewAI, and AutoGen frameworks that help different AI agents work together on big projects \cite{langchain2024, wu2023}. Traditionally, one AI does all the work, but these new setups let multiple agents take on tasks based on what they’re best at.
+Agentic AI frameworks such as LangGraph, CrewAI, and AutoGen allow multiple agents to coordinate on larger tasks \cite{langchain2024, wu2023}. Instead of relying on a single assistant to perform every step, these frameworks assign separate responsibilities to different agents.
 
-LangGraph helps manage agent teamwork with things like conditional routing and checkpointing. Meanwhile, AutoGen is all about letting agents chat back and forth, and CrewAI handles task delegation based on roles. Altogether, these tools show promise for building really smart, self-reliant systems that can figure out tough problems, plan, and coordinate tasks efficiently.
+LangGraph supports stateful workflows with conditional routing and checkpointing. AutoGen focuses on agent-to-agent conversation, while CrewAI organizes task delegation through roles. These tools are useful when a system needs planning, coordination, and repeatable execution.
 
-According to Wu et al. \cite{wu2023}, when you set up proper structures for AI conversations, teams of specialized agents can ace complex assignments. This covers everything from coding and math to answering questions and making decisions. It’s clear that such collaborations do better than lone agents.
+Wu et al. \cite{wu2023} show that structured multi-agent conversations can improve performance on complex tasks, including coding, mathematics, question answering, and decision support. Their work suggests that specialized agents can outperform a single general agent when the workflow is well defined.
 
-Still, most work right now only applies these frameworks to areas like software engineering, web searches, Q\&A, and general reasoning. Not many have looked into how well they fit into fixed data analysis processes that mix deterministic stats ops with more uncertain language-model thinking. This gap presents an opportunity for the development of multi-agent systems specifically designed for automated data analysis and business intelligence workflows.
+Most existing work applies these frameworks to software engineering, web search, Q\&A, and general reasoning. Less attention has been given to fixed data analysis workflows that combine deterministic statistical operations with language-model reasoning. This project applies multi-agent orchestration to automated data analysis and business intelligence reporting.
 
 \section{Existing Research on Automated Data Analysis Systems}
-Researchers are looking into artificial intelligence to make data analytics easier. They’re mixing machine learning, big language models, and natural language processing to help with exploring data, making it visual, and getting insights.
+Researchers have explored artificial intelligence methods for making data analytics easier to use. These systems combine machine learning, large language models, and natural language processing to support data exploration, visualization, and interpretation.
 
-Sun et al. came up with LAMBDA, a Large Model Based Data Agent, which uses special AI agents to do data analysis \cite{sun2024}. These agents follow instructions in regular language to do tasks like code generation, stats, and visualizations. The cool thing is, when these agents work together, they improve accuracy and dependability more than solo agents \cite{sun2024}.
+Sun et al. proposed LAMBDA, a Large Model Based Data Agent that uses specialized AI agents for data analysis \cite{sun2024}. The agents follow natural language instructions for tasks such as code generation, statistical analysis, and visualization. Their results show that coordinated agents can improve accuracy and dependability compared with single-agent approaches \cite{sun2024}.
 
-While there's been progress, most systems now only cover certain parts of the analytics job. For instance, statistical tools are great but aren’t very user-friendly, and some language model tools don’t always deliver consistent results because they rely too much on how you write prompts. Also, many current tools work in isolation they don’t all come together to form that full analytics process which would include everything from pre-processing data to generating reports.
+Even with this progress, many systems cover only part of the analytics process. Statistical tools are powerful but difficult for non-technical users. LLM tools are more accessible, but their outputs can change with prompt wording. Many tools also work in isolation rather than covering the full process from preprocessing to report generation.
 
-So, we need a better way. There’s a call for a complete multi-agent setup that provides reliable and repeatable data analytics. This could revolutionize how we handle big data tasks.
+This leaves room for a multi-agent system that can provide reliable and repeatable data analysis across the full workflow.
 
 \section{Research Gap and Project Positioning}
-According to the literature reviewed, there is a lack of studies dedicated to multi-agent data processing systems that combine deterministic analytical algorithms with LLM-based reasoning in a reliable end-to-end analytics pipeline \cite{sun2024, wu2023}. Traditional BI tools require significant user involvement and technical expertise \cite{dwivedi2023}. While LLM-based systems improve accessibility, they do not inherently guarantee reproducibility, auditability, and structured execution workflows \cite{liu2023chatgpt, maynez2020faithfulness}. Multi-agent frameworks provide orchestration capabilities but have primarily been applied to software engineering and general reasoning tasks rather than autonomous data analytics and reporting \cite{wu2023, langchain2024}.
-Therefore, this project proposes a LangGraph-based multi-agent analytics system in which specialized agents perform data ingestion, preprocessing, analysis, visualization, validation, and report generation. Deterministic analytical methods will be used for statistical computations, while an LLM-based agent will generate insights and explanations. The proposed system aims to improve reproducibility, accessibility, and automation of data analytics workflows for educational institutions, small businesses, and non-technical users.
+The reviewed literature shows a gap in multi-agent data processing systems that combine deterministic analytical algorithms with LLM-based reasoning in one reliable analytics pipeline \cite{sun2024, wu2023}. Traditional BI tools require user involvement and technical skill \cite{dwivedi2023}. LLM-based systems improve accessibility, but they do not automatically provide reproducibility, auditability, or structured execution \cite{liu2023chatgpt, maynez2020faithfulness}. Multi-agent frameworks provide orchestration, but they are used more often for software engineering and general reasoning than for autonomous data analytics and reporting \cite{wu2023, langchain2024}.
+This project proposes a LangGraph-based multi-agent analytics system in which specialized agents perform data ingestion, preprocessing, analysis, visualization, validation, and report generation. Deterministic methods handle statistical computation, while LLM-based stages generate schema meaning and explanations. The goal is to improve reproducibility, accessibility, and automation for educational institutions, small businesses, and non-technical users.
 
 \chapter{REQUIREMENT ANALYSIS}
 
@@ -533,10 +533,10 @@ Therefore, this project proposes a LangGraph-based multi-agent analytics system 
 		\item Clear audit trail for preprocessing and validation decisions.
 \end{itemize}
 
-The most important non-functional requirement is traceability. The system does not hide intermediate decisions inside a black box; instead, it keeps outputs in the shared state and logs important actions as the pipeline proceeds. A second important requirement is robustness, because a report-generating system is only useful if it can continue operating sensibly when some inputs are incomplete or imperfect.
+Traceability is the main non-functional requirement. The system keeps intermediate outputs in shared state and logs major actions as the pipeline runs, so decisions can be reviewed after execution. Fault tolerance is also required because the report generator must handle incomplete or imperfect inputs without producing unchecked results.
 
 \section{Software Requirements}
-The system is built on a modern Python-based backend with a React frontend. Key software components include:
+The system is built on a Python backend with a React frontend. Main software components include:
 
 \begin{itemize}
 	\item \textbf{Python 3.12+}: Core programming language for the backend and agents.
@@ -552,16 +552,16 @@ The system is built on a modern Python-based backend with a React frontend. Key 
 \section{Feasibility Study}
 
 \subsection{Technical Feasibility}
-The project leverages mature open-source libraries and cloud-based LLM APIs. Python's rich ecosystem for data processing (Pandas, Scikit-learn) and orchestration (LangGraph) provides a solid technical foundation. The use of Groq and Gemini APIs eliminates the need for expensive on-premise GPU infrastructure, making the system deployable on standard cloud VMs or even local machines with internet access. The React-based frontend ensures cross-platform compatibility.
+The project uses mature open-source libraries and cloud-based LLM APIs. Python libraries such as Pandas, Scikit-learn, and LangGraph provide the data processing and orchestration foundation. Groq and Gemini APIs remove the need for local GPU infrastructure, so the system can run on standard cloud VMs or local machines with internet access. The React frontend runs in the browser, which supports cross-platform use.
 
 \subsection{Operational Feasibility}
-The no-code web interface significantly lowers the barrier to entry. Users can upload a CSV file and receive a complete analytical report without any programming or statistical expertise. The system is designed to be self-service, reducing dependency on specialized data analysts and accelerating decision-making cycles.
+The web interface lowers the entry barrier. Users can upload a CSV file and receive an analytical report without writing code or using statistical software. The system is designed for self-service use, reducing dependence on specialized analysts.
 
 \subsection{Economic Feasibility}
-The project's primary costs are variable LLM API usage fees. However, the deterministic fallback mechanisms and heuristic-based tagging reduce reliance on the LLM for every operation. The open-source nature of the core stack (Python, FastAPI, React, PostgreSQL) means no licensing fees. For small to medium organizations, the cost of API usage is negligible compared to the labor cost of manual data analysis.
+The main variable cost is LLM API usage. Deterministic fallback mechanisms and heuristic tagging reduce the need to call the LLM for every operation. The core stack, including Python, FastAPI, React, and PostgreSQL, is open source, so there are no software licensing fees for those components. For small to medium organizations, API usage cost is expected to be lower than the labor cost of repeated manual analysis.
 
 \section{Dataset Analysis}
-The system is designed to be dataset-agnostic and accepts arbitrary tabular CSV files of financial and sales data. For validation and demonstration, a representative sample dataset, \texttt{10000 Sales Records.csv}, is included in the project repository. This sample contains 10,000 rows and 14 columns, representing simulated global sales transactions. Its columns are:
+The system accepts arbitrary tabular CSV files of financial and sales data. For validation and demonstration, the repository includes \texttt{10000 Sales Records.csv}. This sample contains 10,000 rows and 14 columns representing simulated global sales transactions. Its columns are:
 
 \begin{itemize}
 	\item \texttt{Region}, \texttt{Country}: Geographic fields (categorical).
@@ -583,7 +583,7 @@ The sample's mix of identifiers, dates, currencies, and categories makes it suit
 \hline
 Requirement & Status & Notes \\
 \hline
-Data loading and profiling & Implemented & CSV-primary; Excel loader path exists \\
+Data loading and profiling & Implemented & Agent loader supports CSV/TSV-style text, Excel, JSON/JSONL, and Parquet; web upload currently accepts CSV \\
 Semantic tagging & Implemented & Qwen3-27B with Gemini fallback \\
 Preprocessing and cleaning & Implemented & Audit trail, quality scoring, KNN/iterative imputation \\
 Statistics and charts & Implemented & ECharts + matplotlib, 10+ chart types \\
@@ -591,18 +591,18 @@ Validation gate & Implemented & Tier-1 contract checks + Cohen's kappa gate \\
 Final report generation & Implemented & HTML/PDF via Jinja2/WeasyPrint \\
 Backend API & Implemented & FastAPI + SSE + PostgreSQL/File storage \\
 Frontend dashboard & Implemented & React 19 + Vite + TailwindCSS \\
-Multi-format expansion & Partial & CSV-primary; JSON/Parquet not implemented \\
+Multi-format expansion & Partial & Direct loader support exists; API upload remains CSV-only \\
 \hline
 \end{tabular}
 \end{table}
 
 \chapter{THEORETICAL APPROACH}
 
-The semantic tagging stage of this project relies on a Transformer-based Large Language Model (LLM) accessed through the Groq API, which serves the \texttt{qwen/qwen3.6-27b} model at high inference speed via purpose-built hardware. The system also includes an automatic Gemini fallback and a deterministic fallback for robustness. This chapter summarises only the concepts needed to understand how the model produces the JSON schema blueprint that drives preprocessing.
+The semantic tagging stage uses a Transformer-based Large Language Model (LLM) through the Groq API with the \texttt{qwen/qwen3.6-27b} model. The system also includes an automatic Gemini fallback and a deterministic fallback when LLM calls fail. The following sections explain how the model produces the JSON schema blueprint that drives preprocessing.
 
 \section{Large Language Model Theory}
 
-A Large Language Model is a neural network trained to model the probability distribution of natural language: given a sequence of previous tokens, it estimates the most likely next token. In this project the model is not used for free-form prose but as a structured reasoning component that reads column metadata and returns a strict JSON schema blueprint.
+A Large Language Model is a neural network trained to model the probability distribution of natural language. Given a sequence of previous tokens, it estimates the most likely next token. In this project, the model is used as a structured reasoning component, not as an unrestricted prose generator. It reads column metadata and returns a strict JSON schema blueprint.
 
 \subsection{Decoder-Only Transformer Architecture}
 Earlier sequence models such as RNNs and LSTMs processed tokens one step at a time, which made training slow and long-range relationships hard to capture. The Transformer replaces recurrence with a self-attention mechanism that relates every token to every other token in parallel \cite{vaswani2017}. Text-generation models such as the Qwen family use a \emph{decoder-only} Transformer: a stack of identical blocks in which a causal mask allows the prediction at position $t$ to attend only to positions $1$ to $t$. This left-to-right constraint makes the model autoregressive, generating one token at a time.
@@ -640,26 +640,26 @@ The model predicts the next token conditioned on all previous tokens and generat
 
 \section{Groq API and LLM Inference Architecture}
 
-The LLM backend of this system is the Groq API, which exposes the \texttt{qwen/qwen3.6-27b} model through an OpenAI-compatible REST interface. Groq achieves exceptionally low inference latency by running Transformer models on Language Processing Units (LPUs), custom silicon designed specifically for autoregressive token generation. The system also includes an automatic Gemini fallback (\texttt{gemini-flash-latest} and 3.x variants) and a deterministic fallback to ensure robustness when the primary model is unavailable. This section explains the inference model and how Agent~2 uses it to generate the JSON schema blueprint.
+The LLM backend uses the Groq API, which exposes the \texttt{qwen/qwen3.6-27b} model through an OpenAI-compatible REST interface. Groq runs Transformer models on Language Processing Units (LPUs), custom silicon designed for autoregressive token generation. The system also includes an automatic Gemini fallback (\texttt{gemini-flash-latest} and 3.x variants) and a deterministic fallback when the primary model is unavailable. This section explains the inference model and how Agent~2 uses it to generate the JSON schema blueprint.
 
 \subsection{Why the Groq API Is Used}
-The Groq API was selected over local inference runtimes for three principal reasons.
+The Groq API was selected over local inference runtimes for three reasons.
 
-\textbf{Inference speed.} LPU hardware is architected for the sequential, memory-bound nature of autoregressive decoding. Each forward pass generates one token, and the dominant cost is reading model weights from memory on every step. LPUs use on-chip SRAM instead of off-chip DRAM, eliminating memory bandwidth as the bottleneck. In practice, \texttt{qwen/qwen3.6-27b} on Groq produces hundreds of output tokens per second---far more than a CPU or consumer GPU running the same model weights locally. For a pipeline where Agent~2 may need to tag dozens of columns in one call, short round-trip times keep the overall pipeline latency acceptable.
+\textbf{Inference speed.} LPU hardware is designed for the sequential, memory-bound nature of autoregressive decoding. Each forward pass generates one token, and the dominant cost is reading model weights from memory on every step. LPUs use on-chip SRAM instead of off-chip DRAM, reducing the memory bandwidth bottleneck. For a pipeline where Agent~2 may need to tag dozens of columns in one call, short round-trip times help keep overall pipeline latency acceptable.
 
-\textbf{No local hardware requirement.} Running a multi-billion-parameter model locally demands tens of gigabytes of GPU VRAM. The Groq API allows the project to use a state-of-the-art open-weight model without imposing any GPU requirement on the developer's machine. This makes the system deployable on standard laptops and cloud VMs alike.
+\textbf{No local hardware requirement.} Running a multi-billion-parameter model locally demands tens of gigabytes of GPU VRAM. The Groq API allows the project to use an open-weight model without requiring a local GPU. This makes the system usable on standard laptops and cloud VMs.
 
-\textbf{Simplicity and cost control.} The API follows the same chat-completion contract as the OpenAI SDK. Agent~2 constructs a system prompt and a user message, sends a single HTTP POST request, and receives a JSON response. The official Python client (\texttt{groq}) abstracts authentication and retries. Usage-based pricing means the project incurs no fixed infrastructure cost, and because Agent~2 sends only column metadata and three sample values rather than full table rows, prompt token counts remain small.
+\textbf{Simplicity and cost control.} The API follows the same chat-completion contract as the OpenAI SDK. Agent~2 constructs a system prompt and a user message, sends a single HTTP POST request, and receives a JSON response. The official Python client (\texttt{groq}) handles authentication and retries. Usage-based pricing avoids fixed model-hosting infrastructure costs. Agent~2 sends only column metadata and three sample values rather than full table rows, which limits prompt size by design.
 
 \subsection{The Qwen3-27B Model}
 \texttt{qwen/qwen3.6-27b} is a multi-billion-parameter decoder-only Transformer released by the Qwen team. Its architecture follows the design described in Section~4.1 with several refinements that improve efficiency and long-context handling.
 
-\textbf{Grouped-Query Attention (GQA).} Standard multi-head attention stores one key--value head per query head. Grouped-Query Attention partitions the query heads into groups that share a single key--value head. Formally, if there are $H$ query heads organized into $G$ groups ($G < H$), the attention for query head $h$ in group $g$ is:
+\textbf{Grouped-Query Attention (GQA).} Standard multi-head attention stores one key-value head per query head. Grouped-Query Attention partitions the query heads into groups that share a single key-value head. Formally, if there are $H$ query heads organized into $G$ groups ($G < H$), the attention for query head $h$ in group $g$ is:
 \begin{equation}
 \text{GQA}_h(Q_h, K_g, V_g) = \text{Softmax}\!\left(\frac{Q_h K_g^{\top}}{\sqrt{d_k}}\right) V_g
 \label{eq:gqa}
 \end{equation}
-where $K_g$ and $V_g$ are the shared key and value matrices for group $g$ \cite{ainslie2023gqa}. GQA reduces the size of the KV cache proportionally to the group ratio $H/G$, which lowers memory bandwidth pressure during autoregressive decoding and is a key reason LPU-based inference is particularly effective with this model.
+where $K_g$ and $V_g$ are the shared key and value matrices for group $g$ \cite{ainslie2023gqa}. GQA reduces the size of the KV cache proportionally to the group ratio $H/G$, which lowers memory bandwidth pressure during autoregressive decoding and helps LPU-based inference run efficiently with this model.
 
 \textbf{RoPE positional encoding.} Instead of adding a fixed positional vector to each embedding, Qwen applies Rotary Position Embedding (RoPE), which encodes absolute position by rotating the query and key vectors before the dot product:
 \begin{equation}
@@ -693,20 +693,20 @@ RMSNorm omits the mean-centering step of LayerNorm \cite{zhang2019rmsnorm}. Beca
 Agent~2 calls the Groq API exactly once per tagging request (or per batch for wide schemas). The call flow is as follows.
 
 \begin{enumerate}
-  \item \textbf{Prompt construction.} \texttt{\_build\_llm\_prompt} assembles a \emph{system} message that specifies the required JSON schema format and valid tag values, and a \emph{user} message containing, for each column: the column name, the heuristically inferred type, the missing-value rate, and the first three sample values. This minimal context keeps the prompt under a few hundred tokens regardless of table size.
+	\item \textbf{Prompt construction.} \texttt{\_build\_llm\_prompt} assembles a \emph{system} message that specifies the required JSON schema format and valid tag values, and a \emph{user} message containing, for each column: the column name, the heuristically inferred type, the missing-value rate, and the first three sample values. This keeps the prompt limited to schema evidence rather than full table rows.
   \item \textbf{API request.} The Groq Python client sends a \texttt{chat.completions.create} request with \texttt{model="qwen/qwen3.6-27b"} and \texttt{temperature=0.1}, \texttt{reasoning\_effort="none"}. A temperature close to zero makes the softmax distribution (Equation~\ref{eq:softmax}) sharply peaked, so the model consistently selects the highest-probability token rather than sampling freely. This near-determinism is important because the output must be strictly parseable JSON.
   \item \textbf{Prompt processing.} On Groq's LPU cluster the prompt tokens are tokenized and embedded (Equation~\ref{eq:embed}), then passed through the decoder blocks of Qwen3-27B. Inside each block, GQA (Equation~\ref{eq:gqa}) computes position-aware attention using RoPE (Equation~\ref{eq:rope}), and the SwiGLU FFN (Equation~\ref{eq:swiglu}) applies non-linear gating. RMSNorm (Equation~\ref{eq:rmsnorm}) stabilizes each sub-layer. The final block projects to logits over the vocabulary and applies softmax to produce the next-token distribution.
   \item \textbf{KV cache and autoregressive generation.} After the prompt is processed, the key and value tensors for every prompt token are cached. Each subsequent output token is generated by running only the new token through the network, attending to the cached values. This KV-cache mechanism makes generation fast even for long prompts.
-  \item \textbf{Gemini failover.} If the Groq call fails or returns an unparseable response, the system automatically falls back to Google Gemini (\texttt{gemini-flash-latest}, then \texttt{gemini-3.6-flash}, \texttt{gemini-3.5-flash}, \texttt{gemini-2.5-flash}) through \texttt{\_call\_gemini\_json\_with\_failover}. If all LLM providers fail, \texttt{\_fallback\_blueprint} constructs a conservative schema from the locally sniffed types, ensuring the pipeline always has a usable blueprint.
-  \item \textbf{Response parsing.} The generated text is returned in the API response body. \texttt{\_parse\_schema\_blueprint\_response} extracts valid JSON from raw or code-fenced output; as a last resort it locates the outermost \texttt{\{...\}} span so that a stray formatting character does not discard an otherwise correct schema. If parsing fails after retries, \texttt{\_fallback\_blueprint} constructs a conservative schema from the locally sniffed types, ensuring the pipeline always has a usable blueprint.
+	\item \textbf{Gemini failover.} If the Groq call fails or returns an unparseable response, the system automatically falls back to Google Gemini (\texttt{gemini-flash-latest}, then \texttt{gemini-3.6-flash}, \texttt{gemini-3.5-flash}, \texttt{gemini-2.5-flash}) through \texttt{\_call\_gemini\_json\_with\_failover}. If all LLM providers fail, \texttt{\_fallback\_blueprint} constructs a conservative schema from the locally sniffed types, so the pipeline still has a usable blueprint.
+	\item \textbf{Response parsing.} The generated text is returned in the API response body. \texttt{\_parse\_schema\_blueprint\_response} extracts valid JSON from raw or code-fenced output; as a last resort it locates the outermost \texttt{\{...\}} span so that a stray formatting character does not discard an otherwise correct schema. If parsing fails after retries, \texttt{\_fallback\_blueprint} constructs a conservative schema from the locally sniffed types, so the pipeline still has a usable blueprint.
 \end{enumerate}
 
-This design keeps Agent~2 loosely coupled to the model provider: the entire LLM interaction is isolated inside a few functions (\texttt{\_build\_llm\_prompt}, the Groq/Gemini client calls, and \texttt{\_parse\_schema\_blueprint\_response}), so the backend can be swapped for another OpenAI-compatible endpoint without touching the rest of the pipeline.
+Agent~2 is loosely coupled to the model provider. The LLM interaction is isolated inside a few functions (\texttt{\_build\_llm\_prompt}, the Groq/Gemini client calls, and \texttt{\_parse\_schema\_blueprint\_response}), so another OpenAI-compatible endpoint could be used without changing the rest of the pipeline.
 
 \chapter{SYSTEM ARCHITECTURE AND METHODOLOGY}
 
 \section{Overall Pipeline}
-The backend pipeline is built as a directed sequence of agents using LangGraph's \texttt{StateGraph}. Each agent consumes the current \texttt{GraphState}, writes its own outputs back into the shared state, and passes the result to the next step. This keeps the workflow clear and makes debugging easier. The pipeline is orchestrated with conditional edges that gate the flow based on errors and validation results.
+The backend pipeline is built as a directed sequence of agents using LangGraph's \texttt{StateGraph}. Each agent reads the current \texttt{GraphState}, writes its outputs back into that state, and passes the result to the next step. This makes the workflow easier to inspect and debug. Conditional edges control whether execution continues, based on errors and validation results.
 
 \begin{figure}[H]
 \centering
@@ -723,9 +723,9 @@ The backend pipeline is built as a directed sequence of agents using LangGraph's
 \end{figure}
 
 \section{Shared State Design}
-The shared state (\texttt{GraphState}) contains the input path, the raw profile, the semantic blueprint, the cleaned dataset, the scaling parameters, the preprocessing log, the quality score, the statistics, the chart paths, an error list, and reliability metadata. This design allows each agent to focus on one responsibility while still keeping the whole workflow connected. The state also carries validation results, insight facts, narrative, and the final report path.
+The shared state (\texttt{GraphState}) contains the input path, raw profile, semantic blueprint, cleaned dataset, scaling parameters, preprocessing log, quality score, statistics, chart paths, errors, and reliability metadata. This lets each agent focus on one responsibility while the pipeline still keeps a single record of the run. The state also carries validation results, insight facts, narrative text, and the final report path.
 
-The state also carries reliability metadata. Each stage contributes a confidence score and evidence list, which helps the system decide whether a later stage should proceed. That is useful in the report because it shows that the project is not just generating outputs, but also measuring the reliability of those outputs.
+Each stage contributes a confidence score and evidence list. These values help the system decide whether later stages should proceed and let the final report show how reliable the outputs are.
 
 \section{LangGraph Orchestration and Conditional Routing}
 The pipeline is built with \texttt{langgraph.graph.StateGraph(GraphState)}. Nodes are \texttt{agent1..agent6}, with entry point \texttt{agent1}. Conditional edges gate the flow:
@@ -735,12 +735,12 @@ The pipeline is built with \texttt{langgraph.graph.StateGraph(GraphState)}. Node
 	\item After \textbf{Agent 2}: end if "Agent2" error or no \texttt{schema\_blueprint}, else $\rightarrow$ Agent 3.
 	\item After \textbf{Agent 3}: end only if \texttt{cleaned\_df is None} (non-fatal "Agent3:" warnings do not abort), else $\rightarrow$ Agent 4.
 	\item After \textbf{Agent 4}: end if "Agent4" error, else $\rightarrow$ Agent 5.
-	\item After \textbf{Agent 5}: end if "Agent5" error \textbf{or} \texttt{validation\_report["passed"]} is falsy — i.e. Agent 5 is a hard quality gate: a failed validation stops the pipeline before reporting, else $\rightarrow$ Agent 6.
+	\item After \textbf{Agent 5}: end if "Agent5" error \textbf{or} \texttt{validation\_report["passed"]} is falsy. Agent 5 is a hard quality gate: a failed validation stops the pipeline before reporting, else $\rightarrow$ Agent 6.
 	\item \textbf{Agent 6} $\rightarrow$ END.
 \end{itemize}
 
 \section{Reliability and Confidence Propagation}
-The system implements a reliability model where every stage contributes a confidence in $[0,1]$ into \texttt{reliability.stage\_confidence[stage]}. The overall confidence is the mean of stage confidences, and decision readiness is classified as \texttt{ready} ($\ge 0.85$), \texttt{needs\_review} ($\ge 0.65$), or \texttt{blocked} ($<0.65$). Evidence strings accumulate throughout the pipeline, providing transparency and auditability. The overall reliability is:
+The reliability model stores each stage's confidence in $[0,1]$ under \texttt{reliability.stage\_confidence[stage]}. Overall confidence is the mean of the available stage confidences, and decision readiness is classified as \texttt{ready} ($\ge 0.85$), \texttt{needs\_review} ($\ge 0.65$), or \texttt{blocked} ($<0.65$). Evidence strings accumulate throughout the pipeline so the final result can be audited. The overall reliability is:
 \begin{equation}
 \bar c = \frac{1}{N} \sum_{i=1}^{N} c_i
 \label{eq:overall-reliability}
@@ -748,7 +748,7 @@ The system implements a reliability model where every stage contributes a confid
 where $c_i$ is the confidence from agent $i$. This mechanism is implemented in \texttt{update\_reliability} in \texttt{backend/main.py}.
 
 \section{Backend Architecture}
-The FastAPI backend provides REST endpoints for authentication, file upload, job management, SSE progress streaming, report download, and a grounded RAG dataset chat.
+The FastAPI backend provides REST endpoints for authentication, file upload, job management, SSE progress streaming, report download, and grounded RAG dataset chat.
 
 \begin{figure}[H]
 \centering
@@ -761,13 +761,13 @@ The FastAPI backend provides REST endpoints for authentication, file upload, job
 \begin{itemize}
 	\item \textbf{App Factory:} \texttt{create\_app()} initializes routers, CORS, and global exception handlers.
 	\item \textbf{Job Manager:} Thread-safe \texttt{Job} dataclass with status, progress, events, and optional PostgreSQL (\texttt{PostgresJobStore}) or file-based (\texttt{FileJobStore}) persistence.
-	\item \textbf{Pipeline Runner:} Runs compiled LangGraph in a daemon thread, emitting SSE events via \texttt{\_MilestoneEmitter} at each agent completion and key milestones.
+	\item \textbf{Pipeline Runner:} Runs compiled LangGraph in a daemon thread, emitting SSE events via \texttt{\_MilestoneEmitter} at each agent completion and milestone.
 	\item \textbf{SSE:} \texttt{/api/analyze/\{job\_id\}/stream} provides real-time progress updates with polling and keepalive.
 	\item \textbf{RAG Chat:} Uses \texttt{BAAI/bge-base-en-v1.5} embeddings via Hugging Face Inference API, stores embeddings in pgvector, and grounds answers in retrieved facts and rows.
 \end{itemize}
 
 \subsection{API Endpoints}
-Key endpoints are summarized in Table \ref{tab:api-endpoints}.
+Table \ref{tab:api-endpoints} summarizes the main endpoints.
 
 \begin{table}[H]
 \centering
@@ -792,10 +792,10 @@ Endpoint & Method & Description \\
 \end{table}
 
 \section{Frontend Workflow}
-The React 19 frontend (\texttt{frontend/AnalyzeAI/}) provides a no-code interface for uploading datasets, monitoring agent progress, viewing results, and interacting with the data via RAG chat.
+The React 19 frontend (\texttt{frontend/AnalyzeAI/}) provides a web interface for uploading datasets, monitoring agent progress, viewing results, and interacting with the data through RAG chat.
 
 \begin{itemize}
-	\item \textbf{Stack:} React 19.2.7, react-router-dom 7.18.1, TailwindCSS 4.3.2, shadcn/radix-ui, framer-motion, Vite 8.1.0.
+	\item \textbf{Stack:} React 19.2.7, react-router-dom 7.18.1, TailwindCSS 4.3.2, local shadcn-style UI primitives, framer-motion, lucide-react, and Vite 8.1.0.
 	\item \textbf{Routing:} \texttt{/} (LandingPage), \texttt{/analyze} (AnalyzePage), \texttt{/analyze/:jobId} (result view), \texttt{/history} (HistoryPage), \texttt{/login}, \texttt{/signup}, \texttt{/profile}.
 	\item \textbf{Authentication:} \texttt{AuthContext} stores user in localStorage; \texttt{RequireAuth} guards protected routes.
 	\item \textbf{SSE Consumption:} \texttt{subscribeToJobStream} uses \texttt{EventSource} to listen for \texttt{csv\_loaded}, \texttt{pipeline\_started}, \texttt{agent\_progress}, \texttt{charts\_generated}, \texttt{validation\_passed/failed}, \texttt{report\_generated}, and \texttt{pipeline\_finished/failed} events.
@@ -814,7 +814,7 @@ The React 19 frontend (\texttt{frontend/AnalyzeAI/}) provides a no-code interfac
 \section{Agent 1: Structural Profiler}
 
 \subsection{Overview and Purpose}
-Agent~1 (\texttt{agent1\_structural\_profiler}) is the entry point of the pipeline. It reads the input file and records a factual description of its structure, performing no cleaning or inference so that every later stage works from an unmodified baseline.
+Agent~1 (\texttt{agent1\_structural\_profiler}) is the entry point of the pipeline. It reads the input file and records a factual description of its structure. It performs no cleaning or inference, so later stages work from an unmodified baseline.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -825,7 +825,7 @@ Agent~1 (\texttt{agent1\_structural\_profiler}) is the entry point of the pipeli
 \subsection{Processing Workflow}
 The agent proceeds in four ordered stages, summarised in Figure~\ref{fig:agent1}:
 \begin{enumerate}
-	\item \texttt{\_load\_dataframe} selects a reader based on the file extension, routing Excel and CSV files to dedicated loaders.
+	\item \texttt{\_load\_dataframe} selects a reader based on the file extension, routing CSV/TSV-style text, Excel, JSON/JSONL, and Parquet files to dedicated loaders.
 	\item the chosen reader tolerates real-world messiness such as mixed delimiters and non-UTF encodings.
 	\item each column is measured for type, missingness, uniqueness, and sample values.
 	\item a confidence value is computed from the observed missingness and duplication.
@@ -838,8 +838,8 @@ The agent proceeds in four ordered stages, summarised in Figure~\ref{fig:agent1}
 \label{fig:agent1}
 \end{figure}
 
-\subsection{Key Functions}
-\textbf{\texttt{\_read\_mixed\_delimiter\_csv}: resilient CSV ingestion.} Business exports are often inconsistent, mixing comma- and semicolon-separated rows under non-UTF encodings. This function first reads the text through \texttt{\_read\_csv\_lines} (trying \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1}), then detects the delimiter \emph{per line} and, when the field count does not match the header, retries with the alternate delimiter before raising an error (Figure~\ref{fig:code-agent1-csv}). It matters because a wrong delimiter would silently merge columns and corrupt every later stage. The column profiling that follows records each column's dtype, missing count and rate, unique count, and first three sample values, which Agent~2 later uses instead of the full dataset.
+\subsection{Main Functions}
+\textbf{\texttt{\_read\_mixed\_delimiter\_csv}: resilient CSV ingestion.} Business exports can mix comma- and semicolon-separated rows under non-UTF encodings. This function first reads the text through \texttt{\_read\_csv\_lines} (trying \texttt{utf-8-sig}, \texttt{cp1252}, and \texttt{latin-1}), then detects the delimiter \emph{per line}. If the field count does not match the header, it retries with the alternate delimiter before raising an error (Figure~\ref{fig:code-agent1-csv}). A wrong delimiter would merge columns and corrupt later stages, so the parser fails explicitly when it cannot recover. The profiling step records each column's dtype, missing count and rate, unique count, and first three sample values, which Agent~2 uses instead of the full dataset.
 
 \begin{figure}[H]
 \centering
@@ -879,7 +879,7 @@ where $m$ is the overall missing rate and $d$ the duplicate rate as percentages.
 \section{Agent 2: Semantic Tagger}
 
 \subsection{Overview and Purpose}
-Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a \texttt{schema\_blueprint}: a per-column description of the intended type, semantic role, and cleaning policy. Where Agent~1 only observed the data, Agent~2 assigns meaning to each column so that preprocessing can be driven by rules rather than guesswork. When the language model is invoked, it is called through the Groq API (\texttt{qwen/qwen3.6-27b}); the inference mechanics are described in Chapter~4 and are not repeated here.
+Agent~2 (\texttt{agent2\_semantic\_tagger}) turns the structural profile into a \texttt{schema\_blueprint}, which describes each column's intended type, semantic role, and cleaning policy. Agent~1 records what the data looks like; Agent~2 assigns meaning so preprocessing can follow rules rather than guesswork. When the language model is invoked, it is called through the Groq API (\texttt{qwen/qwen3.6-27b}); Chapter~4 describes that inference process.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -917,7 +917,7 @@ Finally, the blueprint is enriched: missing tags are filled, a missingness polic
 \label{fig:agent2-3}
 \end{figure}
 
-\subsection{Key Functions}
+\subsection{Main Functions}
 \textbf{\texttt{\_infer\_intended\_types}} performs local type sniffing without the model, using the Pandas dtype and an 80\% parseability threshold for object columns; its result seeds both the prompt and the fallback, so every column has a defensible type even when the LLM is unavailable. \textbf{\texttt{\_build\_llm\_prompt}} sends only column metadata and three samples rather than the full table, and a fixed system prompt requires strictly valid JSON at a low temperature (0.1). For wide schemas, \textbf{\texttt{\_call\_llm\_for\_schema\_blueprint\_with\_retry}} splits columns into batches and, if a truncated response fails to parse, recursively halves the batch and merges the results, which lets the agent tag very wide datasets reliably. \textbf{\texttt{\_parse\_schema\_blueprint\_response}} accepts raw or fenced JSON and, as a last resort, extracts the outermost \texttt{\{...\}} span, so a single formatting quirk does not discard a valid schema. \textbf{\texttt{\_call\_gemini\_json\_with\_failover}} iterates through Gemini model candidates if the Groq call fails.
 
 \subsection{Reliability and Pipeline Interaction}
@@ -926,7 +926,7 @@ After tagging, missing \texttt{semantic\_tag} values are filled and each column 
 \section{Agent 3: Preprocessor}
 
 \subsection{Overview and Purpose}
-Agent~3 (\texttt{agent3\_preprocessor}) performs deterministic cleaning and feature construction, guided entirely by the \texttt{schema\_blueprint} from Agent~2. It is the stage that turns raw, inconsistent values into a trustworthy, analysis-ready table. Unlike Agent~2, it uses no language model at all: every transformation is a fixed, logged rule, which makes the output reproducible and auditable.
+Agent~3 (\texttt{agent3\_preprocessor}) performs deterministic cleaning and feature construction, guided by the \texttt{schema\_blueprint} from Agent~2. It turns raw values into an analysis-ready table. Unlike Agent~2, it uses no language model: every transformation is a fixed, logged rule, which makes the output reproducible and auditable.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -935,7 +935,7 @@ Agent~3 (\texttt{agent3\_preprocessor}) performs deterministic cleaning and feat
 \end{itemize}
 
 \subsection{Profile Selection}
-Before any cleaning, \texttt{\_build\_preprocessing\_config} chooses a \texttt{strict}, \texttt{balanced}, or \texttt{lenient} configuration profile. A profile pinned by the caller is always honoured; otherwise \texttt{\_detect\_dataset\_domain} inspects finance keywords and currency/percentage tags and selects \texttt{strict} for finance and sales data. Each profile fixes the currency limits, the maximum plausible tax rate, the reconciliation tolerances, and the weights used later in the quality score. The profiles are summarized in Table \ref{tab:preprocessing-profiles}.
+Before cleaning, \texttt{\_build\_preprocessing\_config} chooses a \texttt{strict}, \texttt{balanced}, or \texttt{lenient} configuration profile. A profile pinned by the caller is always honoured; otherwise \texttt{\_detect\_dataset\_domain} inspects finance keywords and currency/percentage tags and selects \texttt{strict} for finance and sales data. Each profile fixes the currency limits, maximum plausible tax rate, reconciliation tolerances, and quality-score weights. Table \ref{tab:preprocessing-profiles} summarizes the profiles.
 
 \begin{table}[H]
 \centering
@@ -955,7 +955,7 @@ lenient & 1.0e10 & 0.60 & 0.05 & 2.0 & 0.40 / 0.30 / 0.30 \\
 \end{table}
 
 \subsection{Processing Workflow}
-Cleaning runs as an ordered, fully logged sequence of steps; each step records its per-column null differences so the effect of every action is visible. The stages, shown in Figure~\ref{fig:agent3}, are:
+Cleaning runs as an ordered, logged sequence. Each step records per-column null differences so its effect is visible. The stages, shown in Figure~\ref{fig:agent3}, are:
 \begin{enumerate}
 	\item \textbf{Step 0: Deduplication} \texttt{dedup\_exact\_rows} removes exact duplicate rows, asserts the count matches Agent~1's profile, and aborts through \texttt{\_assert\_row\_survival\_or\_abort} if fewer than half the rows survive (a safeguard against accidental data loss).
 	\item \textbf{Step 1: Currency cleaning} \texttt{\_clean\_currency\_values} normalises monetary text and writes a \texttt{\_parse\_failed} flag for values it cannot parse.
@@ -976,9 +976,9 @@ Cleaning runs as an ordered, fully logged sequence of steps; each step records i
 \label{fig:agent3}
 \end{figure}
 
-\subsection{Key Functions}
+\subsection{Main Functions}
 
-\textbf{\texttt{\_normalize\_currency\_text}: monetary parsing.} Financial exports mix symbols, currency codes, parenthetical negatives such as \texttt{(123)}, and locale-specific separators (for example the European \texttt{1.234,56} versus the US \texttt{1,234.56}). This function converts all of these to a plain numeric string so the values can be cast to \texttt{float}. Its most important part, shown in Figure~\ref{fig:code-agent3-currency}, decides which separator is the decimal point by comparing the positions of the last comma and last dot, then strips the thousands separator. Without this step, monetary columns would be read as text and every downstream financial metric would be impossible.
+\textbf{\texttt{\_normalize\_currency\_text}: monetary parsing.} Financial exports can contain symbols, currency codes, parenthetical negatives such as \texttt{(123)}, and locale-specific separators (for example the European \texttt{1.234,56} versus the US \texttt{1,234.56}). This function converts those values to plain numeric strings so they can be cast to \texttt{float}. Figure~\ref{fig:code-agent3-currency} shows the separator logic: the function compares the last comma and last dot to decide which separator is decimal, then strips the thousands separator. Without this step, monetary columns would remain text and downstream financial metrics could not be computed.
 
 \begin{figure}[H]
 \centering
@@ -1036,15 +1036,15 @@ none & No imputation & Any \\
 \end{tabular}
 \end{table}
 
-\textbf{Other key functions.} \texttt{\_scale\_columns} applies Min-Max normalisation,
+\textbf{Other functions.} \texttt{\_scale\_columns} applies Min-Max normalisation,
 \begin{equation}
 x' = \frac{x - x_{\min}}{x_{\max} - x_{\min}}
 \label{eq:minmax}
 \end{equation}
-while keeping \texttt{\_raw} and \texttt{\_scaled} copies and storing $x_{\min}$ and $x_{\max}$ in \texttt{scaling\_params}, so the transform can be inverted later. \texttt{\_derive\_business\_metrics} uses whole-word matching (\texttt{\_find\_col}, which avoids false hits such as ``count'' matching ``Country'') to locate revenue, cost, unit, price, discount, and budget columns, then derives profit, margin, revenue per unit, discount percentage, and budget variance wherever the required columns exist, giving Agent~4 richer fields to summarise.
+while keeping \texttt{\_raw} and \texttt{\_scaled} copies and storing $x_{\min}$ and $x_{\max}$ in \texttt{scaling\_params}, so the transform can be inverted later. \texttt{\_derive\_business\_metrics} uses whole-word matching (\texttt{\_find\_col}, which avoids false hits such as ``count'' matching ``Country'') to locate revenue, cost, unit, price, discount, and budget columns. It then derives profit, margin, revenue per unit, discount percentage, and budget variance wherever the required columns exist, giving Agent~4 additional fields to summarise.
 
 \subsection{Validation and Data Quality}
-After the transformation steps, \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} flag invalid counts and implausible tax rates into a \texttt{ColumnLedger}, and \texttt{\_compute\_enhanced\_quality\_score} combines the remaining null rate, the validation-failure rate, and the duplication rate into a single 0 to 100 \texttt{data\_quality} score. The ledger and score make the cleaning process transparent: a reviewer can see not only what the data became, but how much of it had to be corrected. The quality score is:
+After transformation, \texttt{\_validate\_count\_ranges} and \texttt{\_validate\_financial\_constraints} record invalid counts and implausible tax rates in a \texttt{ColumnLedger}. \texttt{\_compute\_enhanced\_quality\_score} combines the remaining null rate, validation-failure rate, and duplication rate into a single 0 to 100 \texttt{data\_quality} score. The ledger and score make the cleaning process reviewable: they show both the final data state and how much correction was needed. The quality score is:
 \begin{equation}
 \begin{aligned}
 Q &= w_{c}\,S_{c} + w_{v}\,S_{v} + w_{d}\,S_{d}, \\
@@ -1060,7 +1060,7 @@ Every step appends to \texttt{preprocessing\_log} with its null differences, and
 \section{Agent 4: Statistical Analysis}
 
 \subsection{Overview and Purpose}
-Agent~4 (\texttt{agent4\_analysis}) turns the cleaned dataset into descriptive statistics and chart artifacts. It is the stage that produces measurable evidence about the data: summary statistics, correlations, trends, rankings, seasonality, anomalies, and regression fits, each accompanied by a saved figure. Before running, it clears previous PNGs with \texttt{\_clear\_chart\_dir} and writes every figure through \texttt{\_save} into \texttt{outputs/charts}, so each run starts from a clean, reproducible set of outputs.
+Agent~4 (\texttt{agent4\_analysis}) turns the cleaned dataset into descriptive statistics and chart artifacts. It produces summary statistics, correlations, trends, rankings, seasonality, anomalies, and regression fits, with saved figures for the charted results. Before running, it clears previous PNGs with \texttt{\_clear\_chart\_dir} and writes each figure through \texttt{\_save} into \texttt{outputs/charts}, so each run starts from a clean output directory.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -1073,7 +1073,7 @@ The agent runs a fixed battery of analyses over the selected columns, illustrate
 \begin{enumerate}
 	\item \textbf{Column selection} restricts analysis to meaningful fields, including \texttt{flag\_leakage\_columns} to exclude identifiers and leakage columns.
 	\item \textbf{Descriptive statistics} and a \textbf{correlation} matrix (Pearson and Spearman) summarise each column and the relationships between them.
-	\item \textbf{Growth rates} (MoM, QoQ), \textbf{rankings}, and \textbf{seasonality} describe how key measures change over time and across categories.
+	\item \textbf{Growth rates} (MoM, QoQ), \textbf{rankings}, and \textbf{seasonality} describe how main measures change over time and across categories.
 	\item \textbf{Anomaly detection} (skew-aware z-score, log-z, IQR 3$\times$ far-out fence) and \textbf{regression trends} highlight unusual values and directional change.
 	\item \textbf{Distribution and derived-metric charts} visualise spread and the business fields created in Agent~3.
 	\item \textbf{Cross-dimensional analyses} (6 types) explore interactions like discount-return-rate, category-margin-trend, etc.
@@ -1087,11 +1087,11 @@ The agent runs a fixed battery of analyses over the selected columns, illustrate
 \label{fig:agent4}
 \end{figure}
 
-\subsection{Key Functions}
+\subsection{Main Functions}
 
 \textbf{Column selection.} \texttt{\_numeric\_cols} and \texttt{\_categorical\_cols} decide which columns are worth analysing, excluding validation columns (\texttt{\_parse\_failed}, \texttt{\_range\_failed}), scaling backups (\texttt{\_raw}, \texttt{\_scaled}), identifiers, datetime columns, leakage columns, and any column marked \texttt{analysis\_allowed = false}. They run at the start of almost every other function, preventing meaningless output such as correlating an ID column. \texttt{flag\_leakage\_columns} detects leakage via name patterns ({classifier, naive\_bayes, \_score, \_proba, predicted\_, id, index, clientnum, customerid, \_uuid}) and correlation signatures ($|r|>0.98$ with exactly one column AND $|r|<0.1$ with $\ge n-2$ others).
 
-\textbf{Summarisation.} \texttt{\_descriptive\_stats} computes count, mean, median, standard deviation, variance, quartiles, skewness, and kurtosis for each numeric column, while \texttt{\_correlation} computes Pearson and Spearman matrices, renders a heatmap, and records the "strong" pairs ($|r| \geq 0.5$, labelled strong when $|r| \geq 0.7$), which points the reporting stage at the relationships most worth explaining.
+\textbf{Summarisation.} \texttt{\_descriptive\_stats} computes count, mean, median, standard deviation, variance, quartiles, skewness, and kurtosis for each numeric column. \texttt{\_correlation} computes Pearson and Spearman matrices, renders a heatmap, and records the "strong" pairs ($|r| \geq 0.5$, labelled strong when $|r| \geq 0.7$), which gives the reporting stage the relationships most worth explaining.
 
 \textbf{\texttt{\_detect\_anomalies}: statistical outlier flagging.} This function is skew-aware:
 \begin{itemize}
@@ -1099,7 +1099,7 @@ The agent runs a fixed battery of analyses over the selected columns, illustrate
 	\item If $|\text{skew}| > 1.0$ and positive: use log-z on $\log(1+x)$.
 	\item If heavy skew or negative values: use IQR with 3.0$\times$ far-out fence: lower $= Q_1 - 3.0 \cdot \text{IQR}$, upper $= Q_3 + 3.0 \cdot \text{IQR}$.
 \end{itemize}
-It reports both the per-column anomalies and the count of unique affected rows, which lets the pipeline judge how "noisy" a dataset is. Columns with too few points or zero variance are skipped so the score stays well defined. The core z-score loop is shown in Figure~\ref{fig:code-agent4-anom}.
+It reports both per-column anomalies and the count of unique affected rows, which helps the pipeline estimate how noisy the dataset is. Columns with too few points or zero variance are skipped so the score stays well defined. Figure~\ref{fig:code-agent4-anom} shows the core z-score loop.
 
 \begin{figure}[H]
 \centering
@@ -1131,7 +1131,7 @@ g_t = \frac{v_t - v_{t-1}}{v_{t-1}} \times 100
 \hat{y} = \beta_1 x + \beta_0, \quad R^2 = r^2, \quad \text{significant iff } p < 0.05
 \label{eq:ols}
 \end{equation}
-recording slope, intercept, $R^2$, $p$-value, and whether the trend is significant ($p < 0.05$). Together these functions convert the cleaned table into the directional insights a human analyst would look for.
+It records the slope, intercept, $R^2$, $p$-value, and whether the trend is significant ($p < 0.05$). Together, these functions convert the cleaned table into the directional findings a human analyst would usually inspect.
 
 \textbf{Chart planning and cross-dimensional analysis.} \texttt{chart\_planner.py} scores chart candidates using:
 \begin{itemize}
@@ -1151,7 +1151,7 @@ The agent writes the \texttt{stats} dictionary and \texttt{chart\_paths}, update
 \section{Agent 5: Output Validation \& Trust Gate}
 
 \subsection{Overview and Purpose}
-Agent~5 (\texttt{agent5\_output\_validator}) is the quality gate that ensures only trustworthy outputs proceed to report generation. It performs deterministic contract checks and a Cohen's kappa agreement test between the LLM's semantic tags and heuristic type sniffing, providing a ground-truth-free measure of tag reliability.
+Agent~5 (\texttt{agent5\_output\_validator}) is the quality gate before report generation. It performs deterministic contract checks and a Cohen's kappa agreement test between the LLM's semantic tags and heuristic type sniffing, giving the system a ground-truth-free measure of tag reliability.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -1189,7 +1189,7 @@ The overall validation score is:
 \text{VS} = 100 \cdot \frac{\text{passed} + 0.5 \cdot \text{warned}}{\text{total}}
 \label{eq:validation-score}
 \end{equation}
-The pipeline passes (\texttt{passed = True}) iff \texttt{failed\_checks == 0}. A failed validation stops the pipeline before Agent~6, ensuring that unreliable outputs never reach the report.
+The pipeline passes (\texttt{passed = True}) iff \texttt{failed\_checks == 0}. A failed validation stops the pipeline before Agent~6, so unchecked outputs do not reach the report.
 
 \begin{figure}[H]
 \centering
@@ -1201,7 +1201,7 @@ The pipeline passes (\texttt{passed = True}) iff \texttt{failed\_checks == 0}. A
 \section{Agent 6: Insight Report Generator}
 
 \subsection{Overview and Purpose}
-Agent~6 (\texttt{agent6\_insight\_report\_generator}) synthesizes the validated statistics, charts, and facts into a comprehensive HTML/PDF report. It combines deterministic fact extraction with LLM-generated narrative, claim grounding, and a final hybrid composition that prioritizes verified content.
+Agent~6 (\texttt{agent6\_insight\_report\_generator}) turns validated statistics, charts, and facts into an HTML/PDF report. It combines deterministic fact extraction with LLM-generated narrative, claim grounding, and a hybrid composition step that prioritizes verified content.
 
 \subsection{Inputs and Outputs}
 \begin{itemize}
@@ -1248,13 +1248,13 @@ and the overall report confidence is $0.95$ (LLM narrative) or $0.55$ (fallback)
 \texttt{\_compose\_hybrid\_narrative} always renders the deterministic floor, then layers the LLM output only where it passes hygiene (valid story, no jargon via \texttt{\_JARGON\_PATTERNS}, known chart ids). \texttt{\_lint\_plain\_language} swaps residual jargon back to deterministic wording.
 
 \subsubsection{5. Recommendation Grounding}
-\texttt{\_ground\_recommendations} ensures each recommendation anchors to a reported finding and traceable money figures.
+\texttt{\_ground\_recommendations} checks that each recommendation is anchored to a reported finding and traceable money figures.
 
 \subsubsection{6. Table-Cell and Raw-Column Guards}
 \texttt{\_validate\_no\_empty\_required\_cells} and \texttt{\_validate\_raw\_column\_count} fail loudly on empty required cells or shape drift.
 
 \subsubsection{7. Rendering}
-The report is rendered using Jinja2 (\texttt{insight\_report.html.jinja}) with base64-embedded PNGs and embedded ECharts option JSON for interactive charts. KPI hero cards and narrative sections are grouped. \texttt{WeasyPrint} converts HTML to PDF, with a graceful fallback to HTML if PDF libraries are unavailable. Output is saved to \texttt{outputs/reports/<run\_id>/insight\_report.{pdf|html}}.
+The report is rendered with Jinja2 (\texttt{insight\_report.html.jinja}) using base64-embedded PNGs and embedded ECharts option JSON for interactive charts. KPI cards and narrative sections are grouped in the template. \texttt{WeasyPrint} converts HTML to PDF, with an HTML fallback if PDF libraries are unavailable. Output is saved to \texttt{outputs/reports/<run\_id>/insight\_report.{pdf|html}}.
 
 \begin{figure}[H]
 \centering
@@ -1269,21 +1269,21 @@ The report is rendered using Jinja2 (\texttt{insight\_report.html.jinja}) with b
 The FastAPI app is created via \texttt{create\_app()}, which registers routers for health, auth, analysis, reports, jobs, and chat. CORS is enabled via \texttt{middleware/cors.py}. Configuration is managed by \texttt{Settings} (via \texttt{@lru\_cache}) with environment variables for uploads directory, outputs, max upload size (50 MB), allowed extensions (`.csv`), SSE poll interval (0.15s), keepalive (15s), max concurrent jobs (4), job TTL (3600s), PostgreSQL connection, RAG embedding model (\texttt{BAAI/bge-base-en-v1.5}), and Hugging Face token.
 
 \subsection{Endpoints}
-Key endpoints are summarized in Table \ref{tab:api-endpoints}. Authentication uses JWT-style tokens with PBKDF2-SHA256 password hashing (via \texttt{passlib}). User and job data are stored in PostgreSQL tables (\texttt{app\_users}, \texttt{analysis\_jobs}) with a file-based fallback (\texttt{outputs/analysis\_jobs.json}) if PostgreSQL is unavailable.
+Table \ref{tab:api-endpoints} summarizes the main endpoints. Authentication uses JWT-style tokens with PBKDF2-SHA256 password hashing (via \texttt{passlib}). User and job data are stored in PostgreSQL tables (\texttt{app\_users}, \texttt{analysis\_jobs}) with a file-based fallback (\texttt{outputs/analysis\_jobs.json}) if PostgreSQL is unavailable.
 
 \subsection{Job Manager and Pipeline Runner}
-The \texttt{JobManager} maintains thread-safe \texttt{Job} dataclasses with status (queued/processing/completed/failed), per-agent progress, append-only events for SSE, state, result, chat history, and RAG status. Jobs are persisted via \texttt{PostgresJobStore} or \texttt{FileJobStore}. The \texttt{PipelineRunner} runs the compiled LangGraph in a daemon thread, streaming values and emitting SSE events at each agent completion and key milestone.
+The \texttt{JobManager} maintains thread-safe \texttt{Job} dataclasses with status (queued/processing/completed/failed), per-agent progress, append-only events for SSE, state, result, chat history, and RAG status. Jobs are persisted through \texttt{PostgresJobStore} or \texttt{FileJobStore}. The \texttt{PipelineRunner} runs the compiled LangGraph in a daemon thread, streams values, and emits SSE events when agents complete and milestones are reached.
 
 \subsection{SSE Streaming}
 Server-Sent Events are implemented in \texttt{sse.py} with format: \verb|event: <name>\n data: <json>\n\n|. Past events are replayed on connection, polling occurs every 0.15s, keepalive is sent every 15s, and the stream closes on terminal events. The stream is multi-subscriber safe.
 
 \subsection{RAG Dataset Chat}
-The RAG service uses \texttt{BAAI/bge-base-en-v1.5} embeddings via the Hugging Face Inference API when the required \texttt{DATABASE\_URL} and Hugging Face token are configured. pgvector stores embeddings for row-docs from the original uploaded CSV and fact-docs derived from the generated analysis context. During retrieval, the service retrieves top row documents (default $K=8$), top column/statistic fact documents (default $K=6$), and always includes important dataset-wide facts such as summaries, validation, correlations, rankings, anomalies, and existing charts. The chat service passes the retrieved context and recent chat history to Groq $\rightarrow$ Gemini $\rightarrow$ deterministic fallback for response generation. If the database or embedding service is unavailable, the implemented fallback answers from the deterministic summary facts rather than claiming full vector retrieval. It can optionally generate a fresh chart based on the query.
+The RAG service uses \texttt{BAAI/bge-base-en-v1.5} embeddings via the Hugging Face Inference API when the required \texttt{DATABASE\_URL} and Hugging Face token are configured. pgvector stores embeddings for row documents from the original uploaded CSV and fact documents derived from the generated analysis context. During retrieval, the service fetches top row documents (default $K=8$), top column/statistic fact documents (default $K=6$), and always includes dataset-wide facts such as summaries, validation results, correlations, rankings, anomalies, and existing charts. The chat service passes the retrieved context and recent chat history to Groq $\rightarrow$ Gemini $\rightarrow$ deterministic fallback for response generation. If the database or embedding service is unavailable, the fallback answers from deterministic summary facts rather than claiming vector retrieval. It can also generate a fresh chart based on the query.
 
 \section{Frontend Implementation}
 
 \subsection{Stack and Structure}
-The frontend (\texttt{frontend/AnalyzeAI/}) uses React 19.2.7, react-router-dom 7.18.1, TailwindCSS 4.3.2, shadcn/radix-ui, framer-motion, and Vite 8.1.0. No Redux is used; state is managed via React Context (\texttt{AuthContext}, \texttt{ThemeContext}) and per-page useState. Charts are rendered from backend ECharts JSON; there is no npm charting library.
+The frontend (\texttt{frontend/AnalyzeAI/}) uses React 19.2.7, react-router-dom 7.18.1, TailwindCSS 4.3.2, local shadcn-style UI primitives built with class-variance-authority, framer-motion, lucide-react, and Vite 8.1.0. No Redux is used; state is managed via React Context (\texttt{AuthContext}, \texttt{ThemeContext}) and per-page useState. Charts are rendered from backend ECharts JSON; there is no npm charting library.
 
 \begin{figure}[H]
 \centering
@@ -1298,14 +1298,14 @@ BrowserRouter provides routes: \texttt{/} (LandingPage), \texttt{/analyze} + \te
 \subsection{API Client and SSE}
 The API client (\texttt{src/lib/api.js}) provides \texttt{analyzeCsv} (FormData upload), \texttt{subscribeToJobStream} (EventSource listening for all event types), \texttt{fetchJobResult}, \texttt{fetchJobs}, \texttt{chat}, and \texttt{reportDownloadUrl}. The EventSource listens for \texttt{csv\_loaded}, \texttt{pipeline\_started}, \texttt{agent\_progress}, \texttt{charts\_generated}, \texttt{validation\_passed/failed}, \texttt{report\_generated}, \texttt{pipeline\_finished/completed/failed}, and \texttt{error}.
 
-\subsection{Key Components}
+\subsection{Main Components}
 - \textbf{AnalyzePage:} Handles file upload, displays live agent progress with color coding (blue for Agent 1, cyan, emerald, amber, rose, violet), shows results dashboard with KPI cards, and includes \texttt{DatasetChat} for grounded Q\&A.
 - \textbf{HistoryPage:} Lists past analyses with rows, cols, quality, confidence, duration.
-- \textbf{AppNavbar, ThemeToggle, shadcn/radix UI primitives.}
+- \textbf{AppNavbar, ThemeToggle, and local reusable UI primitives.}
 
 \chapter{RESULTS AND ANALYSIS}
 
-This chapter presents the results from a complete end-to-end run of the pipeline on the \texttt{10000 Sales Records.csv} dataset. The outputs include per-agent logs, diagnostic JSON, generated charts, and the final HTML/PDF report. All results are derived from actual executions of the implemented codebase.
+The results below come from a complete pipeline run on the \texttt{10000 Sales Records.csv} dataset. The outputs include per-agent logs, diagnostic JSON, generated charts, and the final HTML/PDF report. All reported results come from executions of the implemented codebase.
 
 \section{Pipeline Execution Summary}
 
@@ -1323,7 +1323,7 @@ A complete run on the sample dataset produces the following per-stage summary (c
 \section{Per-Agent Outputs}
 
 \subsection{Agent 1: Structural Profiling}
-The agent successfully loaded the CSV file, detected the correct delimiter (comma), and profiled all 14 columns. No missing values or duplicate rows were detected in this sample. The raw profile served as the baseline for all downstream stages.
+The agent loaded the CSV file, detected the comma delimiter, and profiled all 14 columns. No missing values or duplicate rows were detected in this sample. The raw profile became the baseline for all downstream stages.
 
 \subsection{Agent 2: Semantic Tagging}
 Agent 2 produced a 14-column schema blueprint (the LLM output is used when available, with a heuristic fallback). Representative tags from the sample run:
@@ -1351,7 +1351,7 @@ Using the automatically selected \texttt{strict} profile (finance\_sales domain)
 The cleaned dataset expanded from 14 to 58 columns due to one-hot encoding and derived features, with a data-quality score of 100.0/100 and no flagged validation issues.
 
 \subsection{Agent 4: Statistical Analysis and Visualization}
-Agent 4 produced descriptive statistics, correlations, trends, and 16 charts (a representative subset is listed in Table \ref{tab:generated-charts}). Key findings on the sample run:
+Agent 4 produced descriptive statistics, correlations, trends, and 16 charts. Table \ref{tab:generated-charts} lists a representative subset. The sample run produced these findings:
 \begin{itemize}
 	\item \textbf{Descriptive stats:} 22 numeric columns were summarised (count, mean, median, standard deviation, variance, quartiles, skewness, kurtosis).
 	\item \textbf{Correlation:} 10 pairs with $|r| \ge 0.5$ were identified. The strongest was \texttt{Unit Price} vs \texttt{Unit Cost} ($r=0.99$), followed by \texttt{Unit Price} vs \texttt{Total Cost} ($r=0.75$) and \texttt{Unit Price} vs \texttt{Total Revenue} ($r=0.73$); \texttt{Units Sold} correlated moderately with \texttt{Total Profit} ($r=0.60$) and \texttt{Total Revenue} ($r=0.52$).
@@ -1415,7 +1415,7 @@ Interpretation in this project & Semantic typing passed the agreement gate; this
 \end{table}
 
 \subsection{Agent 6: Report Generation}
-The agent extracted deterministic facts, generated a narrative with Groq (Qwen3-27B), and grounded every numeric claim: 21 of 21 checked claims matched the computed facts (grounding confidence 1.0). The report includes KPI cards, the charts, a plain-language executive summary, key findings, a three-part story (what happened / why / next), recommendations, risks, and a glossary. On the test machine, WeasyPrint's native libraries were not installed, so the report was written as a self-contained HTML file (\texttt{insight\_report.html}); the same code produces a PDF when those libraries are present, demonstrating the documented graceful fallback.
+The agent extracted deterministic facts, generated a narrative with Groq (Qwen3-27B), and grounded every numeric claim: 21 of 21 checked claims matched the computed facts (grounding confidence 1.0). The report includes KPI cards, charts, a plain-language executive summary, findings, a three-part story (what happened / why / next), recommendations, risks, and a glossary. On the test machine, WeasyPrint's native libraries were not installed, so the report was written as a self-contained HTML file (\texttt{insight\_report.html}); the same code produces a PDF when those libraries are present.
 
 \section{Performance and Reliability}
 
@@ -1430,7 +1430,7 @@ Table \ref{tab:reliability-results} shows the per-stage confidence scores and ov
 Stage & Confidence & Evidence & Readiness \\
 \hline
 Agent 1 & 1.00 & No missing values or duplicates & ready \\
-Agent 2 & \textit{n/a} & LLM--heuristic agreement $\kappa=1.0$ & ready \\
+Agent 2 & \textit{n/a} & LLM-to-heuristic agreement $\kappa=1.0$ & ready \\
 Agent 3 & 1.00 & Quality = 100.0/100 & ready \\
 Agent 4 & 0.90 & Statistics produced, 16 charts & ready \\
 Agent 5 & 1.00 & 9/9 checks passed & ready \\
@@ -1442,7 +1442,7 @@ Overall & 0.97 & \multicolumn{2}{p{8cm}}{Mean of the five stages reporting a num
 \end{table}
 
 \subsection{API Usage and Runtime Observability}
-The implemented system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. However, the current implementation does not persist prompt tokens, completion tokens, total tokens, or per-call API response latency. Therefore, token counts and API latency values are not reported as numerical results in this project report.
+The system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. The current implementation does not persist prompt tokens, completion tokens, total tokens, or per-call API response latency. For that reason, token counts and API latency values are not reported as numerical results in this project report.
 
 Table \ref{tab:runtime-results} reports only execution times that can be derived from the saved API job events in \texttt{outputs/analysis\_jobs.json}. These are pipeline-stage wall-clock durations, not provider-level API latency measurements.
 
@@ -1486,12 +1486,12 @@ Fallback calls & Partially observable & Fallback paths exist in code; exact fall
 \end{tabular}
 \end{table}
 
-To measure token usage and API latency in future runs, the minimal implementation change is to add a shared API-call metrics wrapper around Groq, Gemini, and Hugging Face calls. That wrapper should record provider, model, agent, purpose, success/failure, fallback attempt, latency in milliseconds, and any available \texttt{prompt\_tokens}, \texttt{completion\_tokens}, and \texttt{total\_tokens}. The metrics should then be stored in the shared state and included in the diagnostics JSON. Until that instrumentation exists and the pipeline is rerun, this report should not claim numerical token counts or provider response latencies.
+Future runs can measure token usage and API latency by adding a shared API-call metrics wrapper around Groq, Gemini, and Hugging Face calls. That wrapper should record provider, model, agent, purpose, success/failure, fallback attempt, latency in milliseconds, and any available \texttt{prompt\_tokens}, \texttt{completion\_tokens}, and \texttt{total\_tokens}. The metrics should then be stored in the shared state and included in the diagnostics JSON. Until that instrumentation exists and the pipeline is rerun, this report should not claim numerical token counts or provider response latencies.
 
 \subsection{RAG Chat Evaluation Status}
-The dataset chat is implemented as a retrieval-augmented system when PostgreSQL/pgvector and the Hugging Face token are configured. The retrieval corpus contains two families of documents: row documents produced from the original uploaded CSV, and fact documents produced from the deterministic analysis result. The retriever embeds documents and user queries with \texttt{BAAI/bge-base-en-v1.5}; row documents are ranked by vector distance, while high-value fact types such as summaries, validation, correlations, rankings, anomalies, and chart references are always included so broad analytical questions remain grounded in computed results. The retrieved context and recent chat history are then passed to the LLM, and the final answer is generated through Groq, Gemini fallback, or deterministic fallback.
+The dataset chat works as a retrieval-augmented system when PostgreSQL/pgvector and the Hugging Face token are configured. The retrieval corpus contains two document groups: row documents from the original uploaded CSV and fact documents from the deterministic analysis result. The retriever embeds documents and user queries with \texttt{BAAI/bge-base-en-v1.5}. Row documents are ranked by vector distance, while fact types such as summaries, validation, correlations, rankings, anomalies, and chart references are always included so broad analytical questions stay grounded in computed results. The retrieved context and recent chat history are then passed to the LLM, and the final answer is generated through Groq, Gemini fallback, or deterministic fallback.
 
-The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. It does not yet contain a labelled retrieval benchmark, so quantitative retrieval metrics have not been reported as achieved results. Table \ref{tab:rag-eval-status} separates what is implemented from what still requires an evaluation experiment.
+The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. It does not yet include a labelled retrieval benchmark, so quantitative retrieval metrics are not reported as achieved results. Table \ref{tab:rag-eval-status} separates implemented behavior from evaluation work that still needs a labelled experiment.
 
 \begin{table}[H]
 \centering
@@ -1519,44 +1519,44 @@ For a future quantitative RAG evaluation, a test set should be created with repr
 
 \section{Error Analysis and Validation Discussion}
 
-The system demonstrated robust error handling and validation. Key observations from the sample run:
+The sample run showed the following error-handling and validation behavior:
 
 \begin{itemize}
 	\item \textbf{Currency parsing:} The European vs US decimal resolution (Figure~\ref{fig:code-agent3-currency}) correctly parsed the monetary columns to numeric values, including accounting negatives and mixed symbols.
 	\item \textbf{Datetime coercion:} The \texttt{format="mixed"} flag in \texttt{pd.to\_datetime} avoids a class of bug in which mixed date formats are silently converted to NaT; the order and ship dates were parsed without row loss.
 	\item \textbf{Outlier clipping:} Adaptive IQR/percentile clipping caps extreme values while excluding currency and identifier columns, preventing distortion of the statistics without discarding genuine business outliers.
 	\item \textbf{Ground-truth reconciliation:} The reconciliation guardrail ($r \ge 0.99$, MAPE $\le$ 1\%) cross-checks each derived metric against any equivalent source column; on this sample no divergence was flagged.
-	\item \textbf{Cohen's kappa:} The $\kappa=1.0$ agreement between the assigned types and the heuristic sniffer provides evidence that the semantic tagging is reliable without requiring ground-truth labels---a ground-truth-free trust signal.
-	\item \textbf{Claim grounding:} All 21 numeric claims in the generated narrative were verified against the computed facts within tolerance, demonstrating effective hallucination control.
+	\item \textbf{Cohen's kappa:} The $\kappa=1.0$ agreement between the assigned types and the heuristic sniffer provides evidence that the semantic tagging is reliable without requiring ground-truth labels, giving the system a trust signal without external labels.
+	\item \textbf{Claim grounding:} All 21 numeric claims in the generated narrative were verified against the computed facts within tolerance.
 \end{itemize}
 
-These results confirm that the multi-agent pipeline successfully processes a raw CSV file through all six stages, producing a validated, grounded, and professionally formatted analytical report with minimal human intervention.
+These results show that the multi-agent pipeline processes a raw CSV file through all six stages and produces a validated, grounded analytical report with minimal human intervention.
 
-\chapter{FUTURE ENHANCEMENT}
+\chapter{FUTURE WORK}
 
-While the current system provides a complete end-to-end solution, several enhancements are planned for future development:
+The current system runs the full workflow from upload to report generation. Future work includes:
 
 \begin{itemize}
-	\item \textbf{Multi-format ingestion:} Extend support beyond CSV-primary to include Excel, JSON, Parquet, and direct database connections. An Excel loader path already exists, but JSON and Parquet are not yet implemented.
-	\item \textbf{Model-agnostic provider configuration:} Allow users to configure their preferred LLM providers (Groq, Gemini, OpenAI, Anthropic, local models via Ollama) through a settings panel, making the system more flexible and cost-optimized.
-	\item \textbf{More chart families:} Add Sankey diagrams, treemaps, geographic maps, and time-series decomposition plots to enrich the visual analysis.
+	\item \textbf{API-level multi-format ingestion:} Extend the FastAPI upload route beyond CSV so the web interface can accept the Excel, JSON/JSONL, and Parquet formats already supported by the internal Agent~1 loader. Direct database connections remain a future extension.
+	\item \textbf{Model-agnostic provider configuration:} Allow users to configure their preferred LLM providers (Groq, Gemini, OpenAI, Anthropic, local models via Ollama) through a settings panel.
+	\item \textbf{More chart families:} Add Sankey diagrams, treemaps, geographic maps, and time-series decomposition plots.
 	\item \textbf{Auth hardening:} Implement proper OAuth2/OpenID Connect with refresh tokens, role-based access control (RBAC), and multi-tenancy for organizational use.
 	\item \textbf{Larger-scale evaluation:} Conduct systematic benchmarking on diverse datasets (100+ CSVs) to quantify accuracy, speed, and reliability across different domains and data quality levels.
 	\item \textbf{Interactive report customization:} Allow users to select chart types, add custom metrics, and modify the narrative tone through a visual editor.
 	\item \textbf{Continuous learning:} Implement feedback loops where user corrections (e.g., fixing a mis-tagged column) are stored and used to fine-tune the semantic tagging and preprocessing rules.
 \end{itemize}
 
-These enhancements will further increase the system's utility, scalability, and adoption in real-world business environments.
+These enhancements would make the system easier to adapt to different datasets, deployments, and user needs.
 
 \chapter{CONCLUSION}
 
-This project successfully developed and delivered a complete end-to-end multi-agent system for automated data analysis and insight generation from financial and sales CSV data. The system comprises six specialized agents (structural profiling, semantic tagging, context-aware preprocessing, statistical analysis and visualization, output validation, and hybrid report generation) orchestrated by LangGraph with conditional routing and a hard validation gate. A FastAPI backend provides secure file uploads, job management, Server-Sent Events for live progress streaming, and a grounded RAG dataset chat. A React 19 frontend offers a no-code web interface for uploading datasets, monitoring pipeline execution, viewing interactive charts, and downloading HTML/PDF reports.
+This project developed a multi-agent system for automated data analysis and insight generation from financial and sales CSV data. The system has six specialized agents: structural profiling, semantic tagging, context-aware preprocessing, statistical analysis and visualization, output validation, and hybrid report generation. LangGraph orchestrates these agents with conditional routing and a hard validation gate. A FastAPI backend provides file uploads, job management, Server-Sent Events for live progress streaming, and grounded RAG dataset chat. A React 19 frontend lets users upload datasets, monitor pipeline execution, view interactive charts, and download HTML/PDF reports.
 
-The system's key strengths are its separation of concerns, auditability through logged transformations and confidence propagation, and reliability through deterministic contract checks, Cohen's kappa agreement scoring, and claim-grounding mechanisms that prevent hallucinated insights from reaching the final report. On a representative sample dataset, the pipeline processes a raw CSV file from ingestion through to a professionally formatted report (HTML, and PDF when WeasyPrint's native libraries are available) with KPI summaries, charts, plain-language findings, and actionable recommendations, all with minimal human intervention.
+The system separates responsibilities across agents and keeps an audit trail through logged transformations and confidence propagation. Reliability is supported by deterministic contract checks, Cohen's kappa agreement scoring, and claim grounding before final report generation. On the representative sample dataset, the pipeline processes a raw CSV file from ingestion to a formatted report (HTML, and PDF when WeasyPrint's native libraries are available) with KPI summaries, charts, plain-language findings, and actionable recommendations.
 
-The project achieves its primary objectives: (1) an autonomous multi-agent system that converts raw data into professional reports without manual coding, and (2) a no-code web interface that democratizes financial analytics for small to medium businesses. The system is ready for deployment and use in real-world scenarios, with clear pathways for future enhancement.
+The project achieves its primary objectives: (1) an autonomous multi-agent system that converts raw data into professional reports without manual coding, and (2) a web interface that makes financial analytics more accessible to small and medium businesses. The implementation is usable as a working prototype and has clear areas for future extension.
 
-The main contribution of this work is a practical, validated framework for agentic data analysis that combines deterministic algorithms with controlled LLM reasoning, ensuring reliability, reproducibility, and accessibility. This framework can serve as a blueprint for similar systems in education, non-profits, and commercial settings where data-driven decision-making is essential but technical expertise is limited.
+The main contribution is a practical framework for agentic data analysis that combines deterministic algorithms with controlled LLM reasoning. It is designed for settings such as education, non-profits, and small businesses where data is available but technical analytics expertise is limited.
 
 \clearpage
 \chapter{APPENDICES}
@@ -1602,7 +1602,7 @@ Internet and miscellaneous expenses & Variable & Project maintenance cost \\
 \end{tabular}
 \end{table}
 
-The cost estimate is intentionally lightweight because the project uses open-source libraries and an existing development environment. The main variable cost comes from API usage during testing and report generation. In practice, that cost can be managed by keeping the heuristic fallback path available, using the schema cache, and avoiding unnecessary repeated model calls. Agent~2 sends only column metadata and a few sample values rather than full rows, which limits prompt size by design; exact token counts are not currently persisted by the implementation.
+The cost estimate is lightweight because the project uses open-source libraries and an existing development environment. The main variable cost comes from API usage during testing and report generation. That cost can be managed by keeping the heuristic fallback path available, using the schema cache, and avoiding unnecessary repeated model calls. Agent~2 sends only column metadata and a few sample values rather than full rows, which limits prompt size by design; exact token counts are not currently persisted by the implementation.
 
 \section*{Appendix C: Project Timeline}
 \addcontentsline{toc}{section}{Appendix C: Project Timeline}
@@ -1616,8 +1616,8 @@ The cost estimate is intentionally lightweight because the project uses open-sou
 Task & Status & Phase \\
 \hline
 Requirement analysis and proposal & Complete & Initial \\
-Agent 1–4 implementation and integration & Complete & Development \\
-Agent 5–6 implementation & Complete & Development \\
+Agent 1 to 4 implementation and integration & Complete & Development \\
+Agent 5 to 6 implementation & Complete & Development \\
 Backend API and frontend development & Complete & Development \\
 Testing, evaluation, and debugging & Complete & Finalization \\
 Documentation and report submission & Complete & Final \\
@@ -1625,7 +1625,7 @@ Documentation and report submission & Complete & Final \\
 \end{tabular}
 \end{table}
 
-All major tasks are now complete. The project moved from proposal to a fully functional end-to-end system with a web interface, API, and six-agent pipeline. The final phase focused on integration testing, report generation, and documentation.
+All major tasks are complete. The project moved from proposal to a working system with a web interface, API, and six-agent pipeline. The final phase focused on integration testing, report generation, and documentation.
 
 \begin{figure}[H]
 \centering

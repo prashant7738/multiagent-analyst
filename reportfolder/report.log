@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.6.20)  25 AUG 2026 17:38
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.6.20)  25 AUG 2026 20:47
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -765,8 +765,8 @@ Chapter 3.
 [7
 
 ] [8]
-Underfull \hbox (badness 10000) in paragraph at lines 586--587
-[]|\T1/ptm/m/n/12 (+20) CSV-primary; Ex-cel
+Underfull \hbox (badness 2689) in paragraph at lines 586--587
+\T1/ptm/m/n/12 (+20) Par-quet; web up-load
  []
 
 
@@ -780,13 +780,8 @@ Underfull \hbox (badness 10000) in paragraph at lines 591--592
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 594--595
-[]|\T1/ptm/m/n/12 (+20) CSV-primary;
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 594--595
-\T1/ptm/m/n/12 (+20) JSON/Parquet not
+Underfull \hbox (badness 2088) in paragraph at lines 594--595
+[]|\T1/ptm/m/n/12 (+20) Direct loader sup-port
  []
 
 [9] [10]
@@ -799,23 +794,18 @@ File: transformer_architecture.png Graphic file (type png)
 <use transformer_architecture.png>
 Package pdftex.def Info: transformer_architecture.png  used on input line 636.
 (pdftex.def)             Requested size: 369.54086pt x 574.45451pt.
- [12]
-Underfull \hbox (badness 4940) in paragraph at lines 643--644
-\T1/ptm/m/n/12 (+20) The LLM back-end of this sys-tem is the Groq API, which ex-poses the
- []
-
-[13 <./transformer_architecture.png>] [14]
+ [12] [13 <./transformer_architecture.png>] [14]
 <qwen3_architecture.png, id=869, 339.1872pt x 185.0112pt>
 File: qwen3_architecture.png Graphic file (type png)
 <use qwen3_architecture.png>
 Package pdftex.def Info: qwen3_architecture.png  used on input line 687.
 (pdftex.def)             Requested size: 375.1773pt x 204.64215pt.
- [15]
+ [15 <./qwen3_architecture.png>]
 Underfull \hbox (badness 10000) in paragraph at lines 697--698
 \T1/ptm/m/n/12 (+20) re-quest with \T1/cmtt/m/n/12 model="qwen/qwen3.6-27b" \T1/ptm/m/n/12 (+20) and \T1/cmtt/m/n/12 temperature=0.1\T1/ptm/m/n/12 (+20) ,
  []
 
-[16 <./qwen3_architecture.png>]
+
 Underfull \hbox (badness 1661) in paragraph at lines 700--701
 \T1/ptm/m/n/12 (+20) tem au-to-mat-i-cally falls back to Google Gem-ini (\T1/cmtt/m/n/12 gemini-flash-latest\T1/ptm/m/n/12 (+20) ,
  []
@@ -825,7 +815,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 700--701
 \T1/ptm/m/n/12 (+20) then \T1/cmtt/m/n/12 gemini-3.6-flash\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 gemini-3.5-flash\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 gemini-2.5-flash\T1/ptm/m/n/12 (+20) )
  []
 
-[17]
+[16] [17]
 Chapter 5.
 <last.jpg, id=901, 835.12pt x 1262.7175pt>
 File: last.jpg Graphic file (type jpg)
@@ -840,12 +830,16 @@ Package pdftex.def Info: second2.png  used on input line 720.
 [18
 
  <./last.jpg>] [19 <./second2.png>]
+Underfull \hbox (badness 10000) in paragraph at lines 743--744
+\T1/ptm/m/n/12 (+20) The re-li-a-bil-ity model stores each stage's con-fi-dence in $\OT1/ztmcm/m/n/12 [0\OML/ztmcm/m/it/12 ; \OT1/ztmcm/m/n/12 1]$ \T1/ptm/m/n/12 (+20) un-der
+ []
+
 <backend_architecture.png, id=913, 339.1872pt x 185.0112pt>
 File: backend_architecture.png Graphic file (type png)
 <use backend_architecture.png>
 Package pdftex.def Info: backend_architecture.png  used on input line 755.
 (pdftex.def)             Requested size: 375.14705pt x 204.64215pt.
- [20]
+[20]
 Underfull \hbox (badness 1603) in paragraph at lines 781--782
 []|\T1/ptm/m/n/12 (+20) User reg-is-tra-tion with PBKDF2-
  []
@@ -912,8 +906,8 @@ Underfull \hbox (badness 10000) in paragraph at lines 882--883
  []
 
 
-Underfull \hbox (badness 1281) in paragraph at lines 882--883
-\T1/cmtt/m/n/12 schema_blueprint\T1/ptm/m/n/12 (+20) : a per-column de-scrip-tion of the in-tended type, se-man-tic
+Underfull \hbox (badness 2884) in paragraph at lines 882--883
+\T1/cmtt/m/n/12 schema_blueprint\T1/ptm/m/n/12 (+20) , which de-scribes each col-umn's in-tended type, se-man-tic
  []
 
 [25]
@@ -1017,12 +1011,12 @@ Underfull \hbox (badness 6364) in paragraph at lines 1033--1034
 
 [32]
 Underfull \hbox (badness 10000) in paragraph at lines 1047--1048
-\T1/ptm/m/n/12 (+20) After the trans-for-ma-tion steps, \T1/cmtt/m/n/12 _validate_count_ranges \T1/ptm/m/n/12 (+20) and
+\T1/ptm/m/n/12 (+20) After trans-for-ma-tion, \T1/cmtt/m/n/12 _validate_count_ranges \T1/ptm/m/n/12 (+20) and
  []
 
 
-Underfull \hbox (badness 3417) in paragraph at lines 1047--1048
-\T1/cmtt/m/n/12 _validate_financial_constraints \T1/ptm/m/n/12 (+20) flag in-valid counts and im-plau-si-ble tax
+Underfull \hbox (badness 10000) in paragraph at lines 1047--1048
+\T1/cmtt/m/n/12 _validate_financial_constraints \T1/ptm/m/n/12 (+20) record in-valid counts and im-plau-si-ble
  []
 
 [33]
@@ -1040,7 +1034,7 @@ File: agent4pic.png Graphic file (type png)
 <use agent4pic.png>
 Package pdftex.def Info: agent4pic.png  used on input line 1085.
 (pdftex.def)             Requested size: 375.15556pt x 167.65372pt.
-[34] [35 <./agent4pic.png>]
+[34 <./agent4pic.png>] [35]
 Underfull \hbox (badness 6016) in paragraph at lines 1128--1130
 \T1/cmtt/m/n/12 _top_bottom_rankings \T1/ptm/m/n/12 (+20) ranks rev-enue across up to three cat-e-gories, and
  []
@@ -1080,17 +1074,18 @@ Underfull \hbox (badness 10000) in paragraph at lines 1169--1170
 []\T1/ptm/b/n/12 (+20) Schema con-sis-tency: \T1/cmtt/m/n/12 cleaned_df \T1/ptm/m/n/12 (+20) columns must align with
  []
 
-[37]
+
 Underfull \hbox (badness 10000) in paragraph at lines 1175--1176
 []\T1/ptm/b/n/12 (+20) Trend sam-ple suf-fi-ciency: \T1/ptm/m/n/12 (+20) Sig-nif-i-cant trends need $\OML/ztmcm/m/it/12 n \OMS/ztmcm/m/n/12 ^^U$
  []
 
+[37]
 <agent5pic.png, id=1097, 618.31pt x 45.16875pt>
 File: agent5pic.png Graphic file (type png)
 <use agent5pic.png>
 Package pdftex.def Info: agent5pic.png  used on input line 1196.
 (pdftex.def)             Requested size: 375.15897pt x 27.40608pt.
-[38 <./agent5pic.png>]
+
 Underfull \hbox (badness 10000) in paragraph at lines 1208--1209
 []\T1/ptm/b/n/12 (+20) Inputs: \T1/cmtt/m/n/12 cleaned_df\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 schema_blueprint\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 stats\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 chart_paths\T1/ptm/m/n/12 (+20) ,
  []
@@ -1100,18 +1095,23 @@ Underfull \hbox (badness 10000) in paragraph at lines 1208--1209
 \T1/cmtt/m/n/12 chart_specs\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 validation_report\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 preprocessing_log\T1/ptm/m/n/12 (+20) ,
  []
 
-[39] [40]
-<agent6pic.png, id=1122, 1370.11874pt x 652.4375pt>
+[38 <./agent5pic.png>] [39]
+<agent6pic.png, id=1114, 1370.11874pt x 652.4375pt>
 File: agent6pic.png Graphic file (type png)
 <use agent6pic.png>
 Package pdftex.def Info: agent6pic.png  used on input line 1261.
 (pdftex.def)             Requested size: 375.14267pt x 178.63936pt.
-
+ [40]
 Underfull \hbox (badness 10000) in paragraph at lines 1275--1276
 \T1/ptm/m/n/12 (+20) The \T1/cmtt/m/n/12 JobManager \T1/ptm/m/n/12 (+20) main-tains thread-safe \T1/cmtt/m/n/12 Job \T1/ptm/m/n/12 (+20) dat-a-classes with sta-tus
  []
 
-[41 <./agent6pic.png>]
+
+Underfull \hbox (badness 7981) in paragraph at lines 1275--1276
+\T1/ptm/m/n/12 (+20) (queued/processing/completed/failed), per-agent progress, append-only events
+ []
+
+
 Underfull \hbox (badness 10000) in paragraph at lines 1278--1279
 \T1/ptm/m/n/12 (+20) Server-Sent Events are im-ple-mented in \T1/cmtt/m/n/12 sse.py \T1/ptm/m/n/12 (+20) with for-mat:
  []
@@ -1121,11 +1121,12 @@ Underfull \hbox (badness 2205) in paragraph at lines 1278--1279
 [][]\T1/cmtt/m/n/12 event: <name>\n data: <json>\n\n[]\T1/ptm/m/n/12 (+20) . Past events are re-played on con-nec-
  []
 
+[41 <./agent6pic.png>]
 File: frontend_workflow.png Graphic file (type png)
 <use frontend_workflow.png>
 Package pdftex.def Info: frontend_workflow.png  used on input line 1290.
 (pdftex.def)             Requested size: 375.14705pt x 204.64215pt.
-[42]
+ [42]
 Underfull \hbox (badness 10000) in paragraph at lines 1299--1300
 \T1/ptm/m/n/12 (+20) The API client (\T1/cmtt/m/n/12 src/lib/api.js\T1/ptm/m/n/12 (+20) ) pro-vides \T1/cmtt/m/n/12 analyzeCsv \T1/ptm/m/n/12 (+20) (For-m-Data up-
  []
@@ -1152,6 +1153,11 @@ Underfull \hbox (badness 10000) in paragraph at lines 1299--1300
 
 [43]
 Chapter 7.
+
+Underfull \hbox (badness 1817) in paragraph at lines 1308--1309
+\T1/ptm/m/n/12 (+20) The re-sults be-low come from a com-plete pipeline run on the \T1/cmtt/m/n/12 10000 Sales
+ []
+
 [44
 
 ] [45]
@@ -1219,12 +1225,7 @@ Overfull \hbox (17.50568pt too wide) in paragraph at lines 1472--1487
  [][] 
  []
 
-[49]
-Underfull \hbox (badness 1502) in paragraph at lines 1492--1493
-\T1/ptm/m/n/12 (+20) The dataset chat is im-ple-mented as a retrieval-augmented sys-tem when Post-
- []
-
-[50]
+[49] [50]
 Underfull \hbox (badness 10000) in paragraph at lines 1505--1506
 []|\T1/ptm/m/n/12 (+20) Hugging Face
  []
@@ -1287,11 +1288,6 @@ Underfull \hbox (badness 10000) in paragraph at lines 1600--1601
 
 
 ]
-Underfull \hbox (badness 2961) in paragraph at lines 1619--1619
-[]|\T1/ptm/m/n/12 (+20) Agent 1^^U4 im-ple-men-ta-tion
- []
-
-
 Underfull \hbox (badness 5726) in paragraph at lines 1623--1623
 []|\T1/ptm/m/n/12 (+20) Documentation and re-port
  []
@@ -1329,18 +1325,18 @@ LaTeX2e <2025-11-01>
 L3 programming layer <2025-12-24>
  ***********
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: D89BE7A06CEB6EFAC351ECFC0E484546;21574.
+(rerunfilecheck)             Checksum: A77A7F37BE2D5B21935A4EA8FED822AC;21564.
  ) 
 Here is how much of TeX's memory you used:
- 18449 strings out of 467871
- 283486 string characters out of 5418376
- 969477 words of memory out of 5000000
+ 18455 strings out of 467871
+ 283549 string characters out of 5418376
+ 969497 words of memory out of 5000000
  46328 multiletter control sequences out of 15000+600000
- 698677 words of font info for 364 fonts, out of 8000000 for 9000
+ 699026 words of font info for 368 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,12n,79p,1776b,1584s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,12n,79p,1437b,1584s stack positions out of 10000i,1000n,20000p,200000b,200000s
  <C:\Users\sushi\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecit1000.pk> <C:\Users\sushi\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ectt1095.pk> <C:\Users\sushi\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ectt1000.pk> <C:\Users\sushi\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ectt1200.pk><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmex10.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/symbols/msbm10.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/urw/symbol/usyr.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/urw/symbol/usyr.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/urw/times/utmb8a.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/urw/times/utmr8a.pfb><C:/Users/sushi/AppData/Local/Programs/MiKTeX/fonts/type1/urw/times/utmri8a.pfb>
-Output written on report.pdf (75 pages, 4443914 bytes).
+Output written on report.pdf (75 pages, 4439671 bytes).
 PDF statistics:
  1569 PDF objects out of 1728 (max. 8388607)
  387 named destinations out of 1000 (max. 500000)

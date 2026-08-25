@@ -337,7 +337,7 @@ Agent 1 classifies numeric columns by computing skewness and kurtosis. Right-ske
 
 \subsection{Implicit Missingness Detection}
 
-Some datasets encode missing values as special numbers or strings. Numeric columns are checked against common sentinels: -999, -9999, -99, -1, 999, and others. Text fields match patterns like ``n/a'', ``none'', ``missing'', ``\#n/a''. Agent 1 flags these per-column with affected row counts. This catches quality issues that simple null checks miss, especially in financial data where -999 is standard practice.
+Some datasets encode missing values as special numbers or strings. Numeric columns are checked against common sentinels: -999, -9999, -99, -1, 999, and others. Text fields match patterns like ``n/a'', ``none'', ``missing'', ``#n/a''. Agent 1 flags these per-column with affected row counts. This catches quality issues that simple null checks miss, especially in financial data where -999 is standard practice.
 
 \subsection{Column Relationships}
 
@@ -559,7 +559,7 @@ Environment variables \texttt{GEMINI\_API\_KEYS} (comma/space/semicolon-separate
 
 \subsection{Gemini Model Fallback Chain}
 
-The system tries \texttt{gemini-flash-latest} first, then \texttt{gemini-3.6-flash}, \texttt{gemini-3.5-flash}, and \texttt{gemini-2.5-flash}. If Google retires or renames one of these models, the pipeline moves to the next candidate instead of failing outright.
+The system tries \texttt{gemini-flash-latest} first, then \texttt{gemini-2.5-flash}, \texttt{gemini-2.5-flash-lite}, and \texttt{gemini-2.0-flash}. This gracefully handles model deprecation.
 
 \subsection{Health Check Caching}
 
@@ -1335,7 +1335,7 @@ S_c &= 100 - \text{missing\_penalty\%}, \quad S_v = 100 - \text{valfail\%}, \qua
 with weights per profile (Table \ref{tab:preprocessing-profiles}), and a risk penalty of $-5$ for critical issues or $-2.5$ for high issues, clamped to $[0,100]$.
 
 \subsection{Reliability and Pipeline Interaction}
-Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the sample dataset, Agent~3 parsed the currency fields into numeric values, extracted calendar features from the order and ship dates, one-hot encoded the region, item-type, and sales-channel columns, and derived business metrics, expanding the table from 14 to 61 columns with a data-quality score of 100.0/100. Because the sample contains no missing values, no imputation was required. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
+Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the sample dataset, Agent~3 parsed the currency fields into numeric values, extracted calendar features from the order and ship dates, one-hot encoded the region, item-type, and sales-channel columns, and derived business metrics, expanding the table from 14 to 58 columns with a data-quality score of 100.0/100. Because the sample contains no missing values, no imputation was required. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
 
 \section{Agent 4: Statistical Analysis}
 
@@ -1560,14 +1560,6 @@ Server-Sent Events are implemented in \texttt{sse.py} with format: \verb|event: 
 \subsection{RAG Dataset Chat}
 The RAG service uses \texttt{BAAI/bge-base-en-v1.5} embeddings via the Hugging Face Inference API when the required \texttt{DATABASE\_URL} and Hugging Face token are configured. pgvector stores embeddings for row documents from the original uploaded CSV and fact documents derived from the generated analysis context. During retrieval, the service fetches top row documents (default $K=8$), top column/statistic fact documents (default $K=6$), and always includes dataset-wide facts such as summaries, validation results, correlations, rankings, anomalies, and existing charts. The chat service passes the retrieved context and recent chat history to Groq $\rightarrow$ Gemini $\rightarrow$ deterministic fallback for response generation. If the database or embedding service is unavailable, the fallback answers from deterministic summary facts rather than claiming vector retrieval. It can also generate a fresh chart based on the query.
 
-\subsection{Constrained Data-Query Path}
-\label{sec:data-query-path}
-Vector retrieval alone cannot answer a question that needs an exact count, sum, average, or a numeric or multi-condition filter, since embedding similarity measures topical closeness between the query text and a row's text, not a numeric comparison. A query such as ``orders with units sold above 8000'' is not converted into \texttt{units\_sold > 8000} anywhere in the vector-search path; the retriever can only return rows whose text happens to read similarly to the query.
-
-To answer this class of question, the chat service adds a second, non-vector path alongside retrieval. The first LLM call can set \texttt{needs\_data\_query} to true and supply a structured \texttt{data\_query} object naming an operation (\texttt{count}, \texttt{sum}, \texttt{mean}, \texttt{median}, \texttt{min}, \texttt{max}, or \texttt{nunique}), a column, up to five filters, and an optional \texttt{group\_by} column. \texttt{run\_data\_query} then validates the request before touching any data: every column name must appear in both the schema blueprint and the job's original CSV, and every filter operator must be one of \texttt{==}, \texttt{!=}, \texttt{>}, \texttt{>=}, \texttt{<}, \texttt{<=}, or \texttt{contains}. No string supplied by the model or the user is evaluated as code; each operation and operator is dispatched through an explicit branch in Python, and pandas performs the actual filtering and aggregation. The function reads the job's original per-job CSV rather than Agent~3's cleaned export, since the cleaned export is a single file shared across concurrent jobs and would risk returning another job's data. Once the result is computed, a second LLM call turns the exact number into a final answer; the model is told to use only that computed result and is not asked to recompute or re-estimate it.
-
-This path is what keeps the low Recall@8 and zero-precision results for numeric queries in Table \ref{tab:rag-k8-per-query} from reaching the user: those specific question types are routed to \texttt{run\_data\_query} instead of being answered from the retrieved rows. Section~\ref{sec:rag-eval-discussion} discusses this connection alongside the retrieval results.
-
 \section{Frontend Implementation}
 
 \subsection{Stack and Structure}
@@ -1602,7 +1594,7 @@ A complete run on the sample dataset produces the following per-stage summary (c
 \begin{itemize}
 	\item \textbf{Agent 1:} Profiled 10000 rows $\times$ 14 columns; missing 0.0\%, duplicates 0.
 	\item \textbf{Agent 2:} Type sniffing \{string:5, datetime:2, numeric:7\}; blueprint built for 14 columns.
-	\item \textbf{Agent 3:} profile=strict, domain=finance\_sales, input 10000$\times$14 $\rightarrow$ cleaned 10000$\times$61, quality=100.0/100, remaining nulls 0.0\%.
+	\item \textbf{Agent 3:} profile=strict, domain=finance\_sales, input 10000$\times$14 $\rightarrow$ cleaned 10000$\times$58, quality=100.0/100, remaining nulls 0.0\%.
 	\item \textbf{Agent 4:} 22 descriptive columns, 10 strong correlation pairs, 52 anomalous rows (0.52\%), 16 charts saved.
 	\item \textbf{Agent 5:} validation score 100/100, 9/9 checks passed, Cohen's kappa = 1.0.
 	\item \textbf{Agent 6:} narrative source = Groq, 21/21 claims grounded, report written to \texttt{outputs/reports/<run\_id>/insight\_report.html} (HTML fallback; see below).
@@ -1610,7 +1602,7 @@ A complete run on the sample dataset produces the following per-stage summary (c
 
 \subsection{Comparison with a General-Purpose Qwen LLM}
 
-The same automated insight-generation task was also evaluated against a general-purpose Qwen LLM using the \texttt{10000\_Sales\_Records.csv} dataset. The Qwen run received the complete 10,000-row dataset in a single prompt rather than a sample, so the reported runtime reflects that larger input. The comparison shows the practical value of separating deterministic analysis from language generation. The multi-agent pipeline completed in approximately 52 seconds, while the standalone Qwen run took approximately 4 minutes 12 seconds, making it about 4.8 times slower.
+The same automated insight-generation task was also evaluated against a general-purpose Qwen LLM using the \texttt{10000\_Sales\_Records.csv} dataset. The comparison shows the practical value of separating deterministic analysis from language generation. The multi-agent pipeline completed in approximately 52 seconds, while the standalone Qwen run took approximately 4 minutes 12 seconds, making it about 4.8 times slower.
 
 \begin{table}[H]
 \centering
@@ -1664,7 +1656,7 @@ Using the automatically selected \texttt{strict} profile (finance\_sales domain)
 	\item Date-feature extraction and one-hot encoding of Region, Item Type, and Sales Channel; ordinal encoding of Order Priority.
 	\item Business-metric derivation with ground-truth reconciliation against the existing Total Profit column.
 \end{itemize}
-The cleaned dataset expanded from 14 to 61 columns due to one-hot encoding and derived features, with a data-quality score of 100.0/100 and no flagged validation issues.
+The cleaned dataset expanded from 14 to 58 columns due to one-hot encoding and derived features, with a data-quality score of 100.0/100 and no flagged validation issues.
 
 \subsection{Agent 4: Statistical Analysis and Visualization}
 Agent 4 produced descriptive statistics, correlations, trends, and 16 charts. Table \ref{tab:generated-charts} lists a representative subset. The sample run produced these findings:
@@ -1758,27 +1750,7 @@ Overall & 0.97 & \multicolumn{2}{p{8cm}}{Mean of the five stages reporting a num
 \end{table}
 
 \subsection{API Usage and Runtime Observability}
-The system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. Groq's response object also carries per-call usage data directly, without any additional instrumentation: \texttt{prompt\_tokens}, \texttt{completion\_tokens}, \texttt{total\_tokens}, and, specific to Groq, \texttt{queue\_time}, \texttt{prompt\_time}, \texttt{completion\_time}, and \texttt{total\_time} in seconds. Table~\ref{tab:llm-latency-results} reports the mean of these values across eight real dataset-chat questions against \texttt{10000 Sales Records.csv}, the same run described in Section~\ref{sec:rag-eval-discussion}, with the RAG index fully populated ($K=8$).
-
-\begin{table}[H]
-\centering
-\caption{Groq call metrics, mean over 8 dataset-chat questions}
-\label{tab:llm-latency-results}
-\begin{tabular}{p{7cm} p{4cm}}
-\hline
-Metric & Mean value \\
-\hline
-Prompt tokens & 3927.4 \\
-Completion tokens & 128.1 \\
-Prompt processing time & 0.314 s \\
-Completion generation time & 0.249 s \\
-Groq-reported total inference time & 0.563 s \\
-Queue time & 0.305 s \\
-\hline
-\end{tabular}
-\end{table}
-
-Client-observed wall-clock time for the same eight calls averaged around 15 s, roughly 27 times the Groq-reported total inference time. The model was not slower; the account tier used for this run caps requests at 8,000 tokens per minute, and once a call is rate-limited the Groq SDK's default behavior (\texttt{max\_retries=2}) retries silently rather than failing, which is invisible unless server-side and client-side timing are compared separately as done here. Reading \texttt{total\_time} directly from the response, rather than timing the call from the client, is what isolates actual model latency from this account-level throttling.
+The system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. The current implementation does not persist prompt tokens, completion tokens, total tokens, or per-call API response latency. For that reason, token counts and API latency values are not reported as numerical results in this project report.
 
 Table \ref{tab:runtime-results} reports only execution times that can be derived from the saved API job events in \texttt{outputs/analysis\_jobs.json}. These are pipeline-stage wall-clock durations, not provider-level API latency measurements.
 
@@ -1811,10 +1783,10 @@ Metric & Status & Evidence / required change \\
 \hline
 LLM/API models used & Available & Model constants and service configuration identify Groq, Gemini, and Hugging Face embedding models \\
 Number of LLM calls & Partially available & Agent~2 captures provider use; Agent~6 and chat calls are not yet persisted as a complete call count \\
-Input / prompt tokens & Available (Groq) & Present on every Groq response as \texttt{usage.prompt\_tokens}; measured in Table~\ref{tab:llm-latency-results} \\
-Output / completion tokens & Available (Groq) & Present on every Groq response as \texttt{usage.completion\_tokens} \\
-Total tokens & Available (Groq) & Present on every Groq response as \texttt{usage.total\_tokens} \\
-API response latency & Available (Groq) & Groq returns \texttt{queue\_time}, \texttt{prompt\_time}, \texttt{completion\_time}, and \texttt{total\_time} directly; Gemini and Hugging Face usage/latency fields were not measured for this report \\
+Input / prompt tokens & Not recorded & Requires reading provider usage metadata after each response and storing it in the run state \\
+Output / completion tokens & Not recorded & Requires provider response usage capture \\
+Total tokens & Not recorded & Requires prompt and completion token capture per call \\
+API response latency & Not recorded & Requires timing wrapper around Groq, Gemini, and Hugging Face calls \\
 Agent execution time & Derivable & Persisted SSE timestamps record agent running/completed events \\
 Total pipeline time & Derivable & Persisted \texttt{pipeline\_started} and \texttt{pipeline\_finished} events \\
 Fallback calls & Partially observable & Fallback paths exist in code; exact fallback-attempt counts are not yet persisted \\
@@ -1822,13 +1794,12 @@ Fallback calls & Partially observable & Fallback paths exist in code; exact fall
 \end{tabular}
 \end{table}
 
-Groq exposes this usage data on every response already, so no timing wrapper is needed to obtain it for that provider. The values in Table~\ref{tab:llm-latency-results} come from calling the same \texttt{chat\_service} and \texttt{rag\_service} functions the application uses at runtime, not from reading persisted production logs; the running application does not yet write per-call token and latency values into job state or a diagnostics JSON, so this data is not currently visible from the job history API. Persisting it would mean saving the \texttt{response.usage} fields Groq already returns, rather than building new instrumentation around the call. Gemini and Hugging Face usage metadata were not examined for this report and remain future work.
+Future runs can measure token usage and API latency by adding a shared API-call metrics wrapper around Groq, Gemini, and Hugging Face calls. That wrapper should record provider, model, agent, purpose, success/failure, fallback attempt, latency in milliseconds, and any available \texttt{prompt\_tokens}, \texttt{completion\_tokens}, and \texttt{total\_tokens}. The metrics should then be stored in the shared state and included in the diagnostics JSON. Until that instrumentation exists and the pipeline is rerun, this report should not claim numerical token counts or provider response latencies.
 
 \subsection{RAG Chat Evaluation Status}
-\label{sec:rag-eval-discussion}
 The dataset chat works as a retrieval-augmented system when PostgreSQL/pgvector and the Hugging Face token are configured. The retrieval corpus contains two document groups: row documents from the original uploaded CSV and fact documents from the deterministic analysis result. The retriever embeds documents and user queries with \texttt{BAAI/bge-base-en-v1.5}. Row documents are ranked by vector distance, while fact types such as summaries, validation, correlations, rankings, anomalies, and chart references are always included so broad analytical questions stay grounded in computed results. The retrieved context and recent chat history are then passed to the LLM, and the final answer is generated through Groq, Gemini fallback, or deterministic fallback.
 
-The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. The K=8 retrieval results in Tables \ref{tab:rag-k8-summary} and \ref{tab:rag-k8-per-query} were measured against \texttt{10000 Sales Records.csv} with \texttt{RAG\_MAX\_ROWS} set to 10,000, so every row in the dataset is embedded and searchable rather than a sample.
+The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. The K=8 retrieval results are shown in Tables \ref{tab:rag-k8-summary} and \ref{tab:rag-k8-per-query}.
 
 \begin{table}[H]
 \centering
@@ -1869,10 +1840,6 @@ Offline Vegetables orders with units sold above 7000 & 0.000 & 0.0000 & 0.000 & 
 \hline
 \end{tabular}
 \end{table}
-
-The two queries scoring 0.000 on every metric, units sold above 8000 and total profit above 1000000, are single-condition numeric thresholds. The two-condition and three-condition compound queries (household orders from Europe, high-priority orders from Asia, offline Vegetables orders with high units sold) score between these two extremes, and every query naming a category directly (Europe, Household, Online, and so on) scores at or near 1.000. This split matches how the embedding model actually works: it matches text that reads similarly to the query, not a numeric comparison, so a query for units sold above 8000 can retrieve a row with units sold in the hundreds if that row's text otherwise resembles the query.
-
-This is also why the numbers in Table \ref{tab:rag-k8-per-query} describe the vector-retrieval path in isolation rather than what the deployed chat service actually returns to a user. As described in Section~\ref{sec:data-query-path}, a question shaped like the two zero-scoring queries is answered through \texttt{run\_data\_query} against the full dataset, not from the eight retrieved rows. Recall@8 is also mechanically small at this $K$ for a different reason: several queries here have hundreds to thousands of matching rows in a 10,000-row dataset, so even a perfect retriever could not exceed roughly $8$ divided by that count.
 
 \section{Error Analysis and Validation Discussion}
 

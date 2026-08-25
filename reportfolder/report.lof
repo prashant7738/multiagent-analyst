@@ -2,30 +2,35 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {4-1}{\ignorespaces Decoder-only Transformer architecture used by modern LLMs}}{13}{figure.caption.16}%
-\contentsline {figure}{\numberline {4-2}{\ignorespaces Qwen3-style decoder-only Transformer with GQA, RoPE, SwiGLU, and RMSNorm}}{15}{figure.caption.17}%
-\addvspace {10\p@ }
-\contentsline {figure}{\numberline {5-1}{\ignorespaces System architecture and agent flow (six-agent pipeline)}}{18}{figure.caption.18}%
-\contentsline {figure}{\numberline {5-2}{\ignorespaces LangGraph workflow showing conditional routing and Agent 5 gate}}{19}{figure.caption.19}%
-\contentsline {figure}{\numberline {5-3}{\ignorespaces Backend architecture: FastAPI, job manager, pipeline runner and RAG components}}{21}{figure.caption.20}%
-\contentsline {figure}{\numberline {5-4}{\ignorespaces Frontend workflow: user upload, SSE progress, results, and RAG chat}}{23}{figure.caption.22}%
-\addvspace {10\p@ }
-\contentsline {figure}{\numberline {6-1}{\ignorespaces Workflow of Agent~1: Structural Profiling}}{24}{figure.caption.23}%
-\contentsline {figure}{\numberline {6-2}{\ignorespaces Per-line delimiter detection and fallback in \texttt {\_read\_mixed\_delimiter\_csv} (Agent~1)}}{25}{figure.caption.24}%
-\contentsline {figure}{\numberline {6-3}{\ignorespaces Agent~2 workflow (stage 1): local type inference and prompt construction}}{27}{figure.caption.25}%
-\contentsline {figure}{\numberline {6-4}{\ignorespaces Agent~2 workflow (stage 2): batched LLM inference and schema parsing}}{27}{figure.caption.26}%
-\contentsline {figure}{\numberline {6-5}{\ignorespaces Agent~2 workflow (stage 3): enrichment, confidence scoring, and fallback}}{28}{figure.caption.27}%
-\contentsline {figure}{\numberline {6-6}{\ignorespaces Workflow of Agent~3: Preprocessing Pipeline}}{31}{figure.caption.29}%
-\contentsline {figure}{\numberline {6-7}{\ignorespaces Decimal/thousands-separator resolution in \texttt {\_normalize\_currency\_text} (Agent~3)}}{31}{figure.caption.30}%
-\contentsline {figure}{\numberline {6-8}{\ignorespaces Workflow of Agent~4: Statistical Analysis}}{34}{figure.caption.32}%
-\contentsline {figure}{\numberline {6-9}{\ignorespaces $z$-score anomaly detection in \texttt {\_detect\_anomalies} (Agent~4)}}{35}{figure.caption.33}%
-\contentsline {figure}{\numberline {6-10}{\ignorespaces Agent~5 output validation implementation: Tier-1 contract checks and Cohen's kappa gate}}{38}{figure.caption.36}%
-\contentsline {figure}{\numberline {6-11}{\ignorespaces Agent~6 insight report generation implementation: facts $\rightarrow $ LLM narrative $\rightarrow $ hybrid+grounding $\rightarrow $ Jinja2/WeasyPrint}}{41}{figure.caption.44}%
-\contentsline {figure}{\numberline {6-12}{\ignorespaces Frontend workflow: user upload, SSE progress, results, and RAG chat}}{42}{figure.caption.45}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {10-1}{\ignorespaces Project schedule and milestones}}{60}{figure.caption.57}%
-\contentsline {figure}{\numberline {10-2}{\ignorespaces Sample output: Final report demo}}{60}{figure.caption.58}%
-\contentsline {figure}{\numberline {10-3}{\ignorespaces Sample output: Web application results dashboard}}{61}{figure.caption.59}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {9-1}{\ignorespaces Decoder-only Transformer architecture used by modern LLMs}}{13}{figure.caption.16}%
+\contentsline {figure}{\numberline {9-2}{\ignorespaces Qwen3-style decoder-only Transformer with GQA, RoPE, SwiGLU, and RMSNorm}}{15}{figure.caption.17}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {10-1}{\ignorespaces System architecture and agent flow (six-agent pipeline)}}{18}{figure.caption.18}%
+\contentsline {figure}{\numberline {10-2}{\ignorespaces LangGraph workflow showing conditional routing and Agent 5 gate}}{19}{figure.caption.19}%
+\contentsline {figure}{\numberline {10-3}{\ignorespaces Backend architecture: FastAPI, job manager, pipeline runner and RAG components}}{21}{figure.caption.20}%
+\contentsline {figure}{\numberline {10-4}{\ignorespaces Frontend workflow: user upload, SSE progress, results, and RAG chat}}{23}{figure.caption.22}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {11-1}{\ignorespaces Workflow of Agent~1: Structural Profiling}}{24}{figure.caption.23}%
+\contentsline {figure}{\numberline {11-2}{\ignorespaces Per-line delimiter detection and fallback in \texttt {\_read\_mixed\_delimiter\_csv} (Agent~1)}}{25}{figure.caption.24}%
+\contentsline {figure}{\numberline {11-3}{\ignorespaces Agent~2 workflow (stage 1): local type inference and prompt construction}}{27}{figure.caption.25}%
+\contentsline {figure}{\numberline {11-4}{\ignorespaces Agent~2 workflow (stage 2): batched LLM inference and schema parsing}}{27}{figure.caption.26}%
+\contentsline {figure}{\numberline {11-5}{\ignorespaces Agent~2 workflow (stage 3): enrichment, confidence scoring, and fallback}}{28}{figure.caption.27}%
+\contentsline {figure}{\numberline {11-6}{\ignorespaces Workflow of Agent~3: Preprocessing Pipeline}}{31}{figure.caption.29}%
+\contentsline {figure}{\numberline {11-7}{\ignorespaces Decimal/thousands-separator resolution in \texttt {\_normalize\_currency\_text} (Agent~3)}}{31}{figure.caption.30}%
+\contentsline {figure}{\numberline {11-8}{\ignorespaces Workflow of Agent~4: Statistical Analysis}}{34}{figure.caption.32}%
+\contentsline {figure}{\numberline {11-9}{\ignorespaces $z$-score anomaly detection in \texttt {\_detect\_anomalies} (Agent~4)}}{35}{figure.caption.33}%
+\contentsline {figure}{\numberline {11-10}{\ignorespaces Agent~5 output validation implementation: Tier-1 contract checks and Cohen's kappa gate}}{38}{figure.caption.36}%
+\contentsline {figure}{\numberline {11-11}{\ignorespaces Agent~6 insight report generation implementation: facts $\rightarrow $ LLM narrative $\rightarrow $ hybrid+grounding $\rightarrow $ Jinja2/WeasyPrint}}{41}{figure.caption.44}%
+\contentsline {figure}{\numberline {11-12}{\ignorespaces Frontend workflow: user upload, SSE progress, results, and RAG chat}}{43}{figure.caption.45}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {15-1}{\ignorespaces Project schedule and milestones}}{62}{figure.caption.58}%
+\contentsline {figure}{\numberline {15-2}{\ignorespaces Sample output: Final report demo}}{62}{figure.caption.59}%
+\contentsline {figure}{\numberline {15-3}{\ignorespaces Sample output: Web application results dashboard}}{63}{figure.caption.60}%

@@ -125,7 +125,11 @@ def _check_row_column_reconciliation(state, ledger):
 
 
 def _check_schema_dataframe_consistency(state, ledger):
-    """Every non-dropped schema_blueprint column must exist in cleaned_df."""
+    """Every retained schema column must exist in cleaned_df.
+
+    Agent 3 removes derived columns when an equivalent canonical input column
+    is already present, recording that replacement in metadata.
+    """
     schema_blueprint = state.get("schema_blueprint", {}) or {}
     cleaned_df = state.get("cleaned_df")
 
@@ -134,11 +138,16 @@ def _check_schema_dataframe_consistency(state, ledger):
         return
 
     df_cols = set(cleaned_df.columns)
+    metadata = schema_blueprint.get("__metadata__", {})
+    canonical_derived = metadata.get("canonical_derived_metrics", {}) if isinstance(metadata, dict) else {}
     missing_from_df = []
     for col, meta in schema_blueprint.items():
         if col == "__metadata__" or not isinstance(meta, dict):
             continue
         if meta.get("dropped_by_imputation"):
+            continue
+        canonical_col = canonical_derived.get(col)
+        if canonical_col and canonical_col in df_cols:
             continue
         if col not in df_cols:
             missing_from_df.append(col)

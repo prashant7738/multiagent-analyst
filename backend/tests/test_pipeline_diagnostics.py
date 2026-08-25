@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from agents.agent_5 import ValidationLedger, _check_schema_dataframe_consistency
 from pipeline import _write_run_diagnostics, should_continue_after_agent3
 
 
@@ -62,6 +63,24 @@ class TestPipelineDiagnostics(unittest.TestCase):
             self.assertEqual(payload["agent_3"]["data_quality"]["overall_quality_score"], 98)
             self.assertEqual(payload["agent_4"]["stats"]["descriptive"]["amount"]["mean"], 5)
             self.assertEqual(payload["pipeline"]["reliability"]["overall_confidence"], 0.95)
+
+    def test_schema_check_accepts_redundant_derived_metrics_removed_by_agent3(self):
+        state = {
+            "cleaned_df": pd.DataFrame({"Revenue": [100.0], "Cost": [40.0], "Profit": [60.0]}),
+            "schema_blueprint": {
+                "Revenue": {"semantic_tag": "currency"},
+                "Cost": {"semantic_tag": "currency"},
+                "derived_profit": {"semantic_tag": "currency"},
+                "__metadata__": {
+                    "canonical_derived_metrics": {"derived_profit": "Profit"},
+                },
+            },
+        }
+        ledger = ValidationLedger()
+
+        _check_schema_dataframe_consistency(state, ledger)
+
+        self.assertEqual(ledger.checks["schema_dataframe_consistency"]["status"], "pass")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,129 @@
+\contentsline {chapter}{DECLARATION}{i}{chapter*.1}%
+\contentsline {chapter}{CERTIFICATE OF APPROVAL}{ii}{chapter*.3}%
+\contentsline {chapter}{COPYRIGHT}{iii}{chapter*.5}%
+\contentsline {chapter}{ACKNOWLEDGEMENT}{iv}{chapter*.7}%
+\contentsline {chapter}{ABSTRACT}{v}{chapter*.9}%
+\contentsline {chapter}{LIST OF FIGURES}{ix}{section*.11}%
+\contentsline {chapter}{LIST OF TABLES}{x}{section*.12}%
+\contentsline {chapter}{LIST OF ABBREVIATIONS}{xi}{chapter*.13}%
+\contentsline {chapter}{\numberline {1}INTRODUCTION}{1}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Background}{1}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Motivation}{1}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Problem Definition}{1}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Objectives}{2}{section.1.4}%
+\contentsline {section}{\numberline {1.5}Scope and Applications}{2}{section.1.5}%
+\contentsline {section}{\numberline {1.6}Report Organization}{3}{section.1.6}%
+\contentsline {chapter}{\numberline {2}LITERATURE REVIEW}{4}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Traditional Data Analytics Platforms}{4}{section.2.1}%
+\contentsline {section}{\numberline {2.2}AI-Assisted Analytics and Large Language Model-Based Data Analysis}{4}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Automated Data Visualization from Tabular/CSV Data}{5}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Agentic AI Frameworks and Multi-Agent Systems}{5}{section.2.4}%
+\contentsline {section}{\numberline {2.5}Existing Research on Automated Data Analysis Systems}{6}{section.2.5}%
+\contentsline {section}{\numberline {2.6}Research Gap and Project Positioning}{6}{section.2.6}%
+\contentsline {chapter}{\numberline {3}REQUIREMENT ANALYSIS}{7}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Functional Requirements}{7}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Non-Functional Requirements}{7}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Software Requirements}{7}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Feasibility Study}{8}{section.3.4}%
+\contentsline {subsection}{\numberline {3.4.1}Technical Feasibility}{8}{subsection.3.4.1}%
+\contentsline {subsection}{\numberline {3.4.2}Operational Feasibility}{8}{subsection.3.4.2}%
+\contentsline {subsection}{\numberline {3.4.3}Economic Feasibility}{8}{subsection.3.4.3}%
+\contentsline {section}{\numberline {3.5}Dataset Analysis}{8}{section.3.5}%
+\contentsline {section}{\numberline {3.6}Requirement Status}{10}{section.3.6}%
+\contentsline {chapter}{\numberline {4}THEORETICAL APPROACH}{11}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Large Language Model Theory}{11}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}Decoder-Only Transformer Architecture}{11}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Tokenization and Embedding}{11}{subsection.4.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}Self-Attention}{11}{subsection.4.1.3}%
+\contentsline {subsection}{\numberline {4.1.4}Next-Token Prediction}{12}{subsection.4.1.4}%
+\contentsline {section}{\numberline {4.2}Groq API and LLM Inference Architecture}{13}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Why the Groq API Is Used}{14}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}The Qwen3-27B Model}{14}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Agent~2 API Call and Prompt Processing}{16}{subsection.4.2.3}%
+\contentsline {chapter}{\numberline {5}SYSTEM ARCHITECTURE AND METHODOLOGY}{18}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Overall Pipeline}{18}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Shared State Design}{19}{section.5.2}%
+\contentsline {section}{\numberline {5.3}LangGraph Orchestration and Conditional Routing}{20}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Reliability and Confidence Propagation}{20}{section.5.4}%
+\contentsline {section}{\numberline {5.5}Backend Architecture}{21}{section.5.5}%
+\contentsline {subsection}{\numberline {5.5.1}Core Components}{21}{subsection.5.5.1}%
+\contentsline {subsection}{\numberline {5.5.2}API Endpoints}{21}{subsection.5.5.2}%
+\contentsline {section}{\numberline {5.6}Frontend Workflow}{22}{section.5.6}%
+\contentsline {chapter}{\numberline {6}IMPLEMENTATION DETAILS}{24}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Agent 1: Structural Profiler}{24}{section.6.1}%
+\contentsline {subsection}{\numberline {6.1.1}Overview and Purpose}{24}{subsection.6.1.1}%
+\contentsline {subsection}{\numberline {6.1.2}Inputs and Outputs}{24}{subsection.6.1.2}%
+\contentsline {subsection}{\numberline {6.1.3}Processing Workflow}{24}{subsection.6.1.3}%
+\contentsline {subsection}{\numberline {6.1.4}Key Functions}{24}{subsection.6.1.4}%
+\contentsline {subsection}{\numberline {6.1.5}Reliability and Pipeline Interaction}{25}{subsection.6.1.5}%
+\contentsline {section}{\numberline {6.2}Agent 2: Semantic Tagger}{26}{section.6.2}%
+\contentsline {subsection}{\numberline {6.2.1}Overview and Purpose}{26}{subsection.6.2.1}%
+\contentsline {subsection}{\numberline {6.2.2}Inputs and Outputs}{26}{subsection.6.2.2}%
+\contentsline {subsection}{\numberline {6.2.3}Processing Workflow}{26}{subsection.6.2.3}%
+\contentsline {subsection}{\numberline {6.2.4}Key Functions}{28}{subsection.6.2.4}%
+\contentsline {subsection}{\numberline {6.2.5}Reliability and Pipeline Interaction}{28}{subsection.6.2.5}%
+\contentsline {section}{\numberline {6.3}Agent 3: Preprocessor}{29}{section.6.3}%
+\contentsline {subsection}{\numberline {6.3.1}Overview and Purpose}{29}{subsection.6.3.1}%
+\contentsline {subsection}{\numberline {6.3.2}Inputs and Outputs}{29}{subsection.6.3.2}%
+\contentsline {subsection}{\numberline {6.3.3}Profile Selection}{29}{subsection.6.3.3}%
+\contentsline {subsection}{\numberline {6.3.4}Processing Workflow}{30}{subsection.6.3.4}%
+\contentsline {subsection}{\numberline {6.3.5}Key Functions}{31}{subsection.6.3.5}%
+\contentsline {subsection}{\numberline {6.3.6}Validation and Data Quality}{33}{subsection.6.3.6}%
+\contentsline {subsection}{\numberline {6.3.7}Reliability and Pipeline Interaction}{33}{subsection.6.3.7}%
+\contentsline {section}{\numberline {6.4}Agent 4: Statistical Analysis}{33}{section.6.4}%
+\contentsline {subsection}{\numberline {6.4.1}Overview and Purpose}{33}{subsection.6.4.1}%
+\contentsline {subsection}{\numberline {6.4.2}Inputs and Outputs}{34}{subsection.6.4.2}%
+\contentsline {subsection}{\numberline {6.4.3}Processing Workflow}{34}{subsection.6.4.3}%
+\contentsline {subsection}{\numberline {6.4.4}Key Functions}{35}{subsection.6.4.4}%
+\contentsline {subsection}{\numberline {6.4.5}Reliability and Pipeline Interaction}{37}{subsection.6.4.5}%
+\contentsline {section}{\numberline {6.5}Agent 5: Output Validation \& Trust Gate}{37}{section.6.5}%
+\contentsline {subsection}{\numberline {6.5.1}Overview and Purpose}{37}{subsection.6.5.1}%
+\contentsline {subsection}{\numberline {6.5.2}Inputs and Outputs}{37}{subsection.6.5.2}%
+\contentsline {subsection}{\numberline {6.5.3}Processing Workflow}{37}{subsection.6.5.3}%
+\contentsline {subsubsection}{Tier 1: Deterministic Contract Checks}{37}{subsubsection*.34}%
+\contentsline {subsubsection}{Tier 2: Cohen's Kappa}{38}{subsubsection*.35}%
+\contentsline {subsection}{\numberline {6.5.4}Scoring and Gating}{38}{subsection.6.5.4}%
+\contentsline {section}{\numberline {6.6}Agent 6: Insight Report Generator}{38}{section.6.6}%
+\contentsline {subsection}{\numberline {6.6.1}Overview and Purpose}{38}{subsection.6.6.1}%
+\contentsline {subsection}{\numberline {6.6.2}Inputs and Outputs}{39}{subsection.6.6.2}%
+\contentsline {subsection}{\numberline {6.6.3}Processing Workflow}{39}{subsection.6.6.3}%
+\contentsline {subsubsection}{1. Deterministic Fact Extraction}{39}{subsubsection*.37}%
+\contentsline {subsubsection}{2. LLM Narrative Generation}{40}{subsubsection*.38}%
+\contentsline {subsubsection}{3. Claim Grounding}{40}{subsubsection*.39}%
+\contentsline {subsubsection}{4. Hybrid Composition}{40}{subsubsection*.40}%
+\contentsline {subsubsection}{5. Recommendation Grounding}{40}{subsubsection*.41}%
+\contentsline {subsubsection}{6. Table-Cell and Raw-Column Guards}{40}{subsubsection*.42}%
+\contentsline {subsubsection}{7. Rendering}{41}{subsubsection*.43}%
+\contentsline {section}{\numberline {6.7}Backend API Implementation}{41}{section.6.7}%
+\contentsline {subsection}{\numberline {6.7.1}App and Configuration}{41}{subsection.6.7.1}%
+\contentsline {subsection}{\numberline {6.7.2}Endpoints}{41}{subsection.6.7.2}%
+\contentsline {subsection}{\numberline {6.7.3}Job Manager and Pipeline Runner}{41}{subsection.6.7.3}%
+\contentsline {subsection}{\numberline {6.7.4}SSE Streaming}{42}{subsection.6.7.4}%
+\contentsline {subsection}{\numberline {6.7.5}RAG Dataset Chat}{42}{subsection.6.7.5}%
+\contentsline {section}{\numberline {6.8}Frontend Implementation}{42}{section.6.8}%
+\contentsline {subsection}{\numberline {6.8.1}Stack and Structure}{42}{subsection.6.8.1}%
+\contentsline {subsection}{\numberline {6.8.2}Routing and Authentication}{43}{subsection.6.8.2}%
+\contentsline {subsection}{\numberline {6.8.3}API Client and SSE}{43}{subsection.6.8.3}%
+\contentsline {subsection}{\numberline {6.8.4}Key Components}{43}{subsection.6.8.4}%
+\contentsline {chapter}{\numberline {7}RESULTS AND ANALYSIS}{44}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Pipeline Execution Summary}{44}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Per-Agent Outputs}{44}{section.7.2}%
+\contentsline {subsection}{\numberline {7.2.1}Agent 1: Structural Profiling}{44}{subsection.7.2.1}%
+\contentsline {subsection}{\numberline {7.2.2}Agent 2: Semantic Tagging}{44}{subsection.7.2.2}%
+\contentsline {subsection}{\numberline {7.2.3}Agent 3: Preprocessing}{45}{subsection.7.2.3}%
+\contentsline {subsection}{\numberline {7.2.4}Agent 4: Statistical Analysis and Visualization}{45}{subsection.7.2.4}%
+\contentsline {subsection}{\numberline {7.2.5}Agent 5: Validation}{46}{subsection.7.2.5}%
+\contentsline {subsection}{\numberline {7.2.6}Agent 6: Report Generation}{47}{subsection.7.2.6}%
+\contentsline {section}{\numberline {7.3}Performance and Reliability}{48}{section.7.3}%
+\contentsline {subsection}{\numberline {7.3.1}API Usage and Runtime Observability}{48}{subsection.7.3.1}%
+\contentsline {subsection}{\numberline {7.3.2}RAG Chat Evaluation Status}{51}{subsection.7.3.2}%
+\contentsline {section}{\numberline {7.4}Error Analysis and Validation Discussion}{53}{section.7.4}%
+\contentsline {chapter}{\numberline {8}FUTURE ENHANCEMENT}{54}{chapter.8}%
+\contentsline {chapter}{\numberline {9}CONCLUSION}{55}{chapter.9}%
+\contentsline {chapter}{\numberline {10}APPENDICES}{56}{chapter.10}%
+\contentsline {section}{Appendix A: Dataset Details}{56}{section*.52}%
+\contentsline {section}{Appendix B: Cost Estimate}{57}{section*.52}%
+\contentsline {section}{Appendix C: Project Timeline}{58}{table.caption.53}%
+\contentsline {section}{Appendix D: Sample Generated Report Screenshots}{59}{figure.caption.55}%
+\contentsline {section}{Appendix E: Agent Run Diagnostics Excerpt}{60}{figure.caption.57}%
+\contentsline {chapter}{REFERENCES}{61}{section*.58}%

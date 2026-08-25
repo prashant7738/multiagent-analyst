@@ -196,30 +196,40 @@ export default function DatasetChat({ jobId }) {
   const ragPct = ragTotal > 0 ? Math.min(100, Math.round((ragEmbedded / ragTotal) * 100)) : null;
   const ragIndexedRows = Number(rag?.sampleInfo?.sampled_rows ?? 0);
 
+  // Only show the button if RAG is ready, building, or failed (not in null/unknown state)
+  const shouldShowButton = rag && (ragBuilding || ragReady || ragFailed);
+
   return (
     <>
-      {/* Floating trigger — appears only after results exist */}
-      <button
-        ref={triggerRef}
-        onClick={() => setOpen(true)}
-        className={cn(
-          "pressable fixed bottom-6 right-6 z-50 inline-flex h-12 items-center gap-2 rounded-full",
-          "bg-accent px-5 text-sm font-medium text-white shadow-lg transition-colors hover:bg-accent-hover"
-        )}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-      >
-        <span className="relative inline-flex">
-          <MessageCircleQuestion size={17} strokeWidth={1.75} aria-hidden="true" />
-          {ragBuilding && (
-            <span
-              className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full border-2 border-accent bg-white animate-pulse"
-              aria-hidden="true"
-            />
+      {/* Floating trigger — appears only when dataset is indexed or indexing */}
+      {shouldShowButton && (
+        <button
+          ref={triggerRef}
+          onClick={() => setOpen(true)}
+          disabled={ragFailed}
+          className={cn(
+            "pressable fixed bottom-6 right-6 z-50 inline-flex h-12 items-center gap-2 rounded-full",
+            "shadow-lg transition-colors",
+            ragFailed
+              ? "bg-danger text-white hover:bg-danger/90 cursor-not-allowed opacity-60"
+              : "bg-accent px-5 text-sm font-medium text-white hover:bg-accent-hover"
           )}
-        </span>
-        Ask about this dataset
-      </button>
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={ragFailed ? "Dataset indexing failed" : "Ask questions about this dataset"}
+        >
+          <span className="relative inline-flex">
+            <MessageCircleQuestion size={17} strokeWidth={1.75} aria-hidden="true" />
+            {ragBuilding && (
+              <span
+                className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-accent animate-pulse"
+                aria-hidden="true"
+              />
+            )}
+          </span>
+          Ask about this dataset
+        </button>
+      )}
 
       <AnimatePresence>
         {open && (
@@ -281,7 +291,9 @@ export default function DatasetChat({ jobId }) {
                 <div>
                   <h2 className="font-heading text-base font-semibold text-ink">Ask about this dataset</h2>
                   <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
-                    Grounded in this run&apos;s verified stats
+                    {ragReady && "Grounded in this run's verified stats"}
+                    {ragBuilding && "Building index—questions available when ready"}
+                    {ragFailed && "Index build failed—questions unavailable"}
                   </p>
                 </div>
                 <button
@@ -296,7 +308,19 @@ export default function DatasetChat({ jobId }) {
               </header>
 
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
-                {historyLoaded && messages.length === 0 && (
+                {ragFailed && (
+                  <div className="rounded-lg border border-danger/30 bg-danger/10 p-4">
+                    <p className="text-xs text-danger font-medium">Dataset indexing failed</p>
+                    <p className="text-xs text-danger/80 mt-1">{rag?.error || "Unable to build search index"}</p>
+                  </div>
+                )}
+                {ragBuilding && (
+                  <div className="rounded-lg border border-accent/30 bg-accent/10 p-4">
+                    <p className="text-xs text-accent font-medium">Dataset is being indexed</p>
+                    <p className="text-xs text-accent/80 mt-1">You can ask questions once the index is ready</p>
+                  </div>
+                )}
+                {historyLoaded && messages.length === 0 && ragReady && (
                   <div className="flex flex-col gap-2">
                     <p className="text-sm text-ink-faint">Try one of these to start:</p>
                     {SUGGESTED_QUESTIONS.map((q) => (
@@ -397,16 +421,23 @@ export default function DatasetChat({ jobId }) {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onKeyDown}
+                  disabled={!ragReady || loading}
                   rows={1}
-                  placeholder="Ask a question about this dataset…"
+                  placeholder={
+                    ragFailed
+                      ? "Indexing failed—questions unavailable"
+                      : ragBuilding
+                      ? "Indexing dataset…questions available soon"
+                      : "Ask a question about this dataset…"
+                  }
                   aria-label="Your question"
-                  className="max-h-32 min-h-[42px] flex-1 resize-none rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent"
+                  className="max-h-32 min-h-[42px] flex-1 resize-none rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <button
                   onClick={() => send()}
-                  disabled={loading || !input.trim()}
+                  disabled={loading || !input.trim() || !ragReady}
                   aria-label="Send question"
-                  className="pressable flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-(--radius-control) bg-accent text-white transition-colors hover:bg-accent-hover disabled:bg-raised disabled:text-ink-faint"
+                  className="pressable flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-(--radius-control) bg-accent text-white transition-colors hover:bg-accent-hover disabled:bg-raised disabled:text-ink-faint disabled:cursor-not-allowed"
                 >
                   <Send size={16} strokeWidth={1.75} />
                 </button>

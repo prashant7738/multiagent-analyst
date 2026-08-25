@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, ArrowLeft, RotateCcw, Upload, Download, CheckCircle2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, RotateCcw, Upload, Download, CheckCircle2, FileBarChart2 } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
 import Dropzone from "@/components/Dropzone";
 import RunSettings from "@/components/RunSettings";
@@ -282,6 +282,10 @@ export default function AnalyzePage() {
   const doneCount = agentStates.filter((a) => a.status === DONE).length;
   const progressPct = (doneCount / AGENTS.length) * 100;
   const reportHref = jobId ? reportDownloadUrl(jobId) : "#";
+  const analysisReady = Boolean(jobId && agentStates.some((agent) => agent.id === 6 && agent.status === DONE));
+  const openAnalysis = () => {
+    if (jobId) navigate(`/analyze/${jobId}`);
+  };
 
   /* ── UPLOAD ─────────────────────────────────────────────────────────────*/
   if (phase === "upload" && !routeJobId && !historyLoading) {
@@ -405,6 +409,20 @@ export default function AnalyzePage() {
         <div className="w-full mt-8">
           <PipelineTimeline agents={agentStates} elapsedTotal={elapsedTotal} />
         </div>
+
+        {analysisReady && (
+          <motion.button
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={openAnalysis}
+            className="mt-8 inline-flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white font-semibold rounded-sm transition-all"
+          >
+            <FileBarChart2 className="w-4 h-4" />
+            View Analysis
+          </motion.button>
+        )}
       </AppLayout>
     );
   }

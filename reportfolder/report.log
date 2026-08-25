@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.1.21)  25 AUG 2026 21:30
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.1.21)  25 AUG 2026 21:39
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1132,173 +1132,114 @@ Underfull \hbox (badness 1817) in paragraph at lines 1308--1309
 \T1/ptm/m/n/12 (+20) The re-sults be-low come from a com-plete pipeline run on the \T1/cmtt/m/n/12 10000 Sales
  []
 
+LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <10> not available
+(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 1333.
+LaTeX Font Info:    Font shape `OT1/ptm/bx/n' in size <7.4> not available
+(Font)              Font shape `OT1/ptm/b/n' tried instead on input line 1333.
 
-Underfull \hbox (badness 10000) in paragraph at lines 1336--1336
-[]|\T1/ptm/m/n/12 (+20) Numerical ac-cu-
+Underfull \hbox (badness 6348) in paragraph at lines 1339--1339
+\T1/ptm/m/n/10 (+20) of 23 nar-ra-tive fig-ures against
  []
 
 
-Underfull \hbox (badness 7888) in paragraph at lines 1336--1336
-\T1/ptm/m/n/12 (+20) break-downs, and rank-ings
+Underfull \hbox (badness 1142) in paragraph at lines 1339--1339
+\T1/ptm/m/n/10 (+20) and a sep-a-rate ground-truth row-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1336--1337
-[]|\T1/ptm/m/n/12 (+20) Rankings and per-cent-ages
+Underfull \hbox (badness 1024) in paragraph at lines 1341--1341
+[]|\T1/ptm/m/n/10 (+20) Duplicate and missing-value han-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1336--1337
-\T1/ptm/m/n/12 (+20) were di-rec-tion-ally cor-rect,
+Underfull \hbox (badness 2042) in paragraph at lines 1341--1341
+\T1/ptm/m/n/10 (+20) across 52 rows, and a re-ported
  []
 
 
-Underfull \hbox (badness 3724) in paragraph at lines 1336--1337
-\T1/ptm/m/n/12 (+20) but ab-so-lute dol-lar fig-ures
+Underfull \hbox (badness 10000) in paragraph at lines 1341--1342
+[]|\T1/ptm/m/n/10 (+20) No data-quality or anomaly-
  []
 
 
-Underfull \hbox (badness 2951) in paragraph at lines 1336--1337
-\T1/ptm/m/n/12 (+20) had a con-sis-tent 10 times
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1337--1337
-[]|\T1/ptm/m/n/12 (+20) Output Val-i-da-tion cross-
- []
-
-
-Underfull \hbox (badness 5490) in paragraph at lines 1337--1338
-\T1/ptm/m/n/12 (+20) so nu-mer-i-cal er-rors could
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1338--1338
-[]|\T1/ptm/m/n/12 (+20) Pearson cor-re-la-tions with
- []
-
-
-Underfull \hbox (badness 1527) in paragraph at lines 1338--1338
-\T1/ptm/m/n/12 (+20) tau-tol-ogy fil-ter-ing, adap-tive
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1338--1338
-\T1/ptm/m/n/12 (+20) trends, and shipping-time
- []
-
-
-Underfull \hbox (badness 1960) in paragraph at lines 1339--1339
-\T1/ptm/m/n/12 (+20) han-dling, anomaly flag-ging
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1340--1340
-[]|\T1/ptm/m/n/12 (+20) Figures and charts were
- []
-
-
-Underfull \hbox (badness 5064) in paragraph at lines 1340--1340
-\T1/ptm/m/n/12 (+20) sourced from de-ter-min-is-tic
- []
-
-
-Underfull \hbox (badness 2671) in paragraph at lines 1341--1341
-[]|\T1/ptm/m/n/12 (+20) A 27-page re-port cov-er-ing
- []
-
-
-Underfull \hbox (badness 1142) in paragraph at lines 1341--1342
-\T1/ptm/m/n/12 (+20) mary of ap-prox-i-mately five
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1342--1343
-[]|\T1/ptm/m/n/12 (+20) Recommendations were
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1342--1343
-\T1/ptm/m/n/12 (+20) broader and less tied to
+Underfull \hbox (badness 5388) in paragraph at lines 1343--1343
+[]|\T1/ptm/m/n/10 (+20) A 27-page re-port cov-er-ing the
  []
 
 [44
 
-]
-Overfull \vbox (112.44968pt too high) has occurred while \output is active []
-
- [45] [46]
-Underfull \hbox (badness 10000) in paragraph at lines 1397--1398
+] [45] [46]
+Underfull \hbox (badness 10000) in paragraph at lines 1399--1400
 []|\T1/ptm/m/n/12 (+20) Pearson cor-re-la-tions
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1397--1398
+Underfull \hbox (badness 10000) in paragraph at lines 1399--1400
 \T1/ptm/m/n/12 (+20) among nu-meric
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1398--1399
+Underfull \hbox (badness 10000) in paragraph at lines 1400--1401
 []|\T1/ptm/m/n/12 (+20) Spread of nu-meric
  []
 
 
-Overfull \hbox (1.61458pt too wide) in paragraph at lines 1402--1402
+Overfull \hbox (1.61458pt too wide) in paragraph at lines 1404--1404
 []|\T1/ptm/m/n/12 (-20) monthly_total_revenue_seasonality.png| 
  []
 
 
-Underfull \hbox (badness 1931) in paragraph at lines 1402--1403
+Underfull \hbox (badness 1931) in paragraph at lines 1404--1405
 []|\T1/ptm/m/n/12 (+20) Monthly rev-enue sea-
  []
 
 
-Overfull \hbox (3.2793pt too wide) in paragraph at lines 1393--1409
+Overfull \hbox (3.2793pt too wide) in paragraph at lines 1395--1411
  [][] 
  []
 
 [47] [48]
-Underfull \hbox (badness 1231) in paragraph at lines 1438--1439
+Underfull \hbox (badness 1231) in paragraph at lines 1440--1441
 \T1/ptm/m/n/12 (+20) not an ex-ter-nal human-label ac-cu-racy
  []
 
 
-Underfull \hbox (badness 1248) in paragraph at lines 1463--1463
+Underfull \hbox (badness 1248) in paragraph at lines 1465--1465
 []|\T1/ptm/m/n/12 (+20) Grounding 21/21, nar-ra-tive =
  []
 
 
-Overfull \hbox (1.0529pt too wide) in paragraph at lines 1454--1468
+Overfull \hbox (1.0529pt too wide) in paragraph at lines 1456--1470
  [][] 
  []
 
 [49] [50]
-Underfull \hbox (badness 2799) in paragraph at lines 1503--1504
+Underfull \hbox (badness 2799) in paragraph at lines 1505--1506
 []|\T1/ptm/m/n/12 (+20) Agent 2 cap-tures provider use;
  []
 
 
-Underfull \hbox (badness 1189) in paragraph at lines 1504--1505
+Underfull \hbox (badness 1189) in paragraph at lines 1506--1507
 []|\T1/ptm/m/n/12 (+20) Requires read-ing provider us-age
  []
 
 
-Underfull \hbox (badness 1132) in paragraph at lines 1507--1508
+Underfull \hbox (badness 1132) in paragraph at lines 1509--1510
 []|\T1/ptm/m/n/12 (+20) Requires tim-ing wrap-per around
  []
 
 
-Overfull \hbox (17.50568pt too wide) in paragraph at lines 1498--1513
+Overfull \hbox (17.50568pt too wide) in paragraph at lines 1500--1515
  [][] 
  []
 
 [51] [52]
-Overfull \hbox (1.091pt too wide) in paragraph at lines 1544--1544
+Overfull \hbox (1.091pt too wide) in paragraph at lines 1546--1546
 []|\T1/ptm/m/n/12 (-20) Precision| 
  []
 
 
-Overfull \hbox (18.74335pt too wide) in paragraph at lines 1542--1560
+Overfull \hbox (18.74335pt too wide) in paragraph at lines 1544--1562
  [][] 
  []
 
@@ -1314,25 +1255,25 @@ Chapter 9.
 Chapter 10.
 
 Package hyperref Warning: The anchor of a bookmark and its parent's must not
-(hyperref)                be the same. Added a new anchor on input line 1607.
+(hyperref)                be the same. Added a new anchor on input line 1609.
 
 
-Underfull \hbox (badness 3568) in paragraph at lines 1609--1610
+Underfull \hbox (badness 3568) in paragraph at lines 1611--1612
 \T1/ptm/m/n/12 (+20) The sam-ple dataset used for val-i-da-tion and demon-stra-tion is \T1/cmtt/m/n/12 10000 Sales
  []
 
 
-Underfull \hbox (badness 5939) in paragraph at lines 1640--1641
+Underfull \hbox (badness 5939) in paragraph at lines 1642--1643
 []|\T1/ptm/m/n/12 (+20) Free for lo-cal/-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1641--1642
+Underfull \hbox (badness 10000) in paragraph at lines 1643--1644
 []|\T1/ptm/m/n/12 (+20) Usage-based;
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1642--1643
+Underfull \hbox (badness 10000) in paragraph at lines 1644--1645
 []|\T1/ptm/m/n/12 (+20) Project main-te-
  []
 
@@ -1340,7 +1281,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 1642--1643
 
 
 ]
-Underfull \hbox (badness 5726) in paragraph at lines 1665--1665
+Underfull \hbox (badness 5726) in paragraph at lines 1667--1667
 []|\T1/ptm/m/n/12 (+20) Documentation and re-port
  []
 
@@ -1348,26 +1289,26 @@ Underfull \hbox (badness 5726) in paragraph at lines 1665--1665
 <project_schedule.png, id=1226, 1102.1175pt x 963.6pt>
 File: project_schedule.png Graphic file (type png)
 <use project_schedule.png>
-Package pdftex.def Info: project_schedule.png  used on input line 1674.
+Package pdftex.def Info: project_schedule.png  used on input line 1676.
 (pdftex.def)             Requested size: 375.14705pt x 328.00195pt.
  [59]
 <final_report.png, id=1231, 641.89813pt x 431.11063pt>
 File: final_report.png Graphic file (type png)
 <use final_report.png>
-Package pdftex.def Info: final_report.png  used on input line 1684.
+Package pdftex.def Info: final_report.png  used on input line 1686.
 (pdftex.def)             Requested size: 375.1514pt x 251.95859pt.
 <dashboard_screenshot.png, id=1232, 822.57312pt x 429.605pt>
 File: dashboard_screenshot.png Graphic file (type png)
 <use dashboard_screenshot.png>
-Package pdftex.def Info: dashboard_screenshot.png  used on input line 1691.
+Package pdftex.def Info: dashboard_screenshot.png  used on input line 1693.
 (pdftex.def)             Requested size: 375.14995pt x 195.92944pt.
  [60 <./project_schedule.png> <./final_report.png>]
-Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on input line 1701.
+Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on input line 1703.
  [61 <./dashboard_screenshot.png>] [62
 
 
 ]
-Underfull \hbox (badness 10000) in paragraph at lines 1762--1763
+Underfull \hbox (badness 10000) in paragraph at lines 1764--1765
 []\T1/ptm/m/n/12 (+20) N. Shazeer, ``GLU Vari-ants Im-prove Trans-former,'' arXiv preprint
  []
 
@@ -1380,18 +1321,18 @@ Package rerunfilecheck Info: File `report.out' has not changed.
 (rerunfilecheck)             Checksum: FB4C3FA1A7364963DA93E5940268078E;21852.
  ) 
 Here is how much of TeX's memory you used:
- 18184 strings out of 474222
- 278791 string characters out of 5748733
+ 18271 strings out of 474222
+ 279923 string characters out of 5748733
  1998975 words of memory out of 5000000
- 39425 multiletter control sequences out of 15000+600000
- 629374 words of font info for 364 fonts, out of 8000000 for 9000
+ 39459 multiletter control sequences out of 15000+600000
+ 638804 words of font info for 413 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,12n,79p,1480b,1595s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfit1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1200.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/symbol/usyr.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/symbol/usyr.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on report.pdf (76 pages, 4368750 bytes).
+Output written on report.pdf (76 pages, 4368647 bytes).
 PDF statistics:
  1427 PDF objects out of 1440 (max. 8388607)
  1282 compressed objects within 13 object streams
  391 named destinations out of 1000 (max. 500000)
- 63523 words of extra memory for PDF output out of 74296 (max. 10000000)
+ 74787 words of extra memory for PDF output out of 89155 (max. 10000000)
 

@@ -98,6 +98,7 @@ export default function AnalyzePage() {
   const timerRef = useRef(null);
   const agentStartRef = useRef({});
   const runStatusRef = useRef("idle");
+  const liveJobIdRef = useRef(null);
 
   const closeStream = () => {
     eventSourceRef.current?.close();
@@ -113,7 +114,7 @@ export default function AnalyzePage() {
     // reflects the report (see finish() below) — the result is already loaded
     // at that point, so skip the network refetch instead of flashing back to
     // the upload screen while it reloads data we already have.
-    if (routeJobId === jobId && runStatusRef.current === "done") return;
+    if (routeJobId === liveJobIdRef.current && runStatusRef.current === "done") return;
 
     let cancelled = false;
 
@@ -254,6 +255,7 @@ export default function AnalyzePage() {
     try {
       const analysisConfig = buildAnalysisConfig(runConfig);
       const { job_id, stream_url } = await analyzeCsv(file, analysisConfig);
+      liveJobIdRef.current = job_id;
       setJobId(job_id);
       eventSourceRef.current = subscribeToJobStream(stream_url, {
         onEvent: (name, data) => handleStreamEvent(job_id, name, data),

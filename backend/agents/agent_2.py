@@ -874,7 +874,7 @@ def _call_llm_for_schema_blueprint(
     raw_profile: dict,
     columns: list[str],
 ) -> dict:
-    """Ask Claude for schema metadata, falling back to Gemini on provider failure."""
+    """Ask Groq for schema metadata, falling back to Gemini on provider failure."""
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
     user_content = f"Produce schema blueprint for these columns:\n{user_prompt}"
 
@@ -926,7 +926,9 @@ def _call_llm_for_schema_blueprint(
         # json.JSONDecodeError) can still split the batch and retry on malformed JSON
         raise
     except Exception as gemini_error:
-        raise RuntimeError(f"Claude and Gemini calls failed: {gemini_error}") from gemini_error
+        raise RuntimeError(
+            f"Groq and Gemini calls failed (Groq: {groq_error}; Gemini: {gemini_error})"
+        ) from gemini_error
 
 
 def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> dict:

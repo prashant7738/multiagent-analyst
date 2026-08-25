@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, AlertCircle, CheckCircle, BarChart3, Download } from 'lucide-react';
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, AlertCircle, AlertTriangle, CheckCircle, BarChart3, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
 import DownloadReportModal from './DownloadReportModal';
 
@@ -58,6 +58,11 @@ const ReportDashboard = ({ reportData }) => {
   const quality = data_quality.overall_quality_score || 0;
   const validationScore = validation.overall_validation_score || 0;
   const confidence = reportData_.reliability?.overall_confidence || 0.85;
+
+  // "llm" (Groq/Gemini classified each column this run) or "fallback" (both providers
+  // failed, so metadata-only heuristics were used instead) — see agent_2.py / result_builder.py.
+  const taggingSource = summary.semantic_tagging_source;
+  const taggingFellBack = taggingSource === "fallback";
 
   const AnimatedCounter = ({ end, suffix = '' }) => {
     const [count, setCount] = React.useState(0);
@@ -181,6 +186,28 @@ const ReportDashboard = ({ reportData }) => {
           {/* Overview */}
           <SectionCard title="Dataset Overview" icon={BarChart3} sectionKey="overview">
             <div className="space-y-4">
+              {taggingSource && (
+                <div
+                  className={`flex items-center gap-2 rounded-sm border p-3 text-xs font-medium ${
+                    taggingFellBack
+                      ? "border-warning/30 bg-warning-subtle text-warning"
+                      : "border-success/30 bg-success/10 text-success"
+                  }`}
+                >
+                  {taggingFellBack ? (
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <CheckCircle className="h-4 w-4 shrink-0" />
+                  )}
+                  <span>
+                    {taggingFellBack
+                      ? `Column semantics used heuristic fallback — the AI model was unavailable during this run${
+                          summary.semantic_tagging_error ? ` (${summary.semantic_tagging_error})` : ""
+                        }.`
+                      : "Column semantics were classified by the AI model (Groq or Gemini)."}
+                  </span>
+                </div>
+              )}
               {narrative_.executive_summary && (
                 <div className="border border-neutral-200 dark:border-neutral-800 p-4 rounded-sm bg-neutral-50 dark:bg-neutral-800">
                   <p className="font-semibold text-black dark:text-white mb-2 text-sm">Executive Summary</p>

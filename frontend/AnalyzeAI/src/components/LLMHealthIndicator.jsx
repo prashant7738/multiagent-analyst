@@ -2,12 +2,15 @@ import React, { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle, AlertTriangle, RotateCw } from "lucide-react";
 
 /**
- * Display LLM connectivity status (Groq for semantic tagging, Gemini for fallback, HF for embeddings).
+ * Display LLM connectivity status (Groq for semantic tagging, Gemini for fallback, HF for embeddings)
+ * plus the RAG database status (Postgres+pgvector) that dataset-chat actually depends on — this can
+ * be down even when every LLM shows healthy, since none of the LLM checks touch Postgres.
  * Fetches health from /api/health and shows indicator in navbar.
  * Manual test button triggers /api/health/test-llm for on-demand connectivity check.
  */
 export default function LLMHealthIndicator() {
   const [llmStatus, setLlmStatus] = useState({ groq: "unknown", gemini: "unknown", huggingface: "unknown" });
+  const [ragStatus, setRagStatus] = useState({ database: "unknown" });
   const [isChecking, setIsChecking] = useState(true);
   const [isTesting, setIsTesting] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -19,6 +22,7 @@ export default function LLMHealthIndicator() {
       if (response.ok) {
         const data = await response.json();
         setLlmStatus(data.llm || { groq: "unknown", gemini: "unknown", huggingface: "unknown" });
+        setRagStatus(data.rag || { database: "unknown" });
       }
     } catch (error) {
       console.error("Failed to fetch health status:", error);
@@ -35,7 +39,8 @@ export default function LLMHealthIndicator() {
       });
       if (response.ok) {
         const data = await response.json();
-        setLlmStatus({ groq: data.groq, gemini: data.gemini, huggingface: data.huggingface });
+        setLlmStatus(data.llm || { groq: "unknown", gemini: "unknown", huggingface: "unknown" });
+        setRagStatus(data.rag || { database: "unknown" });
         setLastTestTime(new Date().toLocaleTimeString());
       } else {
         console.error("Test failed with status:", response.status);
@@ -49,7 +54,12 @@ export default function LLMHealthIndicator() {
 
   useEffect(() => {
     checkHealth();
-    const interval = setInterval(checkHealth, 30000); // Check every 30s
+    // Backend checks now make a real, quota-metered call per provider (not a free
+    // connectivity ping) so decommissioned models / exhausted quota show up here
+    // instead of a false "healthy". Polling every 2 minutes instead of 30s keeps
+    // that cost sane for tight free-tier daily limits; use "Test Connections" for
+    // an immediate on-demand check.
+    const interval = setInterval(checkHealth, 120000);
     return () => clearInterval(interval);
   }, []);
 
@@ -60,9 +70,13 @@ export default function LLMHealthIndicator() {
       case "not_configured":
         return "bg-gray-400";
       case "unreachable":
+      case "model_unavailable":
         return "bg-red-500";
       case "invalid_key":
       case "unauthorized":
+      case "auth_failed":
+      case "extension_missing":
+      case "quota_exceeded":
         return "bg-orange-500";
       default:
         return "bg-gray-300";
@@ -76,7 +90,12 @@ export default function LLMHealthIndicator() {
       case "unreachable":
       case "invalid_key":
       case "unauthorized":
+      case "auth_failed":
+      case "model_unavailable":
         return <AlertCircle className="h-4 w-4 text-red-600" />;
+      case "extension_missing":
+      case "quota_exceeded":
+        return <AlertTriangle className="h-4 w-4 text-orange-600" />;
       case "not_configured":
         return <AlertTriangle className="h-4 w-4 text-gray-600" />;
       default:
@@ -91,6 +110,10 @@ export default function LLMHealthIndicator() {
       unreachable: "Unreachable",
       invalid_key: "Invalid key",
       unauthorized: "Unauthorized",
+      auth_failed: "Auth failed",
+      extension_missing: "pgvector extension missing",
+      quota_exceeded: "Quota exceeded",
+      model_unavailable: "Model decommissioned",
       unknown: "Unknown",
     };
     return labels[status] || status;
@@ -99,6 +122,7 @@ export default function LLMHealthIndicator() {
   const groqStatus = llmStatus.groq || "unknown";
   const geminiStatus = llmStatus.gemini || "unknown";
   const hfStatus = llmStatus.huggingface || "unknown";
+  const dbStatus = ragStatus.database || "unknown";
 
   return (
     <div className="relative">
@@ -112,6 +136,7 @@ export default function LLMHealthIndicator() {
           <div className={`h-2 w-2 rounded-full ${getStatusColor(groqStatus)}`} title={`Groq: ${getStatusLabel(groqStatus)}`} />
           <div className={`h-2 w-2 rounded-full ${getStatusColor(geminiStatus)}`} title={`Gemini: ${getStatusLabel(geminiStatus)}`} />
           <div className={`h-2 w-2 rounded-full ${getStatusColor(hfStatus)}`} title={`Hugging Face: ${getStatusLabel(hfStatus)}`} />
+          <div className={`h-2 w-2 rounded-full ${getStatusColor(dbStatus)}`} title={`RAG Database: ${getStatusLabel(dbStatus)}`} />
         </div>
       </button>
 
@@ -152,6 +177,14 @@ export default function LLMHealthIndicator() {
               </div>
             </div>
 
+            <div className="flex items-center gap-2">
+              {getStatusIcon(dbStatus)}
+              <div>
+                <div className="font-medium text-ink">RAG Database (Postgres/pgvector)</div>
+                <div className="text-ink-secondary">{getStatusLabel(dbStatus)}</div>
+              </div>
+            </div>
+
             {lastTestTime && (
               <div className="text-ink-muted text-xs py-1 border-t border-line">
                 Last tested: {lastTestTime}
@@ -175,6 +208,31 @@ export default function LLMHealthIndicator() {
             {(groqStatus === "unreachable" || geminiStatus === "unreachable" || hfStatus === "unreachable") && (
               <div className="rounded bg-red-50 p-2 text-red-800">
                 ❌ API unreachable. Check network and credentials.
+              </div>
+            )}
+            {(groqStatus === "model_unavailable" || geminiStatus === "model_unavailable") && (
+              <div className="rounded bg-red-50 p-2 text-red-800">
+                ❌ Configured model has been retired by the provider. Update the model constant in the backend.
+              </div>
+            )}
+            {(groqStatus === "quota_exceeded" || geminiStatus === "quota_exceeded" || hfStatus === "quota_exceeded") && (
+              <div className="rounded bg-orange-50 p-2 text-orange-800">
+                ⚠️ API quota exhausted. Check plan/billing for that provider.
+              </div>
+            )}
+            {dbStatus === "not_configured" && (
+              <div className="rounded bg-orange-50 p-2 text-orange-800">
+                ⚠️ Set DATABASE_URL to enable detailed RAG dataset chat.
+              </div>
+            )}
+            {dbStatus === "extension_missing" && (
+              <div className="rounded bg-orange-50 p-2 text-orange-800">
+                ⚠️ Run <code>CREATE EXTENSION vector;</code> on the database.
+              </div>
+            )}
+            {(dbStatus === "unreachable" || dbStatus === "auth_failed") && (
+              <div className="rounded bg-red-50 p-2 text-red-800">
+                ❌ RAG database unreachable. Check DATABASE_URL and credentials.
               </div>
             )}
           </div>

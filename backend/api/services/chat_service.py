@@ -565,6 +565,10 @@ def ask_question(manager: "JobManager", job: "Job", question: str) -> dict[str, 
     except Exception as exc:  # noqa: BLE001 — never hard-fail a chat turn
         print(f"[Chat] Both LLM providers unavailable, using fallback: {exc}")
         llm_out = _fallback_answer(context, question)
+        llm_out["answer"] = (
+            f"{llm_out['answer']} (Live AI answer generation is temporarily unavailable; "
+            "using summary facts instead.)"
+        )
 
     answer = llm_out.get("answer") or "I couldn't generate an answer for that question."
     source = llm_out.get("source", "fallback")

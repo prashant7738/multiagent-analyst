@@ -148,7 +148,10 @@ class TestChatServiceFacts(unittest.TestCase):
 
             gemini_call.assert_not_called()
             fallback_answer.assert_called_once()
-            self.assertEqual(outcome["answer"], "fallback")
+            # The live-LLM-failure fallback path now appends a visible note so a
+            # degraded answer doesn't look identical to a normal AI-generated one.
+            self.assertIn("fallback", outcome["answer"])
+            self.assertIn("temporarily unavailable", outcome["answer"])
         finally:
             chat_service._GEMINI_RETRY_AT = original_retry_at
             chat_service._GEMINI_DISABLED_BY_QUOTA = original_disabled

@@ -151,7 +151,10 @@ export default function DatasetChat({ jobId }) {
 
       try {
         const res = await askDatasetQuestion(jobId, text);
-        setMessages((prev) => [...prev, { role: "assistant", content: res.answer, chart: res.chart || null }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: res.answer, chart: res.chart || null, source: res.source },
+        ]);
         // A reply with index_status means the RAG build just started or moved —
         // refresh the indicator immediately instead of waiting for the next tick.
         if (res.index_status) setRagPollNonce((n) => n + 1);
@@ -346,6 +349,12 @@ export default function DatasetChat({ jobId }) {
                       )}
                     >
                       {message.content}
+                      {message.role === "assistant" && message.source === "fallback" && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-warning">
+                          <AlertTriangle size={12} className="shrink-0" />
+                          Fallback answer — AI model unavailable
+                        </p>
+                      )}
                       {message.chart?.url && (
                         <a href={chartUrl(message.chart.url)} target="_blank" rel="noreferrer" className="mt-3 block">
                           <img

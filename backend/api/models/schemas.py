@@ -36,15 +36,43 @@ class AgentStatus(str, Enum):
 # Health
 # ---------------------------------------------------------------------------
 class LLMHealthStatus(BaseModel):
-    groq: str = Field(default="unknown", description="Groq API status: healthy, unreachable, or error")
-    gemini: str = Field(default="unknown", description="Gemini API status: healthy, unreachable, or error")
+    groq: str = Field(
+        default="unknown",
+        description=(
+            "Groq status from a real completion call against the production model: "
+            "healthy, not_configured, invalid_key, unauthorized, model_unavailable "
+            "(model decommissioned), quota_exceeded, or unreachable"
+        ),
+    )
+    gemini: str = Field(
+        default="unknown",
+        description=(
+            "Gemini status from a real generate_content call against the production model: "
+            "healthy, not_configured, invalid_key, unauthorized, model_unavailable "
+            "(model retired), quota_exceeded, or unreachable"
+        ),
+    )
     huggingface: str = Field(default="unknown", description="Hugging Face API status: healthy, unreachable, or error")
+
+
+class RAGHealthStatus(BaseModel):
+    """Status of the RAG dataset-chat's own infrastructure, separate from LLM connectivity.
+
+    A green LLM status says nothing about whether Postgres/pgvector — the thing RAG chat
+    actually reads and writes embeddings against — is configured or reachable.
+    """
+
+    database: str = Field(
+        default="unknown",
+        description="Postgres+pgvector status: healthy, not_configured, extension_missing, auth_failed, or unreachable",
+    )
 
 
 class HealthResponse(BaseModel):
     status: str = Field(default="healthy")
     version: str = Field(default="1.0.0")
     llm: LLMHealthStatus = Field(default_factory=LLMHealthStatus)
+    rag: RAGHealthStatus = Field(default_factory=RAGHealthStatus)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +207,7 @@ class ChatMessage(BaseModel):
     content: str
     chart: dict[str, str] | None = None
     ts: datetime | None = None
+    source: str | None = None  # assistant only: "groq" | "gemini" | "fallback"
 
 
 class ChatResponse(BaseModel):

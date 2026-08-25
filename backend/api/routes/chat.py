@@ -58,7 +58,12 @@ async def ask_dataset_question(
         )
 
     user_message = {"role": "user", "content": payload.question, "chart": None}
-    assistant_message = {"role": "assistant", "content": outcome["answer"], "chart": outcome.get("chart")}
+    assistant_message = {
+        "role": "assistant",
+        "content": outcome["answer"],
+        "chart": outcome.get("chart"),
+        "source": outcome.get("source"),
+    }
     manager.add_chat_messages(job_id, [user_message, assistant_message])
 
     updated_job = manager.get_job(job_id)

@@ -114,6 +114,7 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
     if cleaned_shape:
         cleaned_shape["internal_audit_columns"] = internal_col_count
         cleaned_shape["analysis_columns"] = cleaned_shape["cols"] - internal_col_count
+    schema_metadata = schema_blueprint.get("__metadata__", {}) if isinstance(schema_blueprint, dict) else {}
     summary = {
         "filename": filename,
         "preprocessing_profile": state.get("preprocessing_profile") or analysis_config.get("preprocessing_profile"),
@@ -125,6 +126,10 @@ def build_result(job_id: str, state: dict[str, Any], filename: str | None) -> di
         "quality_score": data_quality.get("overall_quality_score"),
         "cleaned_shape": cleaned_shape,
         "column_count_tagged": len(schema_blueprint) if hasattr(schema_blueprint, "__len__") else None,
+        # "llm" (Groq/Gemini classified each column) or "fallback" (both providers failed
+        # this run, so metadata-only heuristics were used instead) — see agent_2.py.
+        "semantic_tagging_source": schema_metadata.get("tagging_source"),
+        "semantic_tagging_error": schema_metadata.get("tagging_error"),
         "chart_count": len(charts),
         "validation_passed": validation_report.get("passed"),
         "overall_confidence": reliability_out["overall_confidence"],

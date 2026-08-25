@@ -1,5 +1,5 @@
 import React from "react";
-import { Download, FileDown } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileDown } from "lucide-react";
 import { chartUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +33,11 @@ export default function ResultsView({ result, jobId }) {
   const narrative = result.insight_narrative || {};
   const findings = Array.isArray(narrative.key_findings) ? narrative.key_findings : [];
   const charts = result.charts || [];
-  const schemaEntries = Object.entries(result.schema_blueprint || {});
+  // __metadata__ carries run-level info (tagging source, data quality signals), not a
+  // real column — exclude it from the per-column table.
+  const schemaEntries = Object.entries(result.schema_blueprint || {}).filter(([column]) => column !== "__metadata__");
+  const taggingSource = result.summary?.semantic_tagging_source;
+  const taggingFellBack = taggingSource === "fallback";
   const ready = result.reliability?.decision_readiness === "ready";
 
   return (
@@ -152,7 +156,36 @@ export default function ResultsView({ result, jobId }) {
 
       {/* 4 — Schema snapshot */}
       <section aria-labelledby="results-schema">
-        <SectionHeading title="Schema snapshot" sub="How each column was interpreted." />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SectionHeading title="Schema snapshot" sub="How each column was interpreted." />
+          {taggingSource && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+                taggingFellBack ? "bg-warning-subtle text-warning" : "bg-success/10 text-success"
+              )}
+              title={
+                taggingFellBack
+                  ? `AI semantic tagging was unavailable for this run${
+                      result.summary?.semantic_tagging_error ? `: ${result.summary.semantic_tagging_error}` : ""
+                    } — columns were classified with metadata-only heuristics instead.`
+                  : "Columns were classified by the AI model (Groq or Gemini)."
+              }
+            >
+              {taggingFellBack ? (
+                <>
+                  <AlertTriangle size={12} className="shrink-0" />
+                  Heuristic fallback — AI unavailable
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={12} className="shrink-0" />
+                  AI-tagged
+                </>
+              )}
+            </span>
+          )}
+        </div>
         {schemaEntries.length > 0 ? (
           <div className="mt-3 overflow-hidden rounded-panel border border-line bg-surface">
             <table className="w-full text-sm">

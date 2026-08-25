@@ -264,8 +264,11 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
         print(f"[Gemini] JSON parse failed: finish_reason={finish_reason} raw_len={len(raw_text)} preview={raw_text[:200]!r}")
         raise
 
-GROQ_MODEL = "mixtral-8x7b-32768"
-GROQ_REASONING_EFFORT = "medium"
+GROQ_MODEL = "qwen/qwen3.6-27b"
+# "none" disables the model's <think>...</think> reasoning output — every call site parses
+# a strict JSON response, and reasoning tokens would either break that parse or burn budget
+# for nothing. Verified: reasoning_effort="none" returns clean JSON with no thinking block.
+GROQ_REASONING_EFFORT = "none"
 GEMINI_MODEL = "gemini-flash-latest"
 # gemini-2.5-flash/-lite and gemini-2.0-flash 404 on this project; use current Gemini 3.x stable IDs instead
 GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
@@ -870,6 +873,7 @@ def _call_llm_for_schema_blueprint(
             ],
             temperature=0.1,
             max_tokens=LLM_MAX_TOKENS,
+            reasoning_effort=GROQ_REASONING_EFFORT,
         )
         record_key_use(
             "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
@@ -1544,12 +1548,17 @@ def agent2_semantic_tagger(state: dict) -> dict:
                 _merge_schema_blueprints(schema_blueprint, batch_blueprint)
             _save_schema_cache(cache_key, schema_blueprint)
 
+        # Reached only when the cache hit (a prior LLM call) or the LLM call above
+        # actually returned parseable JSON — the except branches below are the only
+        # path that uses pure heuristics. Surfaced to the frontend so a job whose
+        # tagging silently degraded doesn't look identical to a normal AI-tagged run.
         schema_blueprint, excluded = _apply_missingness_policy(df, raw_profile, schema_blueprint, inferred_types)
         data_quality_signals = _assess_data_quality_signals(df, raw_profile)
         schema_blueprint["__metadata__"] = {
             "data_quality_assessment": data_quality_signals,
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
+            "tagging_source": "llm",
         }
         schema_blueprint = SchemaBlueprint(schema_blueprint)
 
@@ -1568,6 +1577,8 @@ def agent2_semantic_tagger(state: dict) -> dict:
             "data_quality_assessment": data_quality_signals,
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
+            "tagging_source": "fallback",
+            "tagging_error": f"LLM returned invalid JSON: {e}",
         }
         schema_blueprint = SchemaBlueprint(schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)
@@ -1583,6 +1594,8 @@ def agent2_semantic_tagger(state: dict) -> dict:
             "data_quality_assessment": data_quality_signals,
             "preprocessing_recommendation": data_quality_signals["preprocessing_recommendation"],
             "risk_assessment": data_quality_signals["risk_assessment"],
+            "tagging_source": "fallback",
+            "tagging_error": str(e),
         }
         schema_blueprint = SchemaBlueprint(schema_blueprint)
         _print_semantic_summary(df, schema_blueprint)

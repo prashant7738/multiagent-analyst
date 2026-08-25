@@ -241,10 +241,59 @@ def _row_to_text(row_index: int, row: dict[str, Any]) -> str:
     return f"Row {row_index}: " + " | ".join(parts)
 
 
+# Bounds for stratified sampling below - keep the guaranteed-coverage pass cheap
+# and small relative to `cap` even on datasets with many categorical columns.
+_STRAT_MAX_CATEGORICAL_UNIQUE = 20  # same "low-cardinality label" threshold agent_2 uses
+_STRAT_MAX_CATEGORICAL_COLUMNS = 8  # cap how many columns get guaranteed coverage
+_STRAT_MIN_ROWS_PER_VALUE = 3  # example rows guaranteed per category value
+
+
 def _sample_rows(df: pd.DataFrame, cap: int) -> pd.DataFrame:
+    """Sample down to ``cap`` rows for RAG indexing.
+
+    Plain random sampling can silently omit an entire category - e.g. every row with
+    order_status="Cancelled" - when ``cap`` is a small fraction of the dataset. That
+    value then isn't just hard to retrieve, it's structurally absent from the index:
+    no amount of vector search finds a row that was never embedded. This first
+    reserves a few example rows for every value of every low-cardinality categorical
+    column (object dtype, 2-20 unique values, same threshold agent_2 uses for
+    "categorical_label"), then fills the remaining budget with plain random rows as
+    before, so common questions about any category still have at least one real
+    example to retrieve.
+    """
     if len(df) <= cap:
         return df
-    return df.sample(n=cap, random_state=42).sort_index()
+
+    categorical_cols = [
+        col for col in df.columns
+        if df[col].dtype == object and 2 <= df[col].nunique(dropna=True) <= _STRAT_MAX_CATEGORICAL_UNIQUE
+    ]
+    # Coarsest-grained columns first - fewest unique values means fewest rows spent
+    # per column to guarantee full coverage.
+    categorical_cols.sort(key=lambda col: df[col].nunique(dropna=True))
+    categorical_cols = categorical_cols[:_STRAT_MAX_CATEGORICAL_COLUMNS]
+
+    guaranteed_indices: set = set()
+    for col in categorical_cols:
+        if len(guaranteed_indices) >= cap:
+            break
+        for _, group in df.groupby(col, dropna=True):
+            picks = group.sample(n=min(_STRAT_MIN_ROWS_PER_VALUE, len(group)), random_state=42)
+            guaranteed_indices.update(picks.index)
+            if len(guaranteed_indices) >= cap:
+                break
+
+    if len(guaranteed_indices) > cap:
+        guaranteed_indices = set(list(guaranteed_indices)[:cap])
+
+    remaining_cap = cap - len(guaranteed_indices)
+    if remaining_cap > 0:
+        remaining_pool = df.drop(index=list(guaranteed_indices), errors="ignore")
+        if len(remaining_pool) > 0:
+            fill = remaining_pool.sample(n=min(remaining_cap, len(remaining_pool)), random_state=42)
+            guaranteed_indices.update(fill.index)
+
+    return df.loc[sorted(guaranteed_indices)]
 
 
 def _facts_to_documents(context: dict[str, Any]) -> list[dict[str, Any]]:

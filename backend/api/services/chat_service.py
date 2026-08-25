@@ -53,6 +53,11 @@ COLORS = {
 
 MAX_HISTORY_TURNS = 6  # recent user/assistant turns replayed to the model for context
 MAX_LLM_TEXT_CHARS = 280
+# Row docs pack many "col=value" pairs onto one line (a 21-column row already runs
+# ~450 chars) - the 280/320 limit used for short fact sentences was silently cutting
+# off the last several columns (price, discount, etc.) on every retrieved row before
+# the model ever saw them. Rows get their own, larger budget instead.
+MAX_LLM_ROW_TEXT_CHARS = 600
 MAX_LLM_USER_CONTENT_CHARS = 12000
 GEMINI_COOLDOWN_SECONDS = 60
 ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
@@ -220,7 +225,7 @@ def _build_rag_user_content(retrieved: dict[str, Any], question: str, history: l
         if doc.get("doc_text")
     ]
     compact_rows = [
-        {"row_index": doc.get("row_index"), "text": _truncate_text(doc.get("doc_text"), 320)}
+        {"row_index": doc.get("row_index"), "text": _truncate_text(doc.get("doc_text"), MAX_LLM_ROW_TEXT_CHARS)}
         for doc in rows
         if doc.get("doc_text")
     ]

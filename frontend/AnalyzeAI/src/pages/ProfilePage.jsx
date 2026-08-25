@@ -1,251 +1,381 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Trash2, LogOut, Plus, Eye, Settings, History } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
-import Button from "@/components/ui/button";
 import useJobHistory from "@/hooks/useJobHistory";
 import { useAuth } from "@/contexts/AuthContext";
 
-/**
- * GOAL: "what have I done, and how well is it going?" One overview: identity,
- * honest account info (no fake Save), and the same job table as History via
- * the shared hook.
- *
- * Settings tab note: display name/email are read-only on purpose — the auth
- * backend exposes no update endpoint (and no sessions at all; see
- * AuthContext). Showing disabled inputs beats a Save button that lies.
- */
+const TabNav = ({ tabs, activeTab, setActiveTab }) => {
+  return (
+    <div className="flex gap-8 border-b border-neutral-200 dark:border-neutral-800">
+      {tabs.map((tab) => {
+        const icons = {
+          overview: Eye,
+          history: History,
+          settings: Settings,
+        };
+        const Icon = icons[tab];
+
+        return (
+          <motion.button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`relative pb-4 text-sm font-medium capitalize transition-colors flex items-center gap-2 ${
+              activeTab === tab
+                ? "text-amber-700 dark:text-amber-600"
+                : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-300"
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {tab}
+            {activeTab === tab && (
+              <motion.div
+                layoutId="underline"
+                className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-700 dark:bg-amber-600"
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              />
+            )}
+          </motion.button>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { jobs, loading, error, partial, removeJob, deletingIds } = useJobHistory();
+  const { jobs, loading } = useJobHistory();
   const [activeTab, setActiveTab] = useState("overview");
 
   if (!user) {
     return (
-      <AppLayout size="content">
-        <div className="py-24 text-center">
-          <h1 className="font-heading text-2xl font-bold text-ink">Sign in to view your profile</h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-ink-muted">
-            Your analyses and reports are only listed when you&apos;re signed in.
-          </p>
-          <Button className="mt-6" onClick={() => navigate("/login")}>
-            Sign in
-          </Button>
-        </div>
-      </AppLayout>
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-950">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <div className="border border-neutral-200 dark:border-neutral-800 p-8 max-w-md">
+            <h1 className="text-3xl font-serif font-bold text-neutral-900 dark:text-white mb-2">
+              Sign in to continue
+            </h1>
+            <p className="text-neutral-600 dark:text-neutral-400 text-sm mb-6">
+              Your workspace is only available when you are signed in.
+            </p>
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => navigate("/login")}
+              className="w-full px-4 py-3 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-sm transition-all"
+            >
+              Sign in
+            </motion.button>
+          </div>
+        </motion.div>
+      </div>
     );
   }
 
   const initial = user.name?.[0]?.toUpperCase() ?? "U";
   const joinedYear = user.joinedDate ? new Date(user.joinedDate).getFullYear() : null;
-
   const doneJobs = jobs.filter((j) => j.status === "done");
-  const failedJobs = jobs.filter((j) => j.status === "error");
-  const confidenceValues = doneJobs.filter((j) => j.confidence != null);
-  const avgConfidence =
-    confidenceValues.length > 0
-      ? Math.round(
-          (confidenceValues.reduce((sum, j) => sum + j.confidence, 0) / confidenceValues.length) * 100
-        )
-      : null;
-  const qualityValues = doneJobs.filter((j) => j.quality != null);
-  const avgQuality =
-    qualityValues.length > 0
-      ? Math.round(qualityValues.reduce((sum, j) => sum + j.quality, 0) / qualityValues.length)
-      : null;
-
   const TABS = ["overview", "history", "settings"];
 
   return (
-    <AppLayout size="wide">
-      {/* Identity row */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent font-heading text-xl font-bold text-white">
-            {initial}
-          </span>
-          <div>
-            <h1 className="font-heading text-2xl font-bold tracking-tight text-ink">{user.name}</h1>
-            <p className="text-sm text-ink-muted">
-              {user.email}
-              {joinedYear ? ` · Member since ${joinedYear}` : ""}
-            </p>
+    <AppLayout size="default">
+      <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mb-12 pb-12 border-b border-neutral-200 dark:border-neutral-800"
+        >
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-8">
+            {/* User Info */}
+            <div className="flex items-center gap-4">
+              <motion.div
+                className="flex h-16 w-16 items-center justify-center bg-amber-700 text-white font-serif font-bold text-xl rounded-sm"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {initial}
+              </motion.div>
+              <div>
+                <h1 className="text-3xl font-serif font-bold">{user.name}</h1>
+                <p className="text-neutral-600 dark:text-neutral-400 text-sm mt-1">
+                  {user.email}
+                  {joinedYear ? ` · Member since ${joinedYear}` : ""}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <motion.div
+              className="flex gap-3"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => navigate("/analyze")}
+                className="px-6 py-3 bg-amber-700 hover:bg-amber-800 text-white font-semibold rounded-sm transition-all flex items-center gap-2 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                New Analysis
+              </motion.button>
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => { logout(); navigate("/"); }}
+                className="px-6 py-3 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900 font-semibold rounded-sm transition-all flex items-center gap-2 text-sm"
+              >
+                <LogOut className="w-4 h-4" />
+                Log out
+              </motion.button>
+            </motion.div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => navigate("/analyze")}>New analysis</Button>
-          <Button variant="secondary" onClick={() => { logout(); navigate("/"); }}>
-            Log out
-          </Button>
-        </div>
-      </div>
+        </motion.div>
 
-      {/* Tabs */}
-      <div role="tablist" aria-label="Profile sections" className="mt-8 flex gap-1 border-b border-line">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            role="tab"
-            aria-selected={activeTab === tab}
-            onClick={() => setActiveTab(tab)}
-            className={`-mb-px border-b-2 px-4 py-2.5 text-sm capitalize transition-colors ${
-              activeTab === tab
-                ? "border-accent font-medium text-ink"
-                : "border-transparent text-ink-muted hover:text-ink"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+        {/* Tab Navigation */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="mb-8"
+        >
+          <TabNav tabs={TABS} activeTab={activeTab} setActiveTab={setActiveTab} />
+        </motion.div>
 
-      <div className="mt-8">
-        {/* ── Overview ── */}
-        {activeTab === "overview" && (
-          <>
-            <dl className="grid grid-cols-2 divide-line rounded-panel border border-line bg-surface sm:grid-cols-4 sm:divide-x">
-              {[
-                { label: "Analyses run", value: jobs.length },
-                { label: "Reports generated", value: doneJobs.length },
-                { label: "Avg quality", value: avgQuality != null ? `${avgQuality}%` : "—" },
-                { label: "Avg confidence", value: avgConfidence != null ? `${avgConfidence}%` : "—" },
-              ].map((s) => (
-                <div key={s.label} className="px-5 py-4">
-                  <dd className="tnum font-heading text-2xl font-bold text-ink">{s.value}</dd>
-                  <dt className="mt-0.5 text-xs text-ink-faint">{s.label}</dt>
-                </div>
-              ))}
-            </dl>
-
-            <h2 className="mt-10 font-heading text-base font-semibold text-ink">Recent runs</h2>
-            <ul className="mt-3 divide-y divide-line rounded-panel border border-line bg-surface">
-              {jobs.slice(0, 4).map((job) => (
-                <li key={job.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink">{job.file}</p>
-                    <p className="tnum mt-0.5 text-xs text-ink-muted">
-                      {job.date} · {job.duration} ·{" "}
-                      {job.status === "done" ? "complete" : job.status === "error" ? "failed" : job.status}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => navigate(`/analyze/${job.id}`)}
-                    className="shrink-0 text-xs font-medium text-accent-ink transition-colors hover:text-accent"
-                  >
-                    Open
-                  </button>
-                </li>
-              ))}
-              {!loading && jobs.length === 0 && (
-                <li className="px-5 py-6 text-sm text-ink-faint">
-                  No runs yet — start your first analysis.
-                </li>
-              )}
-              {loading && (
-                <li className="px-5 py-6 text-xs text-ink-faint">Loading…</li>
-              )}
-            </ul>
-          </>
-        )}
-
-        {/* ── History ── */}
-        {activeTab === "history" && (
-          <div className="overflow-x-auto rounded-panel border border-line bg-surface">
-            <table className="w-full min-w-[680px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
-                  <th scope="col" className="px-5 py-3.5 font-medium">File</th>
-                  <th scope="col" className="px-4 py-3.5 font-medium">Rows</th>
-                  <th scope="col" className="px-4 py-3.5 font-medium">Confidence</th>
-                  <th scope="col" className="px-4 py-3.5 font-medium">Date</th>
-                  <th scope="col" className="px-4 py-3.5 font-medium">Status</th>
-                  <th scope="col" className="px-4 py-3.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {jobs.map((job) => (
-                  <tr key={job.id}>
-                    <td className="px-5 py-3.5 font-medium text-ink">{job.file}</td>
-                    <td className="tnum px-4 py-3.5 text-ink-muted">
-                      {job.rows != null && !job.enrichFailed ? job.rows.toLocaleString() : "—"}
-                    </td>
-                    <td className="tnum px-4 py-3.5 text-ink-muted">
-                      {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}
-                    </td>
-                    <td className="tnum px-4 py-3.5 text-ink-muted">{job.date}</td>
-                    <td className="px-4 py-3.5 capitalize text-ink-muted">{job.status}</td>
-                    <td className="px-4 py-3.5 text-right">
-                      <div className="flex items-center justify-end gap-4 whitespace-nowrap">
-                        {job.status === "done" && (
-                          <button
-                            onClick={() => navigate(`/analyze/${job.id}`)}
-                            className="text-xs font-medium text-accent-ink transition-colors hover:text-accent"
-                          >
-                            Open
-                          </button>
-                        )}
-                        {job.status !== "done" && job.status !== "error" ? null : (
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Delete "${job.file}" from history? Its report and charts are removed too.`)) {
-                                removeJob(job.id).catch(() => {});
-                              }
-                            }}
-                            disabled={deletingIds.has(job.id)}
-                            aria-label={`Delete analysis for ${job.file}`}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-danger transition-opacity hover:opacity-70 disabled:opacity-40"
-                          >
-                            <Trash2 size={12} aria-hidden="true" /> Delete
-                          </button>
-                        )}
+        {/* Tab Content */}
+        <div>
+          <AnimatePresence mode="wait">
+            {/* ── Overview ── */}
+            {activeTab === "overview" && (
+              <motion.div
+                key="overview"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                {/* Stats Grid */}
+                <motion.div
+                  className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                >
+                  {[
+                    { label: "Analyses run", value: jobs.length },
+                    { label: "Completed", value: doneJobs.length },
+                    { label: "Success Rate", value: jobs.length > 0 ? `${Math.round((doneJobs.length / jobs.length) * 100)}%` : "—" },
+                  ].map((stat, i) => (
+                    <motion.div
+                      key={stat.label}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.05 * i }}
+                      className="border border-neutral-200 dark:border-neutral-800 p-6"
+                    >
+                      <div className="text-xs uppercase tracking-widest text-neutral-500 dark:text-neutral-500 font-mono mb-2">
+                        {stat.label}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {loading && <p className="px-6 py-8 text-center text-xs text-ink-faint">Loading…</p>}
-          </div>
-        )}
+                      <div className="text-3xl font-serif font-bold text-amber-700 dark:text-amber-600">
+                        {stat.value}
+                      </div>
+                    </motion.div>
+                  ))}
+                </motion.div>
 
-        {/* ── Settings: honest read-only account info ── */}
-        {activeTab === "settings" && (
-          <div className="max-w-md rounded-panel border border-line bg-surface p-6">
-            <h2 className="font-heading text-base font-semibold text-ink">Account</h2>
-            <p className="mt-1 text-xs leading-relaxed text-ink-faint">
-              Sign-in currently identifies you for this browser only — the backend doesn&apos;t
-              support profile updates or password changes yet.
-            </p>
-            <dl className="mt-5 space-y-4">
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">Display name</dt>
-                <dd className="mt-1 rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink">
-                  {user.name || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">Email</dt>
-                <dd className="mt-1 rounded-(--radius-control) border border-line bg-raised px-3 py-2.5 text-sm text-ink">
-                  {user.email || "—"}
-                </dd>
-              </div>
-            </dl>
-            {(failedJobs.length > 0 || partial) && (
-              <p className="mt-5 text-xs leading-relaxed text-ink-muted">
-                {failedJobs.length > 0 && `${failedJobs.length} run(s) ended in errors.`}{" "}
-                {partial && "Some stored results have expired."}
-              </p>
+                {/* Recent Analyses */}
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+                  <h2 className="text-2xl font-serif font-bold mb-6">Recent Analyses</h2>
+                  {loading ? (
+                    <div className="text-center py-8 text-neutral-600 dark:text-neutral-400">Loading…</div>
+                  ) : jobs.length === 0 ? (
+                    <div className="border border-neutral-200 dark:border-neutral-800 p-8 text-center">
+                      <p className="text-neutral-600 dark:text-neutral-400 mb-4">No analyses yet</p>
+                      <motion.button
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate("/analyze")}
+                        className="px-6 py-2 bg-amber-700 hover:bg-amber-800 text-white font-medium rounded-sm transition-all text-sm"
+                      >
+                        Run First Analysis
+                      </motion.button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {jobs.slice(0, 5).map((job, i) => (
+                        <motion.div
+                          key={job.id}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.2 + i * 0.05 }}
+                          className="border border-neutral-200 dark:border-neutral-800 p-4 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors flex items-center justify-between"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm">{job.file}</p>
+                            <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
+                              {job.date} · {job.duration}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3 ml-4">
+                            <div className={`text-xs font-medium px-2 py-1 rounded-sm ${
+                              job.status === "done"
+                                ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
+                                : job.status === "error"
+                                ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
+                                : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+                            }`}>
+                              {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                            </div>
+                            {job.status === "done" && (
+                              <motion.button
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                onClick={() => navigate(`/analyze/${job.id}`)}
+                                className="px-3 py-1 bg-amber-700 text-white rounded-sm text-xs font-medium hover:bg-amber-800 transition-all"
+                              >
+                                View
+                              </motion.button>
+                            )}
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
+              </motion.div>
             )}
-          </div>
-        )}
 
-        {(error || partial) && activeTab !== "settings" && (
-          <p role="status" className="mt-6 text-xs text-warning">
-            {error ? error : "Note: some older results have expired from storage."}
-          </p>
-        )}
-      </div>
+            {/* ── History ── */}
+            {activeTab === "history" && (
+              <motion.div
+                key="history"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <h2 className="text-2xl font-serif font-bold mb-6">Full Analysis History</h2>
+                {loading ? (
+                  <div className="text-center py-8 text-neutral-600 dark:text-neutral-400">Loading…</div>
+                ) : jobs.length === 0 ? (
+                  <div className="border border-neutral-200 dark:border-neutral-800 p-8 text-center">
+                    <p className="text-neutral-600 dark:text-neutral-400">No analyses yet</p>
+                  </div>
+                ) : (
+                  <div className="border border-neutral-200 dark:border-neutral-800 divide-y divide-neutral-200 dark:divide-neutral-800">
+                    <div className="bg-neutral-50 dark:bg-neutral-900 px-6 py-4 grid grid-cols-5 gap-4 text-xs uppercase tracking-widest font-mono text-neutral-600 dark:text-neutral-400">
+                      <div>Analysis</div>
+                      <div>Date</div>
+                      <div>Status</div>
+                      <div>Confidence</div>
+                      <div className="text-right">Actions</div>
+                    </div>
+                    {jobs.map((job, i) => (
+                      <motion.div
+                        key={job.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: i * 0.02 }}
+                        className="px-6 py-4 grid grid-cols-5 gap-4 items-center hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors"
+                      >
+                        <div className="font-medium text-sm">{job.file}</div>
+                        <div className="text-sm text-neutral-600 dark:text-neutral-400">{job.date}</div>
+                        <div className="text-xs">
+                          <span className={`px-2 py-1 rounded-sm ${
+                            job.status === "done"
+                              ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
+                              : job.status === "error"
+                              ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
+                              : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+                          }`}>
+                            {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                          </span>
+                        </div>
+                        <div className="text-sm text-neutral-600 dark:text-neutral-400">
+                          {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}
+                        </div>
+                        <div className="text-right">
+                          {job.status === "done" && (
+                            <motion.button
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => navigate(`/analyze/${job.id}`)}
+                              className="text-xs text-amber-700 dark:text-amber-600 hover:text-amber-800 font-medium"
+                            >
+                              View
+                            </motion.button>
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* ── Settings ── */}
+            {activeTab === "settings" && (
+              <motion.div
+                key="settings"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div className="max-w-2xl">
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+                    <h2 className="text-2xl font-serif font-bold mb-6">Account Settings</h2>
+
+                    <div className="border border-neutral-200 dark:border-neutral-800 p-8 mb-6">
+                      <p className="text-neutral-600 dark:text-neutral-400 text-sm mb-6">
+                        Your account information is read-only for now. Backend support for updates coming soon.
+                      </p>
+
+                      <div className="space-y-6">
+                        {/* Display Name */}
+                        <div>
+                          <label className="block text-xs uppercase tracking-widest text-neutral-600 dark:text-neutral-400 font-mono mb-2">
+                            Display Name
+                          </label>
+                          <input
+                            type="text"
+                            value={user.name || ""}
+                            disabled
+                            className="w-full px-4 py-2.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 disabled:opacity-60 cursor-not-allowed rounded-sm text-sm"
+                          />
+                        </div>
+
+                        {/* Email */}
+                        <div>
+                          <label className="block text-xs uppercase tracking-widest text-neutral-600 dark:text-neutral-400 font-mono mb-2">
+                            Email Address
+                          </label>
+                          <input
+                            type="email"
+                            value={user.email || ""}
+                            disabled
+                            className="w-full px-4 py-2.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 disabled:opacity-60 cursor-not-allowed rounded-sm text-sm"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                      For account security, do not upload files containing personal information you are not authorized to process.
+                    </p>
+                  </motion.div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
     </AppLayout>
   );
 }

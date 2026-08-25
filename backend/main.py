@@ -4,6 +4,8 @@ from typing import TypedDict, Any
 class GraphState(TypedDict):
     # ── inputs ────────────────────────────────────────────────────────────────
     csv_path: str
+    original_filename: str    # the name the user uploaded (csv_path is the server-side
+                               # <job_id>.csv storage path) — Agent 6 displays this, not csv_path
 
     # ── Agent 1 outputs ───────────────────────────────────────────────────────
     raw_profile: dict          # structural profile: shape, dtypes, missing rates

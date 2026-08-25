@@ -241,8 +241,9 @@ export function DownloadReportButton({ href, format, size = "md" }) {
         "pressable inline-flex h-10 items-center gap-2 rounded-(--radius-control) bg-accent px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-accent-hover",
         size === "sm" && "h-9 px-3 text-xs"
       )}
+      style={{ color: 'white' }}
     >
-      <Download size={15} strokeWidth={1.75} aria-hidden="true" />
+      <Download size={15} strokeWidth={1.75} aria-hidden="true" style={{ color: 'white' }} />
       Download report{format ? ` (${format.toUpperCase()})` : ""}
     </a>
   );

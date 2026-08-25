@@ -15,8 +15,8 @@ export function chartUrl(pathOrUrl) {
 }
 
 /** Full URL to download the Agent 6 report (PDF/HTML) for a completed job. */
-export function reportDownloadUrl(jobId) {
-  return apiUrl(`/api/report/${jobId}`);
+export function reportDownloadUrl(jobId, format = 'html') {
+  return apiUrl(`/api/report/${jobId}?format=${format}`);
 }
 
 async function parseJsonOrThrow(res) {

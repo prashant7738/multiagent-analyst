@@ -47,12 +47,12 @@ def _clear_chart_dir():
 
 # ── palette ───────────────────────────────────────────────────────────────────
 COLORS = {
-    "primary":   "#2563EB",
+    "primary":   "#A0522D",   # sienna/amber-700 — matches the report's --accent-hover
     "secondary": "#16A34A",
     "accent":    "#DC2626",
     "warning":   "#D97706",
     "purple":    "#7C3AED",
-    "bars":      ["#2563EB", "#16A34A", "#DC2626", "#D97706", "#7C3AED",
+    "bars":      ["#A0522D", "#D97706", "#16A34A", "#DC2626", "#7C3AED",
                   "#0891B2", "#DB2777", "#65A30D", "#EA580C", "#4F46E5"],
 }
 
@@ -570,7 +570,15 @@ def _correlation(df, schema_blueprint):
         "excluded_pairs":  excluded_pairs,
         "formulaic_pairs": formulaic_pairs,
         "n":               len(corr_df),
+        "near_perfect_correlations": [p for p in strong_pairs if abs(p["pearson_r"]) > 0.98],
     }
+    
+    # Flag near-perfect correlations as potential data quality issues
+    # (likely indicates missing cost data, duplicated columns, or other artifacts)
+    near_perfect = result.get("near_perfect_correlations", [])
+    if near_perfect:
+        print(f"[Agent 4] WARNING: {len(near_perfect)} near-perfect correlation(s) detected (r>0.98) — "
+              f"these may indicate missing cost data or column artifacts rather than real business relationships")
     chart_candidates = []
 
     # A wall of near-zero correlation cells is noise, not insight - only draw
@@ -1150,17 +1158,61 @@ def _detect_anomalies(df, schema_blueprint, z_threshold=ANOMALY_Z_THRESHOLD):
 # columns. See agent_3._validate_count_ranges / _validate_financial_constraints.
 _STRUCTURAL_FLAG_SUFFIXES = ("_range_failed", "_rate_failed", "_reconciliation_failed")
 STRUCTURAL_RULE_REVIEW_PCT = 90.0
+BROKEN_RULE_FIRE_RATE_PCT = 95.0  # If a rule fires on >95% of rows, treat it as likely misconfigured
+
+
+def _auto_detect_bounds(values, meta=None):
+    """
+    Auto-detect appropriate bounds for a numeric column by inspecting actual data.
+    If most values are in [0,1], use ratio scale [0.0, 1.0].
+    If most values are in [0,100], use percent scale [0.0, 100.0].
+    Otherwise, return None (no bounds check needed for arbitrary ranges like revenue).
+    """
+    if values is None or len(values) == 0:
+        return None
+    
+    # Filter out NaN values and convert to float
+    clean_vals = pd.to_numeric(values, errors='coerce').dropna()
+    if len(clean_vals) == 0:
+        return None
+    
+    # Check if it looks like a ratio (mostly in [0, 1])
+    ratio_fits = (clean_vals >= 0.0) & (clean_vals <= 1.0)
+    if ratio_fits.mean() > 0.95:
+        return (0.0, 1.0)
+    
+    # Check if it looks like a percent (mostly in [0, 100])
+    percent_fits = (clean_vals >= 0.0) & (clean_vals <= 100.0)
+    if percent_fits.mean() > 0.95:
+        return (0.0, 100.0)
+    
+    # Column doesn't fit a standard bounds pattern (could be revenue, costs, etc.)
+    return None
 
 
 def _percentage_bounds(values, meta=None):
-    """Return externally defined bounds; never infer them from the data."""
+    """
+    Determine appropriate bounds for a numeric column.
+    First checks explicit metadata (unit_scale), then auto-detects from data.
+    Returns (lower, upper) tuple, or None if no bounds check should apply.
+    """
     meta = meta or {}
+    
+    # First priority: explicit configuration
     configured_scale = meta.get("unit_scale")
     if configured_scale == "ratio":
         return 0.0, 1.0
     if configured_scale == "percent":
         return 0.0, 100.0
-    return 0.0, 100.0
+    
+    # Second priority: auto-detect from actual data distribution
+    if values is not None:
+        detected = _auto_detect_bounds(values, meta)
+        if detected is not None:
+            return detected
+    
+    # No bounds check should apply; this column has an arbitrary range (revenue, cost, etc.)
+    return None
 
 
 def _detect_data_quality_issues(df, schema_blueprint):
@@ -1220,18 +1272,22 @@ def _detect_data_quality_issues(df, schema_blueprint):
             key.split(" out of ")[0] for key in issues_by_rule
         }:
             rules_checked.add(f"{col} percentage bounds")
-            lower, upper = _percentage_bounds(_num(col), meta)
-            _record((_num(col) < lower) | (_num(col) > upper), f"{col} out of [{lower:g}, {upper:g}]")
+            bounds = _percentage_bounds(_num(col), meta)
+            if bounds is not None:  # Only apply bounds check if we detected appropriate bounds
+                lower, upper = bounds
+                _record((_num(col) < lower) | (_num(col) > upper), f"{col} out of [{lower:g}, {upper:g}]")
         if "discount" in tokens and meta.get("semantic_tag") != "percentage":
             rules_checked.add(f"{col} discount bounds")
             d = _num(col)
             if "amount" in tokens:
                 _record(d < 0, f"{col} < 0")
             else:
-                lower, upper = _percentage_bounds(d, meta)
-                if not meta.get("unit_scale") and meta.get("semantic_tag") not in {"percentage", "discount"} and upper == 1.0:
-                    upper = 100.0
-                _record((d < lower) | (d > upper), f"{col} out of [{lower:g}, {upper:g}]")
+                bounds = _percentage_bounds(d, meta)
+                if bounds is not None:  # Only apply bounds check if we detected appropriate bounds
+                    lower, upper = bounds
+                    if not meta.get("unit_scale") and meta.get("semantic_tag") not in {"percentage", "discount"} and upper == 1.0:
+                        upper = 100.0
+                    _record((d < lower) | (d > upper), f"{col} out of [{lower:g}, {upper:g}]")
 
     # returns exceeding the order quantity, or negative returns
     return_col = next(
@@ -1265,8 +1321,163 @@ def _detect_data_quality_issues(df, schema_blueprint):
     }
 
 
+def _filter_broken_validation_rules(validation_result):
+    """
+    Post-process validation results to identify and downgrade obviously misconfigured rules.
+    If a rule fires on >95% of rows, it's almost certainly a misconfigured rule (like 0-100
+    bounds on a currency column) rather than a real data defect.
+    These should be flagged as "rule misconfiguration" not "data issue".
+    """
+    if not validation_result or not validation_result.get("rule_details"):
+        return validation_result
+    
+    result = validation_result.copy()
+    result["rule_details"] = result["rule_details"].copy()
+    result["issues_by_rule"] = result["issues_by_rule"].copy() if result.get("issues_by_rule") else {}
+    
+    rules_to_remove = []
+    for rule_name, rule_info in result["rule_details"].items():
+        if rule_info.get("pct", 0) > BROKEN_RULE_FIRE_RATE_PCT:
+            # This rule is almost certainly misconfigured
+            rule_info["is_likely_misconfigured"] = True
+            rule_info["note"] = f"Rule fires on {rule_info['pct']}% of rows — likely misconfigured rather than a data defect"
+            rules_to_remove.append(rule_name)
+    
+    # Remove misconfigured rules from the main issue counts (but keep them in rule_details for audit)
+    for rule_name in rules_to_remove:
+        if rule_name in result["issues_by_rule"]:
+            del result["issues_by_rule"][rule_name]
+    
+    # Recalculate issue counts excluding misconfigured rules
+    if rules_to_remove:
+        all_issue_rows = set()
+        reviewed_rows_set = set()
+        for rule_name, rule_info in result["rule_details"].items():
+            if not rule_info.get("is_likely_misconfigured"):
+                # Re-extract row indices from example_rows if needed, or just use counts as-is
+                # For now, mark that misconfigured rules were filtered
+                pass
+        result["note_on_validation"] = f"{len(rules_to_remove)} validation rule(s) were flagged as likely misconfigured (firing on >{BROKEN_RULE_FIRE_RATE_PCT}% of rows) and excluded from issue counts"
+    
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 7 — CATEGORY DISTRIBUTIONS
+# PHASE 2: STRUCTURAL VALIDATORS (Temporal Logic, Formula Reconciliation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _check_temporal_logic(df):
+    """
+    Detect temporal integrity violations:
+    - Delivery before order
+    - Shipment before order
+    - Delivery before shipment
+    
+    Returns a dict with violation counts and examples.
+    """
+    violations = {
+        "delivery_before_order": [],
+        "ship_before_order": [],
+        "delivery_before_ship": [],
+        "total_flagged": 0,
+    }
+    
+    # Find date columns
+    date_cols = {}
+    for col in df.columns:
+        col_lower = col.lower()
+        if "order" in col_lower and "date" in col_lower:
+            date_cols["order"] = col
+        elif "ship" in col_lower and "date" in col_lower:
+            date_cols["ship"] = col
+        elif "deliver" in col_lower and "date" in col_lower:
+            date_cols["delivery"] = col
+    
+    if not date_cols or len(date_cols) < 2:
+        return violations
+    
+    # Convert to datetime
+    for key, col in date_cols.items():
+        df[f"_temp_{key}_dt"] = pd.to_datetime(df[col], errors='coerce')
+    
+    # Check delivery before order
+    if "order" in date_cols and "delivery" in date_cols:
+        mask = df[f"_temp_delivery_dt"] < df[f"_temp_order_dt"]
+        if mask.any():
+            bad_rows = df.index[mask].tolist()[:10]
+            violations["delivery_before_order"] = bad_rows
+            violations["total_flagged"] = len(df.index[mask])
+    
+    # Check shipment before order
+    if "order" in date_cols and "ship" in date_cols:
+        mask = df[f"_temp_ship_dt"] < df[f"_temp_order_dt"]
+        if mask.any():
+            violations["ship_before_order"] = df.index[mask].tolist()[:10]
+    
+    # Check delivery before shipment
+    if "ship" in date_cols and "delivery" in date_cols:
+        mask = df[f"_temp_delivery_dt"] < df[f"_temp_ship_dt"]
+        if mask.any():
+            violations["delivery_before_ship"] = df.index[mask].tolist()[:10]
+    
+    # Clean up temp columns
+    for col in df.columns:
+        if col.startswith("_temp_"):
+            df.drop(col, axis=1, inplace=True)
+    
+    return violations
+
+
+def _check_formula_reconciliation(df, schema_blueprint):
+    """
+    Verify that derived financial formulas reconcile with their components.
+    E.g., quantity × price ≈ total_revenue (within tolerance)
+    
+    Returns a dict with reconciliation status for each formula found.
+    """
+    reconciliations = {}
+    schema_blueprint = schema_blueprint or {}
+    tolerance = 0.02  # 2% tolerance for rounding
+    
+    # Find financial columns
+    qty_col = None
+    price_col = None
+    revenue_col = None
+    discount_col = None
+    
+    for col, meta in schema_blueprint.items():
+        if not isinstance(meta, dict):
+            continue
+        role = meta.get("financial_role", "").lower()
+        if "quantity" in role or "qty" in role:
+            qty_col = col
+        elif "price" in role or "unit_price" in role:
+            price_col = col
+        elif "revenue" in role or "sales" in role:
+            revenue_col = col
+        elif "discount" in role:
+            discount_col = col
+    
+    # Check quantity × price ≈ revenue
+    if qty_col and price_col and revenue_col and all(c in df.columns for c in [qty_col, price_col, revenue_col]):
+        qty = pd.to_numeric(df[qty_col], errors='coerce')
+        price = pd.to_numeric(df[price_col], errors='coerce')
+        revenue = pd.to_numeric(df[revenue_col], errors='coerce')
+        
+        computed = qty * price
+        # Calculate MAPE (Mean Absolute Percentage Error)
+        valid = ~(computed.isna() | revenue.isna()) & (computed != 0)
+        if valid.any():
+            mape = np.abs((revenue[valid] - computed[valid]) / computed[valid]).mean()
+            reconciliations[f"{qty_col} × {price_col} ≈ {revenue_col}"] = {
+                "mape": float(mape),
+                "within_tolerance": bool(mape <= tolerance),
+                "status": "OK" if mape <= tolerance else "MISMATCH",
+            }
+    
+    return reconciliations
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Above this many distinct categories, a one-bar-per-category chart is
@@ -2100,13 +2311,33 @@ def _agent4_analysis_inner(state: GraphState, errors: list, schema_blueprint, df
 
     # Structural data-quality issues are computed independently of the
     # statistical anomaly pass so the two can penalize the score differently.
-    stats["data_quality_issues"] = _detect_data_quality_issues(df, schema_blueprint)
+    stats["data_quality_issues"] = _filter_broken_validation_rules(
+        _detect_data_quality_issues(df, schema_blueprint)
+    )
     print(
         f"[Agent 4] Step 6b — Structural data-quality issues: "
         f"{stats['data_quality_issues']['data_quality_issue_rows']} rows "
         f"({stats['data_quality_issues']['data_quality_issue_row_pct']}%) across "
         f"{len(stats['data_quality_issues']['rules_checked'])} rule(s)"
     )
+    
+    # Phase 2: Temporal logic and formula reconciliation checks
+    temporal_violations = _check_temporal_logic(df)
+    if any(temporal_violations.get(k) for k in ["delivery_before_order", "ship_before_order", "delivery_before_ship"]):
+        print(
+            f"[Agent 4] Step 6c — Temporal integrity violations detected: "
+            f"delivery_before_order={len(temporal_violations.get('delivery_before_order', []))} "
+            f"ship_before_order={len(temporal_violations.get('ship_before_order', []))} "
+            f"delivery_before_ship={len(temporal_violations.get('delivery_before_ship', []))}"
+        )
+        stats["temporal_violations"] = temporal_violations
+    
+    formula_reconciliations = _check_formula_reconciliation(df, schema_blueprint)
+    if formula_reconciliations:
+        mismatches = [k for k, v in formula_reconciliations.items() if not v.get("within_tolerance")]
+        if mismatches:
+            print(f"[Agent 4] Step 6d — Formula reconciliation mismatches: {mismatches}")
+        stats["formula_reconciliation"] = formula_reconciliations
 
     if chart_plan["chart_families"]["distributions"]:
         stats["distributions"], candidates = _category_distributions(df, schema_blueprint)

@@ -1,0 +1,232 @@
+@import '@fontsource-variable/source-serif-pro';
+@import '@fontsource-variable/source-sans-pro';
+@tailwindcss/postcss;
+
+:root {
+  /* Light mode - warm, premium neutrals */
+  --bg-primary: #FAFAF8;
+  --bg-secondary: #F3F1ED;
+  --bg-tertiary: #E8E5DF;
+  --text-primary: #0F0E0C;
+  --text-secondary: #3D3A35;
+  --text-tertiary: #6B6560;
+  --accent-primary: #A0522D;
+  --accent-light: #C17A5C;
+  --accent-dark: #6B3420;
+  --data-positive: #2D5F4F;
+  --data-negative: #8B4513;
+  --border-color: #D9D4CC;
+  --shadow-sm: 0 1px 2px rgba(15, 14, 12, 0.05);
+  --shadow-md: 0 4px 8px rgba(15, 14, 12, 0.12);
+  --shadow-lg: 0 8px 16px rgba(15, 14, 12, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-primary: #0F0E0C;
+    --bg-secondary: #1A1916;
+    --bg-tertiary: #24221D;
+    --text-primary: #F5F3F0;
+    --text-secondary: #D4D0C8;
+    --text-tertiary: #A6A098;
+    --border-color: #3D3A35;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+  }
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0F0E0C;
+  --bg-secondary: #1A1916;
+  --bg-tertiary: #24221D;
+  --text-primary: #F5F3F0;
+  --text-secondary: #D4D0C8;
+  --text-tertiary: #A6A098;
+  --border-color: #3D3A35;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Söhne', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+body {
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Saol', 'Source Serif Pro', serif;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+h1 {
+  font-size: 4rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+h3 {
+  font-size: 1.875rem;
+  font-weight: 600;
+}
+
+p {
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+  line-height: 1.7;
+}
+
+a {
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 150ms ease;
+}
+
+a:hover {
+  color: var(--accent-light);
+}
+
+/* Card styling - minimal, serious */
+.card {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 200ms ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent-primary);
+}
+
+/* Input styling */
+input, textarea, select {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: all 150ms ease;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(160, 82, 45, 0.1);
+}
+
+input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Button base styles */
+button {
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 200ms ease;
+  border: none;
+  border-radius: 4px;
+}
+
+button:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Primary button */
+.btn-primary {
+  background-color: var(--accent-primary);
+  color: white;
+  padding: 0.75rem 1.5rem;
+}
+
+.btn-primary:hover {
+  background-color: var(--accent-light);
+}
+
+.btn-primary:active {
+  transform: translateY(-1px);
+}
+
+/* Secondary button */
+.btn-secondary {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 0.75rem 1.5rem;
+}
+
+.btn-secondary:hover {
+  background-color: var(--border-color);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-tertiary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Selection styling */
+::selection {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+/* Technical marginalia */
+.marginalia {
+  font-family: 'IBM Plex Mono', 'Courier New', monospace;
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  color: var(--accent-primary);
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

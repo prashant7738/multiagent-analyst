@@ -16,9 +16,15 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
 from agents.report_style import CHART_COLORS, PALETTE, humanize_number, safe_filename_component
+
+# Amber-tinted sequential map for heatmaps — matches the report's accent instead
+# of matplotlib's default blue, so the print/static twin agrees with the
+# interactive ECharts heatmap gradient (see echarts_options.py's visualMap).
+AMBER_CMAP = LinearSegmentedColormap.from_list("amber_seq", ["#fef3c7", "#d97706"])
 
 
 def render_spec_png(spec: dict, out_dir: str) -> str | None:
@@ -51,7 +57,7 @@ def _style(fig, ax, spec, axis_cfg, tight: bool = True):
     subtitle = spec.get("subtitle", "")
     if subtitle:
         ax.text(0.5, 1.015, subtitle, transform=ax.transAxes,
-                ha="center", va="bottom", fontsize=9, color="#6b7280")
+                ha="center", va="bottom", fontsize=9, color="#000000")
     if axis_cfg.get("x_label"):
         ax.set_xlabel(axis_cfg["x_label"], fontsize=10)
     if axis_cfg.get("y_label"):
@@ -179,7 +185,7 @@ def _draw(spec: dict, out_path: str) -> None:
         }
         if all(bx_stats[k] is not None for k in ("med", "q1", "q3")):
             axb.bxp([bx_stats], vert=False, patch_artist=True, widths=0.7,
-                    boxprops={"facecolor": "#bfdbfe", "alpha": 0.9},
+                    boxprops={"facecolor": "#fde68a", "alpha": 0.9},
                     medianprops={"color": PALETTE["warning"], "linewidth": 2},
                     flierprops={"marker": "o", "markersize": 4,
                                 "markerfacecolor": PALETTE["accent"], "alpha": 0.7})
@@ -193,7 +199,7 @@ def _draw(spec: dict, out_path: str) -> None:
         if matrix.size == 0 or matrix.shape != (len(rows), len(cols)):
             raise ValueError("heatmap data missing")
         ax = fig.add_subplot(111)
-        image = ax.imshow(matrix, cmap="Blues", aspect="auto")
+        image = ax.imshow(matrix, cmap=AMBER_CMAP, aspect="auto")
         ax.set_xticks(range(len(cols)))
         ax.set_xticklabels([str(c)[:14] for c in cols], rotation=30, ha="right", fontsize=8)
         ax.set_yticks(range(len(rows)))
@@ -203,7 +209,7 @@ def _draw(spec: dict, out_path: str) -> None:
             for i in range(matrix.shape[0]):
                 for j in range(matrix.shape[1]):
                     ax.text(j, i, humanize_number(matrix[i, j]), ha="center", va="center",
-                            fontsize=7, color="white" if matrix[i, j] > thresh else "#374151")
+                            fontsize=7, color="white" if matrix[i, j] > thresh else "#000000")
         cbar = fig.colorbar(image, ax=ax, shrink=0.8)
         cbar.ax.tick_params(labelsize=7)
         ax.grid(False)

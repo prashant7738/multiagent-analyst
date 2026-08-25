@@ -203,7 +203,7 @@ export default function DatasetChat({ jobId }) {
         ref={triggerRef}
         onClick={() => setOpen(true)}
         className={cn(
-          "pressable fixed bottom-6 right-6 z-40 inline-flex h-12 items-center gap-2 rounded-full",
+          "pressable fixed bottom-6 right-6 z-50 inline-flex h-12 items-center gap-2 rounded-full",
           "bg-accent px-5 text-sm font-medium text-white shadow-lg transition-colors hover:bg-accent-hover"
         )}
         aria-haspopup="dialog"
@@ -224,6 +224,37 @@ export default function DatasetChat({ jobId }) {
       <AnimatePresence>
         {open && (
           <>
+            {/* Close Button - Simple Text */}
+            <motion.button
+              key="close-btn"
+              onClick={closePanel}
+              style={{
+                position: 'fixed',
+                top: '70px',
+                right: '20px',
+                zIndex: 99999,
+                width: '50px',
+                height: '50px',
+                borderRadius: '50%',
+                backgroundColor: '#f59e0b',
+                border: 'none',
+                color: 'white',
+                fontSize: '28px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+              }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              title="Close (Esc)"
+              type="button"
+            >
+              ✕
+            </motion.button>
+
             {/* Scrim (mobile only — the dock doesn't block the page on desktop) */}
             <motion.div
               key="scrim"
@@ -240,25 +271,27 @@ export default function DatasetChat({ jobId }) {
               ref={panelRef}
               role="dialog"
               aria-label="Ask about this dataset"
-              className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-line bg-canvas sm:max-w-md"
+              className="fixed top-16 right-0 bottom-0 z-50 flex w-full flex-col border-l border-line bg-canvas sm:max-w-md"
               initial={{ transform: "translateX(100%)" }}
               animate={{ transform: "translateX(0%)" }}
               exit={{ transform: "translateX(100%)" }}
               transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
             >
-              <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+              <header className="flex items-center justify-between gap-4 border-b border-line bg-raised px-6 py-4 flex-shrink-0">
                 <div>
                   <h2 className="font-heading text-base font-semibold text-ink">Ask about this dataset</h2>
                   <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
-                    Grounded in this run&apos;s verified stats — not raw data.
+                    Grounded in this run&apos;s verified stats
                   </p>
                 </div>
                 <button
                   onClick={closePanel}
-                  aria-label="Close chat panel"
-                  className="rounded-(--radius-control) p-1.5 text-ink-muted transition-colors hover:bg-raised hover:text-ink"
+                  type="button"
+                  className="ml-auto flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface hover:bg-line text-ink-secondary hover:text-ink transition-colors"
+                  title="Close (Esc)"
+                  aria-label="Close chat"
                 >
-                  <X size={18} />
+                  <X size={22} strokeWidth={2} />
                 </button>
               </header>
 

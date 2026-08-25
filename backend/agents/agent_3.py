@@ -1454,6 +1454,47 @@ def _derive_business_metrics(df, schema_blueprint=None):
     return df, notes, derivation_map
 
 
+def _tag_derived_metrics_in_schema(schema_blueprint, derivation_map):
+    """
+    Update schema_blueprint with semantic tags for derived metrics based on their source columns.
+    This prevents validation rules from incorrectly applying generic bounds to financial columns.
+    E.g., if derived_revenue_after_discount comes from a revenue column, tag it as 'currency'.
+    """
+    schema_blueprint = schema_blueprint or {}
+    derivation_map = derivation_map or {}
+    
+    for derived_col, source_cols in derivation_map.items():
+        if not isinstance(source_cols, list):
+            source_cols = [source_cols]
+        
+        # Determine the semantic tag for this derived metric based on its source columns
+        source_tags = set()
+        for src_col in source_cols:
+            if src_col in schema_blueprint and isinstance(schema_blueprint[src_col], dict):
+                src_tag = schema_blueprint[src_col].get("semantic_tag")
+                if src_tag:
+                    source_tags.add(src_tag)
+        
+        # Assign semantic tag to derived column
+        if "currency" in source_tags:
+            # Financial derivation (revenue, cost, profit, discount amount, etc.)
+            if derived_col not in schema_blueprint:
+                schema_blueprint[derived_col] = {}
+            elif not isinstance(schema_blueprint[derived_col], dict):
+                schema_blueprint[derived_col] = {}
+            schema_blueprint[derived_col]["semantic_tag"] = "currency"
+            schema_blueprint[derived_col]["derived_from"] = source_cols
+        
+        elif "percentage" in source_tags or "discount" in source_tags:
+            # Percentage derivation (discount_pct, margin_pct, etc.)
+            if derived_col not in schema_blueprint:
+                schema_blueprint[derived_col] = {}
+            elif not isinstance(schema_blueprint[derived_col], dict):
+                schema_blueprint[derived_col] = {}
+            schema_blueprint[derived_col]["semantic_tag"] = "percentage"
+            schema_blueprint[derived_col]["derived_from"] = source_cols
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3d — DERIVED METRIC / GROUND-TRUTH RECONCILIATION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1940,6 +1981,8 @@ def agent3_preprocessor(state: GraphState) -> GraphState:
 
     before_step = df.copy()
     df, notes, derivation_map = _derive_business_metrics(df, schema_blueprint)
+    # Tag derived metrics in schema_blueprint to prevent validation rule misconfigurations
+    _tag_derived_metrics_in_schema(schema_blueprint, derivation_map)
     preprocessing_log.extend(notes)
     preprocessing_log.extend(_log_null_diff(before_step, df, "Step 3c"))
     if verbose:

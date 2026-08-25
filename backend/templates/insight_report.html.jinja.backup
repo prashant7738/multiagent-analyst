@@ -3,63 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ dataset_name }} — AnalyzeAI Insight Report</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<title>Insight Report — {{ dataset_name }}</title>
 <script>(function(){try{var t=localStorage.getItem('ir-theme');if(t!=='dark'&&t!=='light'){t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <script>document.documentElement.classList.add('js');</script>
 <style>
-  /* ── design tokens — mirrors the AnalyzeAI app theme (src/index.css) ─── */
+  /* ── design tokens ──────────────────────────────────────────────────── */
   :root {
-    --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    --font-heading: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-
-    --bg: #fafafa;
+    --bg: #f5f7fb;
     --surface: #ffffff;
-    --surface-2: #f5f5f5;
-    --border: #00000012;
-    --border-strong: #00000024;
-    --text: #262626;
-    --muted: #737373;
-    --accent: #d97706;
-    --accent-hover: #a0522d;
-    --accent-soft: #fef3c720;
-    --accent-ink: #a0522d;
-    --good: #15803d; --warn: #b45309; --bad: #b91c1c;
-    --shadow: 0 1px 2px rgba(15, 14, 12, .04);
-    --radius: 1rem;
-    --radius-sm: 0.625rem;
+    --surface-2: #f8fafc;
+    --border: #e5e7eb;
+    --text: #1f2933;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --good: #16a34a; --warn: #d97706; --bad: #dc2626;
+    --shadow: 0 1px 3px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.04);
+    --radius: 12px;
   }
   [data-theme="dark"] {
-    --bg: #0f0e0c;
-    --surface: #171717;
-    --surface-2: #262626;
-    --border: #ffffff17;
-    --border-strong: #ffffff29;
-    --text: #fafafa;
-    --muted: #a3a3a3;
-    --accent: #d97706;
-    --accent-hover: #fbbf24;
-    --accent-soft: #d9770626;
-    --accent-ink: #fcd34d;
-    --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    --bg: #0b1220;
+    --surface: #111827;
+    --surface-2: #0f172a;
+    --border: #26303e;
+    --text: #e5e7eb;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --accent-soft: #172554;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.35);
   }
 
   /* ── base ───────────────────────────────────────────────────────────── */
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
-    font-family: var(--font-sans);
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     color: var(--text); background: var(--bg);
     font-size: 11pt; line-height: 1.55; margin: 0;
-    -webkit-font-smoothing: antialiased;
   }
-  h1 { font-family: var(--font-heading); font-weight: 700; font-size: 25pt; margin: 0 0 .1em; color: var(--text); letter-spacing: -.02em; }
-  h2 { font-family: var(--font-heading); font-weight: 700; font-size: 15pt; margin: 1.8em 0 .5em; color: var(--text);
+  h1 { font-size: 25pt; margin: 0 0 .1em; color: var(--text); letter-spacing: -.02em; }
+  h2 { font-size: 15pt; margin: 1.8em 0 .5em; color: var(--text);
        border-bottom: 2px solid var(--border); padding-bottom: .3em; }
-  h3 { font-family: var(--font-heading); font-weight: 600; font-size: 12pt; margin: 0 0 .35em; color: var(--text); }
+  h3 { font-size: 12pt; margin: 0 0 .35em; color: var(--text); }
   p { margin: .35em 0; }
   table { width: 100%; border-collapse: collapse; margin: .6em 0 1em; font-size: 9.5pt; }
   th, td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
@@ -67,16 +52,14 @@
   tr:hover td { background: var(--surface-2); }
   ul { margin: .3em 0 1em; padding-left: 1.4em; }
   li { margin-bottom: .4em; }
-  a { color: var(--accent); text-decoration: none; font-weight: 500; }
-  a:hover { color: var(--accent-hover); }
+  a { color: var(--accent); }
   abbr.glossary { text-decoration: underline dotted var(--accent); cursor: help; }
   .empty-note { color: var(--muted); font-style: italic; }
   .subtitle { color: var(--muted); font-size: 10pt; margin-top: 0; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
   /* ── progress bar ───────────────────────────────────────────────────── */
   .progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 90; background: transparent; }
-  .progress-bar { height: 100%; width: 0; background: var(--accent); transition: width .15s ease-out; }
+  .progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #7c3aed); transition: width .15s ease-out; }
 
   /* ── topbar ─────────────────────────────────────────────────────────── */
   .topbar {
@@ -86,26 +69,24 @@
     border-bottom: 1px solid var(--border);
   }
   .topbar-inner { max-width: 1240px; margin: 0 auto; display: flex; align-items: center; gap: 18px; padding: 10px 20px; }
-  .brand { font-family: var(--font-heading); font-weight: 700; font-size: 13pt; color: var(--text); text-decoration: none; letter-spacing: -.01em; white-space: nowrap; display: inline-flex; align-items: baseline; gap: 8px; }
+  .brand { font-weight: 800; font-size: 13pt; color: var(--text); text-decoration: none; letter-spacing: -.01em; white-space: nowrap; }
   .brand span { color: var(--accent); }
-  .brand-tag { font-family: var(--font-sans); font-weight: 500; font-size: 8.5pt; color: var(--muted); white-space: nowrap; }
   .topnav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; }
   .topnav::-webkit-scrollbar { display: none; }
   .topnav a {
-    font-size: 9pt; font-weight: 500; color: var(--muted); text-decoration: none;
+    font-size: 9pt; color: var(--muted); text-decoration: none;
     padding: 6px 11px; border-radius: 999px; white-space: nowrap;
     border: 1px solid transparent;
   }
   .topnav a:hover { color: var(--text); background: var(--surface); }
-  .topnav a.active { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+  .topnav a.active { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
   .topbar-actions { display: flex; gap: 8px; }
   .icon-btn {
-    border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
-    width: 34px; height: 34px; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px;
-    display: inline-flex; align-items: center; justify-content: center; transition: transform .16s cubic-bezier(0.23,1,0.32,1);
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center; transition: transform .15s ease;
   }
-  .icon-btn:hover { border-color: var(--muted); }
-  .icon-btn:active { transform: scale(0.97); }
+  .icon-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 
   /* ── shell layout ───────────────────────────────────────────────────── */
   .layout { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 230px minmax(0,1fr); gap: 28px; padding: 22px 20px 60px; }
@@ -141,7 +122,7 @@
   }
   .kpi-card::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, var(--accent), transparent 70%); opacity: .55; }
   .kpi-label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
-  .kpi-value { font-family: var(--font-heading); font-size: 17pt; font-weight: 700; line-height: 1.25; margin-top: 2px; }
+  .kpi-value { font-size: 17pt; font-weight: 800; line-height: 1.25; margin-top: 2px; }
   .kpi-hint { font-size: 8pt; color: var(--muted); margin-top: 4px; line-height: 1.35; }
 
   /* ── data-health bar & plain intro ──────────────────────────────────── */
@@ -156,7 +137,7 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     box-shadow: var(--shadow); padding: 14px 18px; margin: 16px 0 4px; page-break-inside: avoid;
   }
-  .intro-box h3 { color: var(--accent-ink); }
+  .intro-box h3 { color: var(--accent); }
   .intro-box ul { margin: .4em 0 0; padding-left: 1.3em; }
   .intro-box li { margin-bottom: .45em; }
 
@@ -168,12 +149,12 @@
     border-radius: var(--radius); padding: 1em 1.3em; margin: 1.4em 0; page-break-inside: avoid;
   }
   .plain-language-box h2 { margin-top: .2em; border-bottom: none; padding-bottom: 0; }
-  .bottom-line { font-family: var(--font-heading); font-size: 12.5pt; font-weight: 700; color: var(--accent-ink); margin: 0 0 .8em; padding-bottom: .6em; border-bottom: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); }
+  .bottom-line { font-size: 12.5pt; font-weight: 700; color: var(--accent); margin: 0 0 .8em; padding-bottom: .6em; border-bottom: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); }
 
   .story-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: .8em 0 1.2em; }
   .story-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 16px; box-shadow: var(--shadow); page-break-inside: avoid; }
-  .story-card h3 { color: var(--accent-ink); font-size: 9.5pt; text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 7px; }
-  .story-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 9pt; }
+  .story-card h3 { color: var(--accent); font-size: 9.5pt; text-transform: uppercase; letter-spacing: .06em; display: flex; align-items: center; gap: 7px; }
+  .story-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 9pt; }
 
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
   @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
@@ -190,27 +171,12 @@
   .chart-sub { color: var(--muted); font-size: 9.5pt; margin: .05em 0 .45em; }
   .chart-desc { font-size: 10pt; margin: .3em 0; }
   .llm-caption {
-    font-size: 10pt; color: var(--accent-ink); background: var(--accent-soft);
+    font-size: 10pt; color: var(--accent); background: var(--accent-soft);
     border-left: 3px solid var(--accent); padding: 6px 11px; border-radius: 0 8px 8px 0; margin: .5em 0;
   }
   .chips { margin: .4em 0 .6em; display: flex; flex-wrap: wrap; gap: 6px; }
-  /* Every chart — interactive canvas, fallback image, or static-only image —
-     shares one size, one white background, and one framing so the whole gallery
-     reads as one consistent set regardless of chart type or the report's own
-     light/dark theme. ECharts paints its own white backgroundColor (see
-     echarts_options.py base option) and dark text there would vanish in dark
-     mode, so this white card + black chart text is deliberate, not a mismatch. */
-  .echart {
-    width: 100%; height: 380px; padding: 8px; box-sizing: border-box;
-    background: #fff; border-radius: var(--radius-sm);
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
-  }
-  .chart-static, .chart-img {
-    width: 100%; max-width: 700px; height: auto; margin: 6px auto; padding: 8px;
-    display: block; border-radius: var(--radius-sm); background: #fff;
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
-  }
-  .chart-static { display: none; }
+  .echart { width: 100%; height: 350px; }
+  .chart-static { display: none; width: 100%; max-width: 700px; height: auto; margin: 4px auto; border-radius: 8px; }
 
   /* ── appendix ───────────────────────────────────────────────────────── */
   details.tech {
@@ -226,8 +192,7 @@
   details.tech h3 { margin-top: 1em; }
   .search-box {
     width: min(320px, 100%); margin: 2px 0 8px; padding: 7px 12px;
-    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2);
-    font-family: var(--font-sans);
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
     color: var(--text); font-size: 9.5pt; outline: none;
   }
   .search-box:focus { border-color: var(--accent); }
@@ -247,6 +212,20 @@
     transform: translateY(8px);
   }
   .to-top.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+  .chart-modal { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; }
+  .chart-modal[hidden] { display: none; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(4, 10, 22, .62); }
+  .modal-panel {
+    position: relative; width: min(1100px, 94vw); height: min(86vh, 760px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.35); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { margin: 0; font-size: 12pt; }
+  .modal-body { flex: 1; min-height: 0; padding: 10px; display: flex; }
+  .modal-body .echart { height: 100%; }
+  .modal-body img { max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; }
 
   /* reveal-on-scroll — gated on html.js so content is NEVER hidden when the
      init script fails or JS is disabled. Progressive enhancement only. */
@@ -270,8 +249,8 @@
     border-bottom: 3px solid var(--accent); padding: 3em 0 2.4em; margin-bottom: 1.5em;
   }
   .cover-kicker { font-size: 9.5pt; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
-  .cover-title { font-family: var(--font-heading); font-size: 34pt; font-weight: 700; letter-spacing: -.02em; line-height: 1.12; margin: .25em 0 .1em; }
-  .cover-dataset { font-family: var(--font-heading); font-size: 14.5pt; font-weight: 600; color: var(--accent-ink); margin-top: .4em; overflow-wrap: anywhere; }
+  .cover-title { font-size: 34pt; font-weight: 800; letter-spacing: -.02em; line-height: 1.12; margin: .25em 0 .1em; }
+  .cover-dataset { font-size: 14.5pt; font-weight: 600; color: var(--accent); margin-top: .4em; overflow-wrap: anywhere; }
   .cover-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1.2em; }
   .cover-stats { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 1.6em; }
   .cover-stat .kpi-label { font-size: 8.5pt; }
@@ -282,7 +261,7 @@
   .toc ol { list-style: none; margin: .6em 0 0; padding: 0; max-width: 720px; }
   .toc li { margin: 0; border-bottom: 1px dotted var(--border); }
   .toc a { display: flex; align-items: baseline; gap: 8px; text-decoration: none; color: var(--text); padding: .32em 0; }
-  .toc a:hover { color: var(--accent-ink); }
+  .toc a:hover { color: var(--accent); }
   .toc .toc-num { color: var(--muted); font-size: 9pt; width: 1.6em; flex: 0 0 auto; }
 
   /* ── recommendation priority badges ────────────────────────────────── */
@@ -310,19 +289,19 @@
     margin: 1.6cm 1.4cm;
     @bottom-center {
       content: "Page " counter(page) " of " counter(pages);
-      font-family: "DM Sans", "Segoe UI", Arial, sans-serif;
+      font-family: "Segoe UI", Arial, sans-serif;
       font-size: 8pt;
-      color: #737373;
+      color: #6b7280;
     }
   }
   @page :first { @bottom-center { content: none; } }
   @media print {
-    :root { --bg:#ffffff; --surface:#ffffff; --surface-2:#f5f5f5; --border:#e5e5e5;
-            --text:#171717; --muted:#525252; --accent:#92400e; --accent-ink:#92400e; --accent-soft:#fef3c7; --shadow:none; }
+    :root { --bg:#ffffff; --surface:#ffffff; --surface-2:#f3f4f6; --border:#d1d5db;
+            --text:#111827; --muted:#4b5563; --accent:#1e3a8a; --accent-soft:#eff6ff; --shadow:none; }
     html { scroll-behavior: auto; }
-    .progress, .topbar-actions, .to-top, .search-box { display: none !important; }
+    .progress, .topbar-actions, .to-top, .search-box, .expand-btn, .chart-modal { display: none !important; }
     .topbar { position: static; backdrop-filter: none; background: none; border-bottom: 1px solid var(--border); }
-    .topnav, .sidenav { display: none !important; }
+    .topnav { display: none; }
     .layout { display: block; max-width: none; padding: 0; }
     [data-reveal] { opacity: 1; transform: none; transition: none; }
     .echart { display: none !important; }
@@ -359,10 +338,10 @@
 
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="#overview">Analyze<span>AI</span><span class="brand-tag">Insight Report</span></a>
+    <a class="brand" href="#overview">Insight<span>Report</span></a>
     <nav class="topnav" aria-label="Sections">
       <a href="#overview" data-target="overview">Overview</a>
-      <a href="#takeaways" data-target="takeaways">Key Takeaways</a>
+      <a href="#plain-english" data-target="plain-english">Plain English</a>
       {% if story and story.get('what_happened') %}<a href="#the-story" data-target="the-story">The Story</a>{% endif %}
       <a href="#findings" data-target="findings">Findings</a>
       {% for key, sec in chart_sections %}
@@ -384,7 +363,7 @@
 <aside class="sidenav needs-js" aria-label="On this page">
   <div class="sidenav-title">Contents</div>
   <a href="#overview" data-target="overview">Overview</a>
-  <a href="#takeaways" data-target="takeaways">Key Takeaways</a>
+  <a href="#plain-english" data-target="plain-english">In Plain English</a>
   {% if story and story.get('what_happened') %}<a href="#the-story" data-target="the-story">The Story</a>{% endif %}
   <a href="#findings" data-target="findings">Key Findings</a>
   {% for key, sec in chart_sections %}
@@ -398,9 +377,9 @@
 <main class="page">
 
 <section class="cover" id="cover">
-  <p class="cover-kicker">Automated data analysis &middot; insights from your file</p>
+  <p class="cover-kicker">Automated data analysis &middot; plain-language insights from your file</p>
   <h1 class="cover-title">Data Insight Report</h1>
-  <p class="cover-dataset">{{ dataset_name.rsplit('.', 1)[0] if '.' in dataset_name else dataset_name }}</p>
+  <p class="cover-dataset">{{ dataset_name }}</p>
   {% set cover_quality = facts.data_quality.overall_quality_score %}
   <div class="badge-row">
     <span class="chip">Generated {{ generated_at }}</span>
@@ -436,7 +415,7 @@
   <ol>
     <li><a href="#overview"><span class="toc-num">{{ 1 }}.</span> Overview</a></li>
     {% if narrative.plain_language_insights or narrative.bottom_line %}
-    <li><a href="#takeaways"><span class="toc-num">{{ 2 }}.</span> Key Takeaways</a></li>
+    <li><a href="#plain-english"><span class="toc-num">{{ 2 }}.</span> In Plain English</a></li>
     {% endif %}
     {% if story and story.get('what_happened') %}
     <li><a href="#the-story"><span class="toc-num">{{ 3 }}.</span> The Story</a></li>
@@ -460,7 +439,8 @@
 </nav>
 
 <section id="overview">
-  <h1>Overview</h1>
+  <h1>Data Insight Report</h1>
+  <p class="subtitle">{{ dataset_name }} &middot; generated {{ generated_at }}</p>
 
   {% set quality = facts.data_quality.overall_quality_score %}
   {% if quality is not none %}{% set quality_int = quality | round(0, 'common') | int %}
@@ -528,9 +508,9 @@
 </section>
 
 {% if narrative.plain_language_insights or narrative.bottom_line %}
-<div class="plain-language-box" id="takeaways" data-reveal>
-  <h2>Key Takeaways</h2>
-  <p class="subtitle" style="margin-bottom:.6em;">What this data actually means for you.</p>
+<div class="plain-language-box" id="plain-english" data-reveal>
+  <h2>In Plain English</h2>
+  <p class="subtitle" style="margin-bottom:.6em;">No statistics background needed — here's what this data actually means for you.</p>
   {% if narrative.bottom_line %}
   <p class="bottom-line">{{ narrative.bottom_line | abbr_glossary(glossary) }}</p>
   {% endif %}
@@ -594,6 +574,9 @@
         <h3>{{ c.title }}</h3>
         {% if c.subtitle %}<p class="chart-sub">{{ c.subtitle }}</p>{% endif %}
       </div>
+      {% if c.img_b64 %}
+      <button class="icon-btn expand-btn needs-js" type="button" data-expand="{{ c.id }}" data-title="{{ c.title }}" title="View full size" aria-label="View chart full size">⤢</button>
+      {% endif %}
     </div>
     {% set desc = c.plain_summary or c.why_it_matters %}
     {% if desc %}<p class="chart-desc">{{ desc | abbr_glossary(glossary) }}</p>{% endif %}
@@ -609,7 +592,7 @@
     <div class="echart" id="ec-{{ c.id }}" data-option="{{ c.option_json }}"></div>
     <img class="chart-static" src="{{ c.img_b64 }}" alt="{{ c.alt_text }}">
     {% elif c.img_b64 %}
-    <img class="chart-img" src="{{ c.img_b64 }}" alt="{{ c.alt_text }}">
+    <img src="{{ c.img_b64 }}" alt="{{ c.alt_text }}" style="{% if has_interactive %}width:100%; max-width:700px; display:block; margin:4px auto; border-radius:8px;{% endif %}">
     {% endif %}
   </div>
   {% endfor %}
@@ -1012,9 +995,19 @@
 
 <button class="to-top needs-js" id="toTop" type="button" title="Back to top" aria-label="Back to top">↑</button>
 
+<div class="chart-modal" id="chartModal" hidden role="dialog" aria-modal="true" aria-label="Chart full view">
+  <div class="modal-backdrop" data-close-modal></div>
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h3 id="modalTitle">Chart</h3>
+      <button class="icon-btn" type="button" data-close-modal title="Close" aria-label="Close full view">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
 {% if has_interactive %}
 {% autoescape false %}<script>{{ echarts_lib }}</script>{% endautoescape %}
-{% endif %}
 <script>
 (function () {
   function humanize(value) {
@@ -1045,7 +1038,6 @@
   }
 
   var instances = [];
-  {% if has_interactive %}
   document.querySelectorAll('.echart').forEach(function (el) {
     try {
       var rawOption = el.getAttribute('data-option');
@@ -1063,16 +1055,6 @@
         });
       });
       if (option.tooltip) option.tooltip.valueFormatter = vf;
-      // Bar/data labels print the raw number by default (e.g. "1234567") while
-      // the axis and tooltip show the compact form ("$1.2M") right next to them —
-      // besides being inconsistent, a long raw number squeezed above a narrow bar
-      // is exactly what overflows and reads as cut-off text. Keep every on-chart
-      // label using the same compact formatter.
-      (Array.isArray(option.series) ? option.series : [option.series]).forEach(function (s) {
-        if (s && s.label && s.label.show) {
-          s.label = Object.assign({}, s.label, { formatter: function (p) { return vf(p.value); } });
-        }
-      });
       var chart = echarts.init(el, null, { renderer: 'canvas' });
       chart.setOption(option);
       el.__chartInstance = chart;
@@ -1083,7 +1065,6 @@
       if (img) img.style.display = 'block';
     }
   });
-  {% endif %}
 
   // ── theme toggle ────────────────────────────────────────────────────────
   safe(function () {
@@ -1204,12 +1185,65 @@
     });
   });
 
-  // ── resize interactive charts with the window ──────────────────────────
+  // ── chart fullscreen modal ──────────────────────────────────────────────
   safe(function () {
-    window.addEventListener('resize', function () { instances.forEach(function (c) { c.resize(); }); });
+    var modal = document.getElementById('chartModal');
+    var modalBody = document.getElementById('modalBody');
+    var modalTitle = document.getElementById('modalTitle');
+    if (!modal || !modalBody || !modalTitle) return;
+    var movedEl = null, movedFromParent = null, movedNextSibling = null;
+
+    function closeModal() {
+      if (movedEl) {
+        if (movedNextSibling && movedNextSibling.parentNode === movedFromParent) {
+          movedFromParent.insertBefore(movedEl, movedNextSibling);
+        } else if (movedFromParent) {
+          movedFromParent.appendChild(movedEl);
+        }
+        if (movedEl.classList.contains('echart') && movedEl.__chartInstance) movedEl.__chartInstance.resize();
+      }
+      movedEl = movedFromParent = movedNextSibling = null;
+      modal.hidden = true;
+      document.body.style.overflow = '';
+    }
+    modal.querySelectorAll('[data-close-modal]').forEach(function (el) { el.addEventListener('click', closeModal); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !modal.hidden) closeModal(); });
+
+    document.querySelectorAll('.expand-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        try {
+          var card = document.getElementById('chart-' + btn.getAttribute('data-expand'));
+          if (!card) return;
+          modalTitle.textContent = btn.getAttribute('data-title') || 'Chart';
+          var holder = card.querySelector('.echart');
+          if (holder) {
+            movedEl = holder; movedFromParent = holder.parentNode;
+            movedNextSibling = holder.nextElementSibling;
+            modalBody.innerHTML = '';
+            modalBody.appendChild(holder);
+            if (holder.__chartInstance) holder.__chartInstance.resize();
+          } else {
+            var img = card.querySelector('img');
+            modalBody.innerHTML = '';
+            if (img) {
+              var clone = img.cloneNode();
+              clone.className = ''; clone.style.cssText = 'max-width:100%;max-height:100%;margin:auto;';
+              modalBody.appendChild(clone);
+            }
+          }
+          modal.hidden = false;
+          document.body.style.overflow = 'hidden';
+        } catch (err) { if (window.console) console.warn('chart expand:', err); }
+      });
+    });
+
+    safe(function () {
+      window.addEventListener('resize', function () { instances.forEach(function (c) { c.resize(); }); });
+    });
   });
 })();
 </script>
+{% endif %}
 
 </body>
 </html>

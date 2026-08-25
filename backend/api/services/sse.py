@@ -49,6 +49,7 @@ async def event_stream(manager: JobManager, job_id: str) -> AsyncIterator[bytes]
 
     index = 0
     idle_ticks = 0
+    terminal_sent = False
     keepalive_ticks = max(1, int(settings.sse_keepalive_interval / max(settings.sse_poll_interval, 0.01)))
 
     while True:
@@ -63,13 +64,26 @@ async def event_stream(manager: JobManager, job_id: str) -> AsyncIterator[bytes]
             for event in pending:
                 yield format_sse(event).encode("utf-8")
                 if event.get("event") in {"completed", "pipeline_failed"}:
-                    # Terminal event delivered; close the stream cleanly.
-                    return
-        else:
+                    terminal_sent = True
+        elif not terminal_sent:
             idle_ticks += 1
             if finished:
                 # No more events will arrive and log is drained.
                 return
+            if idle_ticks >= keepalive_ticks:
+                idle_ticks = 0
+                yield b": keepalive\n\n"
+        else:
+            # The terminal event was delivered. Do NOT close the connection here:
+            # a browser EventSource treats a server-initiated close as a dropped
+            # connection and auto-reconnects, which (with no Last-Event-ID support
+            # in this replay-by-index protocol) replays the entire history and
+            # re-delivers "completed" — an infinite reconnect loop that flickers
+            # the UI and hammers the server. Idle instead and let the CLIENT close
+            # the connection once it's done handling the terminal event; if the
+            # client (or its tab) goes away, the ASGI server cancels this
+            # generator for us, same as any other disconnect.
+            idle_ticks += 1
             if idle_ticks >= keepalive_ticks:
                 idle_ticks = 0
                 yield b": keepalive\n\n"

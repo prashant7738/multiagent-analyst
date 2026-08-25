@@ -1,175 +1,279 @@
-import React from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Plus, Trash2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Search, Download, Trash2, Eye, Filter } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
-import Button from "@/components/ui/button";
 import useJobHistory from "@/hooks/useJobHistory";
 import { reportDownloadUrl } from "@/lib/api";
 
-/**
- * GOAL: find a past analysis and get back to it (or its report) in one scan.
- * A single consistent table over the shared useJobHistory hook — same data
- * shape the Profile page uses, so both surfaces always agree.
- */
+const StatusBadge = ({ status }) => {
+  const statusConfig = {
+    done: { bg: "bg-green-100 dark:bg-green-950", text: "text-green-700 dark:text-green-300", label: "Complete" },
+    error: { bg: "bg-red-100 dark:bg-red-950", text: "text-red-700 dark:text-red-300", label: "Failed" },
+    running: { bg: "bg-blue-100 dark:bg-blue-950", text: "text-blue-700 dark:text-blue-300", label: "Running" },
+  };
+  const config = statusConfig[status] || statusConfig.done;
 
-function StatusBadge({ status }) {
-  if (status === "done")
-    return <span className="rounded-full bg-success-subtle px-2 py-0.5 text-xs text-success">Complete</span>;
-  if (status === "error")
-    return <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-xs text-danger">Failed</span>;
-  return <span className="rounded-full bg-raised px-2 py-0.5 text-xs capitalize text-ink-muted">{status}</span>;
-}
-
-function DeleteButton({ job, onDelete, busy }) {
-  const running = job.status !== "done" && job.status !== "error";
-  if (running) return null;
   return (
-    <button
-      onClick={() => {
-        if (window.confirm(`Delete "${job.file}" from history? Its report and charts are removed too.`)) {
-          onDelete(job.id);
-        }
-      }}
-      disabled={busy}
-      aria-label={`Delete analysis for ${job.file}`}
-      className="inline-flex items-center gap-1 text-xs font-medium text-danger transition-opacity hover:opacity-70 disabled:opacity-40"
-    >
-      <Trash2 size={12} aria-hidden="true" /> Delete
-    </button>
+    <div className={`inline-flex items-center px-2 py-1 rounded-sm text-xs font-medium ${config.bg} ${config.text}`}>
+      {config.label}
+    </div>
   );
-}
+};
 
 export default function HistoryPage() {
   const navigate = useNavigate();
-  const { jobs, loading, error, partial, removeJob, deletingIds, removeAllJobs, deletingAll } =
-    useJobHistory();
+  const { jobs, loading, error, removeJob, deletingIds } = useJobHistory();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains("dark"));
+
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter((job) => {
+      const matchesSearch = job.file.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === "all" || job.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [jobs, searchQuery, statusFilter]);
 
   const doneCount = jobs.filter((j) => j.status === "done").length;
-  const deletableCount = jobs.filter((j) => j.status === "done" || j.status === "error").length;
-
-  const handleDeleteAll = () => {
-    if (
-      window.confirm(
-        `Delete all ${deletableCount} finished run${deletableCount === 1 ? "" : "s"} from history? Their reports and charts are removed too.`
-      )
-    ) {
-      removeAllJobs().catch(() => {});
-    }
-  };
 
   return (
     <AppLayout size="wide">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight text-ink">Analysis history</h1>
-          <p className="tnum mt-1.5 text-sm text-ink-muted">
-            {jobs.length} run{jobs.length === 1 ? "" : "s"} · {doneCount} complete
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {deletableCount > 0 && (
-            <Button variant="danger" onClick={handleDeleteAll} disabled={deletingAll}>
-              <Trash2 size={15} aria-hidden="true" />
-              {deletingAll ? "Deleting…" : "Delete all"}
-            </Button>
-          )}
-          <Button onClick={() => navigate("/analyze")}>
-            <Plus size={15} aria-hidden="true" /> New analysis
-          </Button>
-        </div>
-      </div>
-
-      {error && (
-        <p role="alert" className="mt-6 rounded-panel border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger">
-          {error}
-        </p>
-      )}
-      {partial && !error && (
-        <p role="status" className="mt-6 rounded-panel border border-warning bg-warning-subtle px-4 py-3 text-sm text-warning">
-          Some older results have expired from storage; their metrics show as “—”.
-        </p>
-      )}
-
-      {/* Consistent job table */}
-      <div className="mt-8 overflow-x-auto rounded-panel border border-line bg-surface">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
-              <th scope="col" className="px-5 py-3.5 font-medium">File</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Rows</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Profile</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Confidence</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Date</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Took</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Status</th>
-              <th scope="col" className="px-4 py-3.5" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {jobs.map((job) => (
-              <tr key={job.id} className="transition-colors hover:bg-raised/50">
-                <td className="px-5 py-3.5 font-medium text-ink">{job.file}</td>
-                <td className="tnum px-4 py-3.5 text-ink-muted">
-                  {job.rows != null && !job.enrichFailed ? job.rows.toLocaleString() : "—"}
-                </td>
-                <td className="px-4 py-3.5 capitalize text-ink-muted">{job.profile}</td>
-                <td className="tnum px-4 py-3.5 text-ink-muted">
-                  {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}
-                </td>
-                <td className="tnum px-4 py-3.5 text-ink-muted">{job.date}</td>
-                <td className="tnum px-4 py-3.5 text-ink-muted">{job.duration}</td>
-                <td className="px-4 py-3.5">
-                  <StatusBadge status={job.status} />
-                </td>
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center justify-end gap-4 whitespace-nowrap">
-                    {job.status === "done" && (
-                      <>
-                        <button
-                          onClick={() => navigate(`/analyze/${job.id}`)}
-                          className="text-xs font-medium text-accent-ink transition-colors hover:text-accent"
-                        >
-                          Open
-                        </button>
-                        {job.reportAvailable && (
-                          <a
-                            href={reportDownloadUrl(job.id)}
-                            target="_blank"
-                            rel="noreferrer"
-                            aria-label={`Download report for ${job.file}`}
-                            className="inline-flex items-center gap-1 text-xs font-medium text-accent-ink transition-colors hover:text-accent"
-                          >
-                            <Download size={12} aria-hidden="true" /> Report
-                          </a>
-                        )}
-                      </>
-                    )}
-                    <DeleteButton
-                      job={job}
-                      busy={deletingIds.has(job.id)}
-                      onDelete={(id) => removeJob(id).catch(() => {})}
-                    />
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {!loading && jobs.length === 0 && !error && (
-          <div className="px-6 py-14 text-center">
-            <p className="text-sm text-ink-muted">No analyses yet.</p>
-            <Button variant="secondary" size="sm" className="mt-4" onClick={() => navigate("/analyze")}>
-              Run your first analysis
-            </Button>
+      <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="mb-12"
+        >
+          <div className="text-xs uppercase tracking-widest text-accent mb-4 font-mono">
+            Analysis History
           </div>
-        )}
-        {loading && (
-          <p className="px-6 py-10 text-center text-xs text-ink-faint" role="status">
-            Loading history…
+          <h1 className="text-5xl font-serif font-bold mb-4">Your analyses.</h1>
+          <p className="text-ink-secondary max-w-2xl">
+            View and manage all your past analyses. Each run is deterministic — same CSV, same results.
           </p>
+
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-6 mt-12">
+            {[
+              { label: "Total Analyses", value: jobs.length },
+              { label: "Completed", value: doneCount },
+              { label: "Success Rate", value: jobs.length > 0 ? `${Math.round((doneCount / jobs.length) * 100)}%` : "—" },
+            ].map((stat, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 * (i + 1) }}
+              >
+                <div className="text-xs uppercase tracking-widest text-ink-muted font-mono mb-2">
+                  {stat.label}
+                </div>
+                <div className="text-3xl font-serif font-bold text-accent">
+                  {stat.value}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Controls */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="mb-8 space-y-4"
+        >
+          {/* Search Bar */}
+          <div className="relative flex items-center">
+            <Search className="absolute left-4 w-4 h-4 text-neutral-400 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search analyses..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 bg-raised border border-line text-ink placeholder-ink-muted focus:outline-none focus:border-amber-700 focus:ring-2 focus:ring-amber-700/20 transition-all"
+              style={{ paddingLeft: "44px" }}
+            />
+          </div>
+
+          {/* Filter */}
+          <div className="flex gap-3">
+            <div className="relative">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="pl-3 pr-9 py-2 bg-raised border border-line focus:outline-none focus:border-amber-700 cursor-pointer text-sm font-medium rounded-sm w-full"
+                style={{
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  backgroundImage: "none",
+                  color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(17, 24, 39)",
+                  paddingRight: "2.25rem",
+                }}
+              >
+                <option value="all" style={{ color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(17, 24, 39)" }}>All Status</option>
+                <option value="done" style={{ color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(17, 24, 39)" }}>Complete</option>
+                <option value="error" style={{ color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(17, 24, 39)" }}>Failed</option>
+                <option value="running" style={{ color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(17, 24, 39)" }}>Running</option>
+              </select>
+              <Filter 
+                className="absolute w-4 h-4 pointer-events-none"
+                style={{ 
+                  color: isDarkMode ? "rgb(229, 231, 235)" : "rgb(55, 65, 81)",
+                  right: "0.5rem",
+                  top: "50%",
+                  transform: "translateY(-50%)"
+                }}
+              />
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Table */}
+        {loading ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-16 text-ink-secondary"
+          >
+            Loading history…
+          </motion.div>
+        ) : filteredJobs.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-16 border border-line p-8"
+          >
+            <p className="text-ink-secondary mb-4">No analyses found</p>
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => navigate("/analyze")}
+              className="px-6 py-2 bg-amber-700 hover:bg-amber-800 text-white font-medium rounded-sm transition-all text-sm"
+            >
+              Run First Analysis
+            </motion.button>
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="border border-line divide-y divide-neutral-200 dark:divide-neutral-800"
+          >
+            {/* Header */}
+            <div className="bg-neutral-50 dark:bg-neutral-900 px-6 py-4 grid grid-cols-6 gap-4 text-xs uppercase tracking-widest font-mono text-ink-secondary">
+              <div>Analysis</div>
+              <div>Date</div>
+              <div>Rows</div>
+              <div>Confidence</div>
+              <div>Status</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {/* Rows */}
+            <div>
+              <AnimatePresence>
+                {filteredJobs.map((job, i) => (
+                  <motion.div
+                    key={job.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.05 * i }}
+                    className="px-6 py-4 grid grid-cols-6 gap-4 items-center hover:bg-neutral-50 dark:hover:bg-neutral-900/50 transition-colors border-b border-line last:border-0"
+                  >
+                    <div>
+                      <p 
+                        className="font-medium text-sm" 
+                        style={{ color: isDarkMode ? "rgb(243, 244, 246)" : "rgb(0, 0, 0)" }}
+                      >
+                        {job.file}
+                      </p>
+                    </div>
+                    <div className="text-sm text-ink-secondary">
+                      {job.date}
+                    </div>
+                    <div className="text-sm text-ink-secondary">
+                      {job.rows != null && !job.enrichFailed ? job.rows.toLocaleString() : "—"}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-line rounded-full overflow-hidden">
+                          <motion.div
+                            className="h-full bg-amber-700"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${(job.confidence || 0) * 100}%` }}
+                            transition={{ duration: 0.8, delay: 0.1 * i }}
+                          />
+                        </div>
+                        <span className="text-xs font-mono text-ink-secondary">
+                          {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <StatusBadge status={job.status} />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      {job.status === "done" && (
+                        <>
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => navigate(`/analyze/${job.id}`)}
+                            className="p-2 text-ink-secondary hover:text-amber-700 dark:hover:text-amber-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-sm transition-colors"
+                            title="View analysis"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </motion.button>
+                          {job.reportAvailable && (
+                            <motion.a
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              href={reportDownloadUrl(job.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-2 text-ink-secondary hover:text-green-700 dark:hover:text-green-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-sm transition-colors"
+                              title="Download report"
+                            >
+                              <Download className="w-4 h-4" />
+                            </motion.a>
+                          )}
+                        </>
+                      )}
+                      {(job.status === "done" || job.status === "error") && (
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => {
+                            if (window.confirm(`Delete "${job.file}"? This cannot be undone.`)) {
+                              removeJob(job.id).catch(() => {});
+                            }
+                          }}
+                          disabled={deletingIds.has(job.id)}
+                          className="p-2 text-ink-secondary hover:text-red-700 dark:hover:text-red-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-sm transition-colors disabled:opacity-50"
+                          title="Delete analysis"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </motion.button>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </motion.div>
         )}
-      </div>
     </AppLayout>
   );
 }

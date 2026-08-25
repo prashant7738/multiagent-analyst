@@ -103,6 +103,50 @@ def make_spec(
     return spec
 
 
+# Legacy agent_4 charts don't get a narrated description from the planner or the
+# LLM, so without this they'd show only the terse `reason` score string (e.g.
+# "max |pearson r|=0.97") as if it were an explanation of the chart. One plain-
+# language sentence per family so every chart says what it actually shows.
+_FAMILY_BLURBS = {
+    "correlation_heatmap": "This heatmap shows how strongly every pair of numeric columns moves together — darker cells mean a stronger relationship, pale cells mean little to no connection.",
+    "correlation_scatter": "Each dot is one record, plotted by its two values. The dashed line is the general trend — dots hugging it closely mean a dependable relationship.",
+    "growth_rates_monthly": "How this metric changed from one month to the next, so you can spot which periods grew and which pulled back.",
+    "growth_rates_quarterly": "How this metric changed from one quarter to the next, so you can spot which periods grew and which pulled back.",
+    "top_bottom_ranking": "The categories that contribute the most and the least, ranked side by side so the gap between them is easy to see.",
+    "profit_breakdown": "How profit is distributed across categories, highlighting which ones carry the business and which barely contribute.",
+    "seasonality_monthly": "How this metric typically behaves across the calendar year, so seasonal highs and lows stand out.",
+    "seasonality_quarterly": "How this metric typically behaves across quarters, so seasonal highs and lows stand out.",
+    "category_distribution": "How often each category appears in your data — tall bars are the common cases, short bars are the rare ones.",
+    "distribution_boxplot": "The spread of your numeric columns side by side — the box marks the middle half of the values, and dots beyond it are unusually high or low entries.",
+    "revenue_histogram": "How your values are distributed — tall bars mark where most records fall, and the shape shows whether typical values cluster tightly or spread out.",
+    "regression_trend": "The overall direction of this metric over time, with a fitted line showing whether it's generally rising, falling, or flat.",
+    "derived_margin_trend": "How the derived profit margin has moved over time.",
+    "derived_metrics_summary": "A summary view of the business metrics the pipeline derived from your columns.",
+    "discount_return_rate": "How the return rate changes as the discount offered gets bigger, so you can see whether steep discounts come with more returns.",
+    "category_margin_trend": "How profit margin for each category has moved over time.",
+    "rep_discount_margin": "Average discount given and the margin left over, compared across the people or teams responsible.",
+    "segment_order_value": "The typical order value for each segment, so you can see which segments spend more per order.",
+    "region_shipping_cost": "The average shipping cost for each region, so you can spot where fulfillment is more expensive.",
+    "shipping_lead_time": "How long orders typically take to ship, broken down by group.",
+}
+
+# finalize_specs() only treats a legacy chart and a planner chart as the same
+# chart (and drops one) when their (section, chart_type, title) all match.
+# Every legacy family used to report chart_type="bar" regardless of what it
+# actually was, so a legacy correlation_scatter could never match its planner
+# equivalent and both survived — the exact "same chart twice" bug this maps
+# away from. Values must be members of CHART_TYPES.
+_FAMILY_CHART_TYPES = {
+    "correlation_heatmap": "heatmap",
+    "correlation_scatter": "scatter",
+    "regression_trend": "line",
+    "derived_margin_trend": "line",
+    "category_margin_trend": "line",
+    "revenue_histogram": "histbox",
+    "distribution_boxplot": "histbox",
+}
+
+
 def wrap_legacy_candidate(candidate: dict) -> dict | None:
     """Convert an agent_4 legacy chart candidate ({path, family, score, reason})
     into an image-render spec so old families keep their slot in the unified
@@ -111,6 +155,7 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
     family = candidate.get("family", "legacy")
     reason = candidate.get("reason") or ""
     title = candidate.get("title") or _title_from_path(path, family)
+    blurb = _FAMILY_BLURBS.get(family) or reason or f"Shows {family.replace('_', ' ')} patterns found in your data."
     try:
         priority = float(candidate.get("score", 0.0))
     except (TypeError, ValueError):
@@ -121,15 +166,15 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
         "id": f"legacy_{family}_{abs(hash(path)) % 10_000}",
         "family": family,
         "section": SECTION_BY_FAMILY.get(family, "what_matters"),
-        "chart_type": "bar",
+        "chart_type": _FAMILY_CHART_TYPES.get(family, "bar"),
         "render": "image",
         "title": title,
         "subtitle": "",
-        "why_it_matters": reason,
-        "plain_summary": reason,
+        "why_it_matters": blurb,
+        "plain_summary": blurb,
         "alt_text": title,
         "data": {},
-        "annotations": [],
+        "annotations": [{"label": "Signal", "value": reason}] if reason else [],
         "axis": {},
         "priority": round(priority, 2),
         "png_path": path,
@@ -225,7 +270,12 @@ def _normalize_axis(axis: dict) -> dict:
 
 
 def _title_from_path(path, family: str) -> str:
-    stem = str(path).rsplit("/", 1)[-1].rsplit(".", 1)[0] if path else family
+    # Chart PNGs are saved with os.path.join, which emits native (backslash on
+    # Windows) separators - splitting on "/" alone leaves the directory prefix
+    # glued onto the title (e.g. "Charts\\<hash>\\correlation Heatmap"). Split on
+    # both separators regardless of host OS so the stripped basename is clean.
+    base = re.split(r"[\\/]", str(path))[-1] if path else family
+    stem = base.rsplit(".", 1)[0] if "." in base else base
     words = stem.replace("_", " ").split()
     small = {"by", "of", "the", "and", "to", "per", "vs", "over", "in", "on"}
     titled = " ".join(

@@ -22,8 +22,13 @@ def build_echarts_option(spec: dict) -> dict:
         "__fmt": axis.get("y_unit", "number"),
         "__symbol": axis.get("symbol", ""),
         "animationDuration": 350,
-        "textStyle": {"fontFamily": "Segoe UI, Helvetica Neue, Arial, sans-serif",
-                      "color": "#1f2933"},
+        # Charts always render on white regardless of the report's light/dark theme
+        # (matches the static PNG twins, which are always facecolor="white"), so
+        # every chart in the report shares one background and text stays black —
+        # never near-invisible dark-on-dark canvas text.
+        "backgroundColor": "#ffffff",
+        "textStyle": {"fontFamily": "DM Sans, Segoe UI, Helvetica Neue, Arial, sans-serif",
+                      "color": "#000000"},
         "grid": {"left": 64, "right": 56, "top": 48, "bottom": axis.get("x_label") and 56 or 40,
                  "containLabel": True},
         "toolbox": {"show": True, "right": 8, "top": 0,
@@ -51,17 +56,17 @@ def build_echarts_option(spec: dict) -> dict:
             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [3, 3, 0, 0]},
             "barMaxWidth": 46,
             "label": {"show": len(values) <= 12, "position": "top", "fontSize": 10,
-                      "color": "#374151"},
+                      "color": "#000000"},
         }]
         option = {**base,
                   "xAxis": {"type": "category", "data": labels,
                             "axisLabel": {"interval": 0, "rotate": _label_rotation(labels),
-                                          "fontSize": 10, "width": 90, "overflow": "truncate"},
+                                          "fontSize": 10, "width": 110, "overflow": "truncate"},
                             "name": axis.get("x_label"), "nameGap": 28,
-                            "nameTextStyle": {"fontSize": 10, "color": "#6b7280"}},
+                            "nameTextStyle": {"fontSize": 10, "color": "#000000"}},
                   "yAxis": {"type": "value",
                             "name": axis.get("y_label"),
-                            "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                            "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                             "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                   "series": series}
         cum = data.get("cumulative_pct")
@@ -89,14 +94,14 @@ def build_echarts_option(spec: dict) -> dict:
             bar_data[extreme_i] = {"value": bar_data[extreme_i], "itemStyle": {"color": highlight}}
         return {**base,
                 "xAxis": {"type": "value", "name": axis.get("y_label") or axis.get("x_label"),
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "yAxis": {"type": "category", "data": labels,
-                          "axisLabel": {"fontSize": 10, "width": 110, "overflow": "truncate"}},
+                          "axisLabel": {"fontSize": 10, "width": 160, "overflow": "truncate"}},
                 "series": [{"type": "bar", "data": bar_data, "barMaxWidth": 22,
                             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [0, 3, 3, 0]},
                             "label": {"show": True, "position": "right", "fontSize": 9,
-                                      "color": "#374151"}}]}
+                                      "color": "#000000"}}]}
 
     if kind == "line":
         xs, ys = data.get("x") or [], data.get("y") or []
@@ -109,13 +114,16 @@ def build_echarts_option(spec: dict) -> dict:
                            "lineStyle": {"color": PALETTE["accent"], "width": 1.8,
                                          "type": "dashed"}, "name": "Overall direction"})
         return {**base,
-                "legend": {"show": bool(y_fit), "top": 0, "textStyle": {"fontSize": 10}},
+                # grid.top (48) leaves the legend, when shown, only just enough room —
+                # give it real clearance instead of trusting the two not to touch.
+                "grid": {**base["grid"], "top": 68} if y_fit else base["grid"],
+                "legend": {"show": bool(y_fit), "top": 0, "textStyle": {"fontSize": 10, "color": "#000000"}},
                 "xAxis": {"type": "category", "data": xs,
                           "axisLabel": {"interval": _label_interval(xs), "rotate": _label_rotation(xs),
                                         "fontSize": 9}},
                 "yAxis": {"type": "value", "scale": True,
                           "name": axis.get("y_label"),
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "series": series}
 
@@ -126,10 +134,10 @@ def build_echarts_option(spec: dict) -> dict:
                 "tooltip": {"trigger": "item"},
                 "xAxis": {"type": "value", "scale": True, "name": axis.get("x_label"),
                           "nameLocation": "middle", "nameGap": 30,
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "yAxis": {"type": "value", "scale": True, "name": axis.get("y_label"),
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "series": [
                     {"type": "scatter", "data": points, "symbolSize": 9,
@@ -180,9 +188,9 @@ def build_echarts_option(spec: dict) -> dict:
         return {**base,
                 "xAxis": {"type": "value", "min": min(bins), "max": max(bins),
                           "name": axis.get("x_label"), "nameLocation": "middle", "nameGap": 30,
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"}},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"}},
                 "yAxis": {"type": "value", "name": "Records",
-                          "nameTextStyle": {"fontSize": 10, "color": "#6b7280"},
+                          "nameTextStyle": {"fontSize": 10, "color": "#000000"},
                           "splitLine": {"lineStyle": {"type": "dashed", "opacity": 0.4}}},
                 "series": [series, *outlier_series]}
 
@@ -197,17 +205,22 @@ def build_echarts_option(spec: dict) -> dict:
             for c_i, count in enumerate(row)
         ]
         return {**base,
+                # The horizontal visualMap legend lives below the plot inside this
+                # same fixed-height container; base.grid.bottom (40) is nowhere near
+                # enough room for it (itemHeight 60 + its own labels), which made the
+                # heatmap's cells/x-axis labels overlap the color-scale legend.
+                "grid": {**base["grid"], "bottom": 110},
                 "tooltip": {"trigger": "item", "position": "top"},
                 "xAxis": {"type": "category", "data": cols,
                           "axisLabel": {"fontSize": 9, "rotate": 30},
                           "splitArea": {"show": True}},
                 "yAxis": {"type": "category", "data": rows,
-                          "axisLabel": {"fontSize": 9, "width": 100, "overflow": "truncate"},
+                          "axisLabel": {"fontSize": 9, "width": 130, "overflow": "truncate"},
                           "splitArea": {"show": True}},
                 "visualMap": {"min": 0, "max": vmax, "calculable": False, "orient": "horizontal",
-                              "left": "center", "bottom": 0, "itemHeight": 60,
-                              "inRange": {"color": ["#eff6ff", "#2563EB"]},
-                              "textStyle": {"fontSize": 9}},
+                              "left": "center", "bottom": 6, "itemHeight": 60,
+                              "inRange": {"color": ["#fef3c7", "#d97706"]},
+                              "textStyle": {"fontSize": 9, "color": "#000000"}},
                 "series": [{"type": "heatmap", "data": series_data,
                             "label": {"show": vmax <= 200, "fontSize": 9},
                             "emphasis": {"itemStyle": {"shadowBlur": 4}}}]}

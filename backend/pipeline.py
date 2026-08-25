@@ -152,6 +152,7 @@ if __name__ == "__main__":
 
     initial_state: GraphState = {
         "csv_path": csv_path,
+        "original_filename":     os.path.basename(csv_path),
         "raw_profile":           {},
         "schema_blueprint":      {},
         "_df_cache":             None,

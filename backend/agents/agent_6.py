@@ -753,6 +753,68 @@ def _extract_numeric_claims(text: str) -> list[float]:
     return claims
 
 
+def _check_narrative_contradictions(narrative: dict) -> dict:
+    """Detect contradictory statements within the narrative that may confuse the reader.
+    
+    Returns a dict with:
+    - contradictions_found: bool
+    - detected_pairs: list of (text1, text2, reason) tuples
+    - recommendation: suggested fix
+    """
+    contradictions = []
+    
+    # Keywords indicating opposite claims
+    problem_keywords = {"fix", "issue", "problem", "broken", "wrong", "error", "defect", "quality concern"}
+    confidence_keywords = {"solid", "reliable", "trustworthy", "high quality", "good quality", "act with confidence"}
+    
+    sections_to_check = []
+    story = narrative.get("story")
+    if isinstance(story, dict):
+        sections_to_check.extend([
+            ("story.what_happened", story.get("what_happened", "")),
+            ("story.why_it_matters", story.get("why_it_matters", "")),
+            ("story.what_to_do_next", story.get("what_to_do_next", "")),
+        ])
+    
+    sections_to_check.extend([
+        ("executive_summary", narrative.get("executive_summary", "")),
+        ("plain_language_insights", " ".join(narrative.get("plain_language_insights", []))),
+        ("bottom_line", narrative.get("bottom_line", "")),
+    ])
+    
+    # Check for contradictory topic pairs
+    for i, (label1, text1) in enumerate(sections_to_check):
+        if not text1:
+            continue
+        text1_lower = str(text1).lower()
+        has_problem = any(kw in text1_lower for kw in problem_keywords)
+        has_confidence = any(kw in text1_lower for kw in confidence_keywords)
+        
+        for label2, text2 in sections_to_check[i+1:]:
+            if not text2:
+                continue
+            text2_lower = str(text2).lower()
+            has_problem2 = any(kw in text2_lower for kw in problem_keywords)
+            has_confidence2 = any(kw in text2_lower for kw in confidence_keywords)
+            
+            # Contradiction: one says "fix this problem" the other says "data is fine"
+            if (has_problem and has_confidence2) or (has_confidence and has_problem2):
+                contradictions.append({
+                    "section1": label1,
+                    "text1": text1[:100] + "..." if len(text1) > 100 else text1,
+                    "section2": label2,
+                    "text2": text2[:100] + "..." if len(text2) > 100 else text2,
+                    "issue": "contradictory claims about data quality/trustworthiness"
+                })
+    
+    return {
+        "contradictions_found": bool(contradictions),
+        "contradiction_count": len(contradictions),
+        "detected_pairs": contradictions,
+        "recommendation": "Review reported data quality issues vs. confidence statements for consistency" if contradictions else None,
+    }
+
+
 def _check_narrative_grounding(insight_facts: dict, narrative: dict, tolerance: float = CLAIM_GROUNDING_TOLERANCE) -> dict:
     """Verify that numbers cited in the LLM narrative actually appear in the
     deterministic facts it was given, within a small tolerance for rounding.
@@ -846,6 +908,9 @@ move the needle" or "Sales quietly dip every February - worth planning a promoti
 them in plain English instead of statistical language.
 - Do not repeat the same point already phrased differently; each bullet should be a distinct, \
 useful takeaway.
+- Never write the literal phrase "plain English", "in simple terms", "in layman's terms", "in \
+other words", or any other meta-comment announcing that you're simplifying - just write the \
+explanation directly, in plain language, without narrating that you're doing so.
 
 Return ONLY a JSON object with exactly these keys:
 {
@@ -1077,7 +1142,30 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
 
 
-def _plain_language_fallback(insight_facts: dict):
+def _is_material_difference(top_share_pct, comparison_share_pct, threshold_multiplier=1.5, absolute_threshold_pct=5):
+    """
+    Determine if a difference between top and next performer is "material" enough
+    to justify a "leader" claim.
+    
+    Returns True if:
+    - top_share is at least threshold_multiplier times the comparison_share (e.g., 1.5x), OR
+    - top_share exceeds comparison_share by at least absolute_threshold_pct points (e.g., 5pp)
+    
+    This prevents saying "X is your clear leader" when it's 35% vs 34% vs 30%.
+    """
+    if not top_share_pct or not comparison_share_pct:
+        return False
+    
+    if comparison_share_pct <= 0:
+        return True  # Any positive vs zero/negative is material
+    
+    ratio_test = top_share_pct >= comparison_share_pct * threshold_multiplier
+    absolute_test = (top_share_pct - comparison_share_pct) >= absolute_threshold_pct
+    
+    return ratio_test or absolute_test
+
+
+def _plain_language_fallback(insight_facts: dict) -> tuple[list[str], str]:
     """Deterministic, jargon-free bullets for non-technical readers, plus a single
     "bottom line" sentence. Built straight from the facts JSON - no LLM involved."""
     bullets = []
@@ -1101,23 +1189,38 @@ def _plain_language_fallback(insight_facts: dict):
     for cat_col, data in (insight_facts.get("rankings") or {}).items():
         metric_label = (data.get("metric_label") or "revenue").lower()
         top = (data.get("top") or [None])[0]
+        bottom = (data.get("bottom") or [None])[0]
+        
+        # Check if the difference is material before claiming a "leader"
+        top_share = top.get("revenue_share_pct") if top else None
+        bottom_share = bottom.get("revenue_share_pct") if bottom else None
+        
         if top:
             name = top.get(cat_col)
-            share = top.get("revenue_share_pct")
+            share = top_share
             if name is not None and share is not None:
-                bullets.append(
-                    f"'{name}' is your best performer in {cat_col}, bringing in "
-                    f"{share}% of total {metric_label} on its own."
-                )
-        bottom = (data.get("bottom") or [None])[0]
+                # Only claim "best performer" if the gap to others is material
+                # Use bottom share as a proxy for second-place (might not be exact but good enough)
+                if bottom_share and _is_material_difference(share, bottom_share):
+                    bullets.append(
+                        f"'{name}' is your best performer in {cat_col}, bringing in "
+                        f"{share}% of total {metric_label} on its own."
+                    )
+                elif not bottom_share or share > 10:  # Only mention top if truly dominant (>10%) or sole entry
+                    bullets.append(
+                        f"'{name}' leads in {cat_col} with {share}% of total {metric_label}."
+                    )
+        
         if bottom:
             name = bottom.get(cat_col)
-            share = bottom.get("revenue_share_pct")
+            share = bottom_share
             if name is not None and share is not None:
-                bullets.append(
-                    f"'{name}' is your weakest performer in {cat_col}, contributing only "
-                    f"{share}% of total {metric_label} - worth a closer look."
-                )
+                # Similarly, only flag as "weakest" if it's a real outlier
+                if share < 5:  # Bottom performer contributes <5% - worth mentioning
+                    bullets.append(
+                        f"'{name}' contributes only {share}% of total {metric_label} in {cat_col} - "
+                        f"worth a closer look for optimization opportunities."
+                    )
 
     growth = insight_facts.get("growth") or {}
     best_month = growth.get("best_month")
@@ -1563,15 +1666,28 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
 
     Legacy agent_4 PNG-only families arrive as render="image" specs; planner
     specs get their static twin rendered on demand here.
+    
+    Deduplicates charts by ID to prevent the same chart from appearing multiple times.
     """
     captions = narrative.get("chart_captions") or {}
     out_dir = _charts_output_dir(state)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     view_models = []
+    seen_ids = set()  # Track chart IDs to avoid duplicates
+    
     for spec in state.get("chart_specs") or []:
         if not isinstance(spec, dict):
             continue
+        
+        chart_id = spec.get("id", "chart")
+        
+        # Skip if we've already included this chart ID
+        if chart_id in seen_ids:
+            print(f"[Agent 6] Skipping duplicate chart: {chart_id}")
+            continue
+        seen_ids.add(chart_id)
+        
         png_path = spec.get("png_path")
         if not png_path:
             # Render the static twin lazily so print/PDF stays complete even
@@ -1580,12 +1696,12 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
         img_b64 = _embed_png(Path(png_path)) if png_path else None
 
         entry = {
-            "id": spec.get("id", "chart"),
+            "id": chart_id,
             "title": spec.get("title", ""),
             "subtitle": spec.get("subtitle", ""),
             "why_it_matters": spec.get("why_it_matters", ""),
             "plain_summary": spec.get("plain_summary", ""),
-            "llm_caption": captions.get(spec.get("id"), ""),
+            "llm_caption": captions.get(chart_id, ""),
             "alt_text": spec.get("alt_text") or spec.get("title", ""),
             "section": spec.get("section", "what_matters"),
             "priority": spec.get("priority") or 0.0,
@@ -1628,6 +1744,26 @@ def _group_by_section(chart_entries: list[dict]) -> list[tuple[str, list[dict]]]
     return [(section, payload) for _, _, section, payload in sections]
 
 
+def _quality_verdict(score):
+    """Translate a numeric quality score into a plain-language verdict.
+
+    Returns {"label": ..., "cls": good|warn|bad} so templates can show a
+    human word instead of a bare number."""
+    if score is None:
+        return None
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return None
+    if value >= 85:
+        return {"label": "Excellent", "cls": "good"}
+    if value >= 70:
+        return {"label": "Good", "cls": "good"}
+    if value >= 50:
+        return {"label": "Fair — some cleaning helped", "cls": "warn"}
+    return {"label": "Needs attention", "cls": "bad"}
+
+
 def _kpi_cards(facts: dict) -> list[dict]:
     """Hero strip values, all grounded in extracted facts."""
     dataset = facts.get("dataset") or {}
@@ -1635,22 +1771,82 @@ def _kpi_cards(facts: dict) -> list[dict]:
     validation = facts.get("validation") or {}
     reliability = facts.get("reliability") or {}
     cards = [
-        {"label": "Rows analysed", "value": humanize_number(dataset.get("raw_rows"))},
-        {"label": "Columns", "value": humanize_number(dataset.get("raw_cols"))},
+        {"label": "Rows analysed",
+         "value": humanize_number(dataset.get("raw_rows")),
+         "hint": "Each row is one record — e.g. one sale, order or entry"},
+        {"label": "Columns",
+         "value": humanize_number(dataset.get("raw_cols")),
+         "hint": "Details recorded for every record"},
     ]
     score = quality.get("overall_quality_score")
     if score is not None:
+        verdict = _quality_verdict(score)
         cards.append({"label": "Data health",
-                      "value": f"{humanize_pct(score)}".rstrip("%") + "/100"})
+                      "value": f"{humanize_pct(score)}".rstrip("%") + "/100",
+                      "hint": f"{verdict['label']} — how complete and consistent the data is"})
     v_score = validation.get("overall_validation_score")
     if v_score is not None:
         cards.append({"label": "Validation",
                       "value": ("Pass · " if validation.get("passed") else "Fail · ")
-                               + f"{humanize_pct(v_score)}".rstrip("%") + "/100"})
+                               + f"{humanize_pct(v_score)}".rstrip("%") + "/100",
+                      "hint": "An independent re-check of the analysis steps"})
     readiness = reliability.get("decision_readiness")
     if readiness:
-        cards.append({"label": "Decision readiness", "value": str(readiness).replace("_", " ")})
+        cards.append({"label": "Decision readiness",
+                      "value": str(readiness).replace("_", " "),
+                      "hint": "How safely you can act on these findings"})
     return cards
+
+
+def _dataset_intro(facts: dict) -> list[str]:
+    """Friendly 'what's in your data' sentences for non-technical readers,
+    built strictly from extracted pipeline facts."""
+    dataset = facts.get("dataset") or {}
+    quality = facts.get("data_quality") or {}
+    lines = []
+    rows = dataset.get("raw_rows")
+    cols = dataset.get("raw_cols")
+    if rows is not None and cols is not None:
+        try:
+            is_one_row = int(rows) == 1
+        except (TypeError, ValueError):
+            is_one_row = False
+        lines.append(
+            f"Your file contains <strong>{humanize_number(rows)}</strong> record{'' if is_one_row else 's'} "
+            f"with <strong>{humanize_number(cols)}</strong> pieces of information each."
+        )
+    removed = quality.get("duplicates_removed")
+    dup_rate = quality.get("duplicate_rate_pct")
+    if removed:
+        rate = f" ({dup_rate}% of rows)" if dup_rate else ""
+        lines.append(
+            f"We found and removed <strong>{humanize_number(removed)}</strong> duplicate record{'' if removed == 1 else 's'}{rate}, "
+            f"so nothing is counted twice."
+        )
+    missing_raw = quality.get("raw_missing_pct")
+    missing_left = quality.get("remaining_null_pct")
+    if missing_raw is not None and missing_raw > 0:
+        msg = f"Some cells were empty ({float(missing_raw):g}% of the file); the pipeline filled them using standard rules"
+        if missing_left is not None and missing_left > 0:
+            msg += f", and {float(missing_left):g}% remain unfilled where filling would distort the data"
+        lines.append(msg + ".")
+    elif missing_raw == 0:
+        lines.append("No empty cells were found — the file is complete.")
+    raw_rows = dataset.get("raw_rows")
+    cleaned_rows = dataset.get("cleaned_rows")
+    if raw_rows is not None and cleaned_rows is not None and cleaned_rows != raw_rows:
+        diff = raw_rows - cleaned_rows
+        if diff > 0:
+            lines.append(
+                f"After cleanup, <strong>{humanize_number(cleaned_rows)}</strong> records remain for analysis "
+                f"(the other {humanize_number(diff)} were exact duplicates or unusable rows)."
+            )
+        else:
+            lines.append(
+                f"Analysis-ready data has <strong>{humanize_number(cleaned_rows)}</strong> records "
+                "(extra columns such as calculated metrics are added by the pipeline)."
+            )
+    return lines
 
 
 def _render_html(insight_facts, narrative, chart_paths, state):
@@ -1666,24 +1862,32 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         "abbr_glossary": _glossary_abbr,
     })
 
-    # Legacy PNG paths → image entries (backwards compatibility + tests).
+    # Legacy PNG paths -> image entries. This is ONLY a backwards-compat path for
+    # tests/CLI runs where state["chart_specs"] was never populated. In the live
+    # pipeline, agent_4 already wraps every kept legacy candidate into chart_specs
+    # (chart_spec.wrap_legacy_candidate) and caps/dedupes them via finalize_specs —
+    # chart_paths is the pre-cap, pre-dedup candidate list, so replaying it here
+    # whenever chart_specs exists just re-adds charts the cap/dedup intentionally
+    # dropped, all mis-filed into "what_matters" with a crude filename-derived
+    # title. Skip entirely once the unified gallery has anything to show.
     legacy_entries = []
-    for p in (chart_paths or []):
-        path = Path(p)
-        if not path.exists():
-            continue
-        data_uri = _embed_png(path)
-        if not data_uri:
-            continue
-        legacy_entries.append({
-            "id": f"legacy_{path.stem}",
-            "title": path.stem.replace("_", " ").title(),
-            "subtitle": "", "why_it_matters": "", "plain_summary": "",
-            "llm_caption": "", "alt_text": path.stem.replace("_", " "),
-            "section": "what_matters",
-            "render": "image", "annotations": [],
-            "option_json": "", "img_b64": data_uri,
-        })
+    if not state.get("chart_specs"):
+        for p in (chart_paths or []):
+            path = Path(p)
+            if not path.exists():
+                continue
+            data_uri = _embed_png(path)
+            if not data_uri:
+                continue
+            legacy_entries.append({
+                "id": f"legacy_{path.stem}",
+                "title": path.stem.replace("_", " ").title(),
+                "subtitle": "", "why_it_matters": "", "plain_summary": "",
+                "llm_caption": "", "alt_text": path.stem.replace("_", " "),
+                "section": "what_matters",
+                "render": "image", "annotations": [],
+                "option_json": "", "img_b64": data_uri,
+            })
 
     # Non-JSON-native values (pd.Timestamp, numpy scalars, etc.) can end up in
     # facts/example_rows; fall back to str() instead of letting |tojson raise.
@@ -1695,17 +1899,23 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         echarts_lib = ECHARTS_LIB_PATH.read_text(encoding="utf-8", errors="replace")
 
     template = env.get_template(TEMPLATE_NAME)
+    quality = (insight_facts.get("data_quality") or {}).get("overall_quality_score")
     return template.render(
         facts=insight_facts,
         narrative=narrative,
         story=narrative.get("story") or {},
         glossary=narrative.get("glossary_terms") or {},
         kpis=_kpi_cards(insight_facts),
+        dataset_intro=_dataset_intro(insight_facts),
+        quality_verdict=_quality_verdict(quality),
         chart_sections=_group_by_section(entries),
         has_interactive=bool(echarts_lib),
         echarts_lib=echarts_lib,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        dataset_name=Path(state.get("csv_path", "dataset")).name,
+        # Prefer the name the user actually uploaded — csv_path is the server-side
+        # "<job_id>.csv" storage path once a job is created (see analysis.py), so
+        # deriving the display name from it shows a UUID-looking filename instead.
+        dataset_name=state.get("original_filename") or Path(state.get("csv_path", "dataset")).name,
     )
 
 
@@ -1913,6 +2123,15 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         print(
             f"[Agent 6] Claim grounding: {claims_grounding['claims_grounded']}/{claims_grounding['claims_checked']} "
             f"checked claims matched computed facts; flagged={claims_grounding['flagged_examples']}"
+        )
+    
+    # Check for internal contradictions in the narrative
+    contradictions = _check_narrative_contradictions(narrative)
+    narrative["contradictions"] = contradictions
+    if contradictions["contradictions_found"]:
+        print(
+            f"[Agent 6] WARNING: {contradictions['contradiction_count']} contradictory statement(s) detected in narrative. "
+            f"Review data quality claims for consistency."
         )
 
     chart_paths = state.get("chart_paths", []) or []

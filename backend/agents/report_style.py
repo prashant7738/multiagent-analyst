@@ -16,15 +16,16 @@ import hashlib
 import re
 
 PALETTE = {
-    "primary":   "#2563EB",
+    "primary":   "#A0522D",   # sienna/amber-700 — matches the report's --accent-hover
     "secondary": "#16A34A",
     "accent":    "#DC2626",
     "warning":   "#D97706",
     "purple":    "#7C3AED",
 }
 # Categorical series colors (same order/feel as the legacy agent_4 palette).
+# Leads with the brand's amber family before falling back to the wider set.
 CHART_COLORS = [
-    "#2563EB", "#16A34A", "#DC2626", "#D97706", "#7C3AED",
+    "#A0522D", "#D97706", "#16A34A", "#DC2626", "#7C3AED",
     "#0891B2", "#DB2777", "#65A30D", "#EA580C", "#4F46E5",
 ]
 SEVERITY = {"good": "#16a34a", "warn": "#d97706", "bad": "#dc2626"}

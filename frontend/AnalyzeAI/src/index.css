@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "@fontsource-variable/space-grotesk";
 @import "@fontsource-variable/dm-sans";
+@import "./styles/globals.css";
+
+/* Configure Tailwind to use 'dark' class for dark mode selector */
+@config "../tailwind.config.ts";
 
 /* ─────────────────────────────────────────────────────────────────────────────
    AnalyzeAI design tokens (Tailwind v4, CSS-first)
@@ -90,10 +94,10 @@
   --ink-secondary: oklch(0.78 0.004 260);
   --ink-muted: oklch(0.62 0.005 260);
   --ink-faint: oklch(0.47 0.005 260);
-  --accent: oklch(0.585 0.16 254);         /* cobalt — single accent; AA vs white */
-  --accent-hover: oklch(0.66 0.15 250);    /* hover lifts toward the brand tone  */
-  --accent-subtle: oklch(0.62 0.15 252 / 12%);
-  --accent-ink: oklch(0.85 0.09 250);      /* accent-tinted text on dark  */
+  --accent: oklch(0.59 0.18 45);           /* burnt sienna/amber — single accent; AA vs white */
+  --accent-hover: oklch(0.53 0.19 40);     /* hover lifts toward darker amber  */
+  --accent-subtle: oklch(0.62 0.18 45 / 12%);
+  --accent-ink: oklch(0.95 0.06 45);       /* accent-tinted text on dark  */
   --success: oklch(0.72 0.15 163);
   --success-subtle: oklch(0.72 0.15 163 / 12%);
   --warning: oklch(0.8 0.13 85);
@@ -115,8 +119,8 @@ html.theme-light {
   --ink-secondary: oklch(0.38 0.01 260);
   --ink-muted: oklch(0.52 0.01 260);
   --ink-faint: oklch(0.64 0.008 260);
-  --accent: oklch(0.55 0.17 255);
-  --accent-hover: oklch(0.49 0.17 255);
+  --accent: oklch(0.59 0.18 45);
+  --accent-hover: oklch(0.53 0.19 40);
   --accent-subtle: oklch(0.55 0.17 255 / 9%);
   --accent-ink: oklch(0.48 0.16 255);
   --success: oklch(0.55 0.14 158);
@@ -194,6 +198,40 @@ html.theme-light {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Semantic Color Utility Classes ────────────────────────────────────────*/
+.bg-canvas { background-color: var(--canvas) !important; }
+.bg-surface { background-color: var(--surface) !important; }
+.bg-raised { background-color: var(--raised) !important; }
+
+.text-ink { color: var(--ink) !important; }
+.text-ink-secondary { color: var(--ink-secondary) !important; }
+.text-ink-muted { color: var(--ink-muted) !important; }
+.text-ink-faint { color: var(--ink-faint) !important; }
+
+.text-accent { color: var(--accent) !important; }
+.text-accent:hover { color: var(--accent-hover) !important; }
+.bg-accent { background-color: var(--accent) !important; }
+.bg-accent:hover { background-color: var(--accent-hover) !important; }
+.bg-accent-subtle { background-color: var(--accent-subtle) !important; }
+
+.text-success { color: var(--success) !important; }
+.bg-success-subtle { background-color: var(--success-subtle) !important; }
+
+.text-warning { color: var(--warning) !important; }
+.bg-warning-subtle { background-color: var(--warning-subtle) !important; }
+
+.text-danger { color: var(--danger) !important; }
+.bg-danger-subtle { background-color: var(--danger-subtle) !important; }
+
+.border-line { border-color: var(--line) !important; }
+.border-line-strong { border-color: var(--line-strong) !important; }
+
+.placeholder-ink-muted::placeholder { color: var(--ink-muted) !important; }
+
+:root .text-black { color: #000000 !important; }
+:root.dark .text-black { color: #ffffff !important; }
+.text-white { color: #ffffff !important; }
 
 /* ── Shared primitives ──────────────────────────────────────────────────────*/
 

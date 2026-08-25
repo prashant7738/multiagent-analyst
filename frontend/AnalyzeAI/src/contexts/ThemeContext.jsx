@@ -17,6 +17,8 @@ export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(readInitialTheme);
 
   useEffect(() => {
+    // Add 'dark' class for Tailwind dark: modifier to work
+    document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.classList.toggle("theme-light", theme === "light");
     try {
       localStorage.setItem(STORAGE_KEY, theme);

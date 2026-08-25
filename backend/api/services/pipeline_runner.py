@@ -19,6 +19,7 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 # Importing config first bootstraps sys.path + cwd so the pipeline/agents import.
@@ -50,11 +51,14 @@ def _get_pipeline():
 
 
 def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None,
-                   run_id: str | None = None) -> dict[str, Any]:
+                   run_id: str | None = None, original_filename: str | None = None) -> dict[str, Any]:
     """Construct the GraphState seed exactly as pipeline.py does."""
     runtime_config = dict(runtime_config or {})
     return {
         "csv_path": csv_path,
+        # Falls back to csv_path's own basename (the "<job_id>.csv" storage name) only
+        # when no original upload filename is available, e.g. direct/CLI pipeline runs.
+        "original_filename": original_filename or Path(csv_path).name,
         "raw_profile": {},
         "schema_blueprint": {},
         "_df_cache": None,
@@ -188,7 +192,11 @@ def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[s
         pipeline = _get_pipeline()
         emitter.agent_running("agent1")
 
-        final_state: dict[str, Any] = _initial_state(csv_path, runtime_config, run_id=job_id)
+        job_for_filename = manager.get_job(job_id)
+        final_state: dict[str, Any] = _initial_state(
+            csv_path, runtime_config, run_id=job_id,
+            original_filename=job_for_filename.filename if job_for_filename else None,
+        )
         for snapshot in pipeline.stream(final_state, stream_mode="values"):
             final_state = snapshot
             emitter.observe(snapshot)

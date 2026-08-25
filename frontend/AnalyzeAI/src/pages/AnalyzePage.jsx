@@ -1,21 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, RotateCcw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { AlertCircle, ArrowLeft, RotateCcw, Upload, Download, CheckCircle2 } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
-import Button from "@/components/ui/button";
 import Dropzone from "@/components/Dropzone";
 import RunSettings from "@/components/RunSettings";
 import PipelineTimeline, { PENDING, RUNNING, DONE, ERROR } from "@/components/PipelineTimeline";
-import ResultsView, { DownloadReportButton } from "@/components/ResultsView";
+import ResultsView from "@/components/ResultsView";
+import ReportDashboard from "@/components/ReportDashboard";
+import DownloadReportModal from "@/components/DownloadReportModal";
 import DatasetChat from "@/components/DatasetChat";
 import { analyzeCsv, subscribeToJobStream, fetchJob, fetchJobResult, reportDownloadUrl } from "@/lib/api";
-
-/**
- * GOAL: one coherent flow — configure → upload → watch → read results.
- * The upload screen explains what each setting does before running; the run
- * screen narrates progress in plain language; the done screen leads with the
- * deliverable (summary/findings), not backend ordering.
- */
 
 const AGENTS = [
   {
@@ -79,7 +74,6 @@ const buildAnalysisConfig = (config) => {
   };
 };
 
-// "Agent N" (as emitted by the SSE stream) -> AGENTS[].id
 const agentIdFromLabel = (label) => Number((/\d+/.exec(label || "") || [])[0]);
 
 export default function AnalyzePage() {
@@ -87,7 +81,7 @@ export default function AnalyzePage() {
   const { jobId: routeJobId } = useParams();
 
   const [file, setFile] = useState(null);
-  const [phase, setPhase] = useState("upload"); // upload | running | done | error
+  const [phase, setPhase] = useState("upload");
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loadedJobName, setLoadedJobName] = useState(null);
   const [runConfig, setRunConfig] = useState({ ...DEFAULT_RUN_CONFIG });
@@ -98,12 +92,12 @@ export default function AnalyzePage() {
   const [jobId, setJobId] = useState(null);
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
 
-  // ── SSE / job lifecycle logic — contract-sensitive, do not restructure ────
   const eventSourceRef = useRef(null);
   const timerRef = useRef(null);
   const agentStartRef = useRef({});
-  const runStatusRef = useRef("idle"); // idle | running | done | error
+  const runStatusRef = useRef("idle");
 
   const closeStream = () => {
     eventSourceRef.current?.close();
@@ -111,10 +105,15 @@ export default function AnalyzePage() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
   };
 
-  useEffect(() => () => closeStream(), []); // cleanup on unmount
+  useEffect(() => () => closeStream(), []);
 
   useEffect(() => {
     if (!routeJobId) return;
+    // A just-finished live run navigates to its own /analyze/:jobId so the URL
+    // reflects the report (see finish() below) — the result is already loaded
+    // at that point, so skip the network refetch instead of flashing back to
+    // the upload screen while it reloads data we already have.
+    if (routeJobId === jobId && runStatusRef.current === "done") return;
 
     let cancelled = false;
 
@@ -164,15 +163,23 @@ export default function AnalyzePage() {
 
   const finish = async (id) => {
     runStatusRef.current = "done";
+    // Close our end the instant "completed" arrives, before the async result
+    // fetch below — otherwise the EventSource sits open across that await and
+    // can auto-reconnect (browsers treat a server-closed SSE connection as
+    // dropped) and replay the whole event log, re-triggering this handler.
+    closeStream();
     try {
       const data = await fetchJobResult(id);
       setResult(data);
     } catch (err) {
-      // Progress already reached 100%; surface the fetch failure without discarding it.
       setErrorMessage(err.message || "Failed to load the analysis result.");
     } finally {
-      closeStream();
       setPhase("done");
+      // Move the URL to /analyze/:jobId now that there's a finished report to
+      // show at it — matches how History/Profile link to a completed job, and
+      // means refreshing or sharing the link lands back on this report instead
+      // of a blank upload screen.
+      if (!routeJobId) navigate(`/analyze/${id}`, { replace: true });
     }
   };
 
@@ -213,6 +220,19 @@ export default function AnalyzePage() {
       fail(data.message || "Stream error.");
       return;
     }
+    if (name === "pipeline_finished") {
+      // An agent can catch its own error and still return normally (e.g. a file
+      // that fails to parse) — the pipeline then "finishes" gracefully with no
+      // report, using the SAME event name as a real success. Without this check
+      // the "completed" event below routes to finish(), which never touches
+      // agentStates — so whichever agent was mid-run stays stuck on its spinner
+      // forever even though the run is actually over.
+      const errs = data.detail?.errors;
+      if (Array.isArray(errs) && errs.length > 0 && !data.detail?.has_report) {
+        fail(errs[0] || "Analysis failed.");
+      }
+      return;
+    }
     if (name === "completed") {
       finish(id);
     }
@@ -237,8 +257,6 @@ export default function AnalyzePage() {
       eventSourceRef.current = subscribeToJobStream(stream_url, {
         onEvent: (name, data) => handleStreamEvent(job_id, name, data),
         onError: () => {
-          // EventSource fires this on network hiccups too; only fail if the
-          // job never reached a terminal state (stream would otherwise retry).
           if (runStatusRef.current === "running") fail("Lost connection to the analysis stream.");
         },
       });
@@ -257,7 +275,6 @@ export default function AnalyzePage() {
     navigate("/analyze");
     setAgentStates(AGENTS.map(a => ({ ...a, status: PENDING, duration: null, summary: null })));
   };
-  // ── End SSE / job lifecycle logic ─────────────────────────────────────────
 
   const doneCount = agentStates.filter((a) => a.status === DONE).length;
   const progressPct = (doneCount / AGENTS.length) * 100;
@@ -266,177 +283,238 @@ export default function AnalyzePage() {
   /* ── UPLOAD ─────────────────────────────────────────────────────────────*/
   if (phase === "upload" && !routeJobId && !historyLoading) {
     return (
-      <AppLayout size="wide">
-        <div className="mx-auto max-w-3xl">
-          <h1 className="font-heading text-3xl font-bold tracking-tight text-ink">New analysis</h1>
-          <p className="mt-2 max-w-[60ch] text-base text-ink-muted">
-            Choose a CSV, review how it will be cleaned, then run six agents over it end-to-end.
+      <AppLayout size="wide" className="flex flex-col py-6!">
+        {/* Compact Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="mb-6"
+        >
+          <div className="flex items-baseline gap-2 mb-2">
+            <h1 className="text-3xl font-serif font-bold">CSV Analysis</h1>
+            <span className="text-xs uppercase tracking-widest text-amber-700 dark:text-amber-600 font-mono">
+              Single-page workflow
+            </span>
+          </div>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            Six agents: structure, semantics, cleaning, statistics, validation, insights.
+          </p>
+        </motion.div>
+
+        {/* Main Stack - Vertical Layout */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="flex flex-col gap-6 flex-1"
+        >
+          {/* Dropzone */}
+          <Dropzone file={file} onFile={setFile} onClear={() => setFile(null)} />
+
+          {/* File Preview - Compact */}
+          <AnimatePresence>
+            {file && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="border border-neutral-200 dark:border-neutral-800 p-3 rounded-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-xs text-amber-700 dark:text-amber-600 uppercase tracking-widest font-mono mb-0.5">
+                      Ready
+                    </p>
+                    <p className="text-sm font-medium truncate">{file.name}</p>
+                  </div>
+                  <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 ml-2" />
+                </div>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
+                  {(file.size / 1024 / 1024).toFixed(2)} MB
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Settings - Horizontal */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="border border-neutral-200 dark:border-neutral-800 p-6 rounded-sm"
+          >
+            <RunSettings config={runConfig} onConfigChange={setRunConfig} />
+          </motion.div>
+
+          {/* Run Button */}
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={runPipeline}
+            disabled={!file}
+            className="py-2.5 px-4 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-sm transition-all flex items-center justify-center gap-2 text-sm shrink-0 w-full sm:w-auto"
+          >
+            <Upload className="w-4 h-4" />
+            Analyze
+          </motion.button>
+        </motion.div>
+      </AppLayout>
+    );
+  }
+
+  /* ── RUNNING ────────────────────────────────────────────────────────────*/
+  if (phase === "running") {
+    return (
+      <AppLayout size="content" className="flex flex-col items-center justify-center py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="w-full text-center"
+        >
+          <div className="text-xs uppercase tracking-widest text-amber-700 dark:text-amber-600 mb-4 font-mono">
+            Analyzing {loadedJobName || file?.name}
+          </div>
+          <h2 className="text-4xl font-serif font-bold mb-4">
+            Pipeline running.
+          </h2>
+          <p className="text-ink-secondary">
+            Each agent validates its work before handing off. Typical runtime: 30-90 seconds.
+          </p>
+        </motion.div>
+
+        {/* Progress Bar */}
+        <div className="w-full mt-12">
+          <div className="h-1 bg-neutral-200 dark:bg-neutral-800 rounded-full overflow-hidden mb-4">
+            <motion.div
+              className="h-full bg-linear-to-r from-amber-700 to-amber-600"
+              animate={{ width: `${progressPct}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+          <p className="text-xs text-center text-ink-secondary font-mono">
+            {doneCount} of {AGENTS.length} agents complete · {elapsedTotal}s elapsed
           </p>
         </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
-          {/* Primary column: file in, pipeline out */}
-          <div className="flex flex-col gap-6">
-            <Dropzone file={file} onFile={setFile} onClear={() => setFile(null)} />
-
-            <div className="flex flex-wrap items-center gap-4">
-              <Button size="lg" onClick={runPipeline} disabled={!file}>
-                {file ? "Run analysis" : "Select a CSV first"}
-              </Button>
-              <p className="text-xs leading-relaxed text-ink-faint">
-                Typical runs take under a minute.
-                <br />
-                You&apos;ll watch each stage complete live.
-              </p>
-            </div>
-
-            <div className="rounded-panel border border-line bg-surface p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">
-                What will happen
-              </p>
-              <ol className="mt-3 space-y-2">
-                {AGENTS.map((a, i) => (
-                  <li key={a.id} className="flex gap-3 text-sm">
-                    <span className="tnum shrink-0 font-heading text-xs font-semibold text-accent-ink">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span className="text-ink-secondary">{a.plain}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </div>
-
-          {/* Secondary column: configuration with consequences explained */}
-          <RunSettings config={runConfig} onChange={setRunConfig} />
+        {/* Pipeline Timeline */}
+        <div className="w-full mt-8">
+          <PipelineTimeline agents={agentStates} elapsedTotal={elapsedTotal} />
         </div>
       </AppLayout>
     );
   }
 
-  /* ── LOADING A SAVED JOB ───────────────────────────────────────────────*/
-  if (routeJobId && historyLoading) {
+  /* ── ERROR ──────────────────────────────────────────────────────────────*/
+  if (phase === "error") {
     return (
-      <AppLayout size="default">
-        <p className="py-24 text-center text-sm text-ink-faint" role="status">
-          Restoring saved analysis…
-        </p>
+      <AppLayout size="content" className="flex items-center justify-center py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 p-8 rounded-sm w-full"
+        >
+          <div className="flex gap-4">
+            <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h2 className="text-xl font-serif font-bold text-red-700 dark:text-red-300 mb-2">
+                Analysis failed
+              </h2>
+              <p className="text-red-700 dark:text-red-400 text-sm mb-6">
+                {errorMessage}
+              </p>
+
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={reset}
+                className="px-6 py-2 bg-red-700 hover:bg-red-800 text-white font-medium rounded-sm transition-all flex items-center gap-2 text-sm"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Try Again
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
       </AppLayout>
     );
   }
 
-  /* ── RUNNING / DONE / ERROR ────────────────────────────────────────────*/
-  return (
-    <AppLayout size="default">
-      {/* Header: status, subject, and the ONE persistent download action */}
-      <div className="sticky top-16 z-30 -mx-6 mb-8 border-b border-line bg-canvas/90 px-6 py-4 backdrop-blur-md">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className={`h-2 w-2 rounded-full ${
-                  phase === "done" ? "bg-success" : phase === "error" ? "bg-danger" : "bg-accent animate-pulse"
-                }`}
-              />
-              <h1 className="truncate font-heading text-xl font-bold tracking-tight text-ink">
-                {phase === "done"
-                  ? "Analysis complete"
-                  : phase === "error"
-                    ? "Analysis failed"
-                    : routeJobId
-                      ? "Saved analysis"
-                      : "Analysis running"}
-              </h1>
-              {phase === "running" && (
-                <span className="tnum rounded-full bg-raised px-2 py-0.5 text-xs text-ink-muted">
-                  {elapsedTotal}s
-                </span>
-              )}
-            </div>
-            <p className="tnum mt-0.5 truncate text-sm text-ink-muted">
-              {routeJobId
-                ? loadedJobName || "Restored from history"
-                : file
-                  ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB`
-                  : ""}
-              {" · "}
-              {doneCount}/{AGENTS.length} stages
-            </p>
-          </div>
+  /* ── DONE ───────────────────────────────────────────────────────────────*/
+  if (phase === "done") {
+    return (
+      <AppLayout size="wide">
+        {/* Back Button */}
+        <motion.button
+          whileHover={{ x: -2 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={reset}
+          className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-600 hover:text-amber-800 dark:hover:text-amber-500 transition-colors mb-8"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to upload
+        </motion.button>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={routeJobId ? () => navigate("/history") : reset}
+        {/* Results */}
+        {result ? (
+          <>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-12"
             >
-              <ArrowLeft size={14} aria-hidden="true" />
-              {routeJobId ? "History" : "New run"}
-            </Button>
-            {phase === "done" && result?.report?.available && (
-              <DownloadReportButton href={reportHref} format={result.report.format} size="sm" />
-            )}
-          </div>
-        </div>
+              <div className="text-xs uppercase tracking-widest text-amber-700 dark:text-amber-600 mb-4 font-mono">
+                Analysis Complete
+              </div>
+              <h1 className="text-4xl font-serif font-bold mb-6">
+                {loadedJobName || file?.name}
+              </h1>
 
-        {phase !== "done" && (
-          <div
-            className="mt-3 h-1 overflow-hidden rounded-full bg-raised"
-            role="progressbar"
-            aria-valuenow={Math.round(progressPct)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={`Pipeline progress: ${doneCount} of ${AGENTS.length} stages`}
-          >
-            {phase === "error" ? (
-              <div className="h-full w-full bg-danger" style={{ width: "100%" }} />
-            ) : (
-              <div
-                className="h-full rounded-full bg-accent transition-[width] duration-300 ease-out-quart"
-                style={{ width: `${progressPct}%` }}
-              />
-            )}
+              <motion.button
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setShowDownloadModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover font-semibold rounded-sm transition-all text-white"
+              >
+                <Download className="w-4 h-4" />
+                Download Report
+              </motion.button>
+            </motion.div>
+
+            {/* Dashboard */}
+            <ReportDashboard reportData={result} />
+
+            {/* Chat */}
+            {DatasetChat && <DatasetChat jobId={jobId} />}
+          </>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-ink-secondary">Loading results…</p>
           </div>
         )}
-      </div>
 
-      {/* Pipeline timeline — visible while running; collapsed after success */}
-      {(phase === "running" || phase === "error" || (phase === "done" && errorMessage)) && (
-        <section aria-label="Pipeline stages" className="mb-8">
-          <PipelineTimeline agents={agentStates} elapsedTotal={elapsedTotal} />
-        </section>
-      )}
+        {/* Download Modal */}
+        <DownloadReportModal
+          isOpen={showDownloadModal}
+          onClose={() => setShowDownloadModal(false)}
+          reportData={result}
+          jobId={jobId}
+        />
+      </AppLayout>
+    );
+  }
 
-      {/* Error state */}
-      {phase === "error" && (
-        <div className="rounded-panel border border-danger bg-danger-subtle p-6" role="alert">
-          <p className="flex items-start gap-2.5 text-sm text-danger">
-            <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            {errorMessage || "Something went wrong while running the pipeline."}
-          </p>
-          {!routeJobId && (
-            <Button variant="secondary" onClick={reset} className="mt-4">
-              <RotateCcw size={14} aria-hidden="true" /> Start over
-            </Button>
-          )}
+  /* ── LOADING HISTORY ────────────────────────────────────────────────────*/
+  if (historyLoading) {
+    return (
+      <AppLayout size="wide">
+        <div className="flex items-center justify-center py-12">
+          <p className="text-ink-secondary">Loading analysis…</p>
         </div>
-      )}
+      </AppLayout>
+    );
+  }
 
-      {/* Results — inverted pyramid lives in ResultsView */}
-      {phase === "done" && result && (
-        <>
-          {errorMessage && (
-            <p role="status" className="mb-6 rounded-panel border border-warning bg-warning-subtle px-4 py-3 text-sm text-warning">
-              {errorMessage}
-            </p>
-          )}
-          <ResultsView result={result} jobId={jobId} />
-        </>
-      )}
-
-      {/* Chat: docked panel via floating action, never competing with results */}
-      {phase === "done" && result && jobId && <DatasetChat jobId={jobId} />}
-    </AppLayout>
-  );
+  return null;
 }

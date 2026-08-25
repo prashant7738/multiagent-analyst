@@ -264,19 +264,17 @@ def _call_gemini_json_with_failover(*, contents, system_instruction: str, temper
         print(f"[Gemini] JSON parse failed: finish_reason={finish_reason} raw_len={len(raw_text)} preview={raw_text[:200]!r}")
         raise
 
-GROQ_MODEL = "qwen/qwen3.6-27b"  # llama-3.3-70b-versatile deprecated by Groq 08/16/26 
+GROQ_MODEL = "mixtral-8x7b-32768"
+GROQ_REASONING_EFFORT = "medium"
 GEMINI_MODEL = "gemini-flash-latest"
 # gemini-2.5-flash/-lite and gemini-2.0-flash 404 on this project; use current Gemini 3.x stable IDs instead
 GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
-# qwen/qwen3.6-27b's on-demand tier caps at 8000 tokens/minute; a 15-column batch measured ~8429 tokens and 413'd
-LLM_BATCH_SIZE = 8
-LLM_SINGLE_CALL_THRESHOLD = 10
-# qwen3.6-27b is a reasoning model; without reasoning_effort=none it can burn the whole budget on <think> and return empty content
-# lowered from 4000: an 8-column JSON batch never needs that much completion budget, and the reserved max_tokens
-# eats into the same 8000 TPM ceiling that causes repeated 429s across sequential batches
+# Claude 3.5 Sonnet has higher rate limits than older models
+LLM_BATCH_SIZE = 10
+LLM_SINGLE_CALL_THRESHOLD = 15
+# Claude doesn't need reasoning_effort; it's optimized for standard prompting
 LLM_MAX_TOKENS = 2000
-GROQ_REASONING_EFFORT = "none"
 
 # On-disk cache so re-running the pipeline on an unchanged CSV skips the Groq/Gemini calls entirely.
 SCHEMA_CACHE_DIR = os.path.join("outputs", ".schema_cache")
@@ -859,7 +857,7 @@ def _call_llm_for_schema_blueprint(
     raw_profile: dict,
     columns: list[str],
 ) -> dict:
-    """Ask Groq for schema metadata, falling back to Gemini on provider failure."""
+    """Ask Claude for schema metadata, falling back to Gemini on provider failure."""
     user_prompt = _build_llm_prompt(df, inferred_types, raw_profile, columns)
     user_content = f"Produce schema blueprint for these columns:\n{user_prompt}"
 
@@ -872,7 +870,6 @@ def _call_llm_for_schema_blueprint(
             ],
             temperature=0.1,
             max_tokens=LLM_MAX_TOKENS,
-            reasoning_effort=GROQ_REASONING_EFFORT,
         )
         record_key_use(
             "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
@@ -897,7 +894,7 @@ def _call_llm_for_schema_blueprint(
         # json.JSONDecodeError) can still split the batch and retry on malformed JSON
         raise
     except Exception as gemini_error:
-        raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
+        raise RuntimeError(f"Claude and Gemini calls failed: {gemini_error}") from gemini_error
 
 
 def _merge_schema_blueprints(base_blueprint: dict, incoming_blueprint: dict) -> dict:

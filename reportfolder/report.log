@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.1.21)  25 AUG 2026 21:27
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.1.21)  25 AUG 2026 21:30
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -783,13 +783,13 @@ Chapter 4.
 [11
 
 ]
-<transformer_architecture.png, id=857, 559.33969pt x 869.49844pt>
+<transformer_architecture.png, id=859, 559.33969pt x 869.49844pt>
 File: transformer_architecture.png Graphic file (type png)
 <use transformer_architecture.png>
 Package pdftex.def Info: transformer_architecture.png  used on input line 636.
 (pdftex.def)             Requested size: 369.54086pt x 574.45451pt.
  [12] [13 <./transformer_architecture.png>] [14]
-<qwen3_architecture.png, id=883, 339.1872pt x 185.0112pt>
+<qwen3_architecture.png, id=885, 339.1872pt x 185.0112pt>
 File: qwen3_architecture.png Graphic file (type png)
 <use qwen3_architecture.png>
 Package pdftex.def Info: qwen3_architecture.png  used on input line 687.
@@ -811,12 +811,12 @@ Underfull \hbox (badness 10000) in paragraph at lines 700--701
 
 [16] [17]
 Chapter 5.
-<last.jpg, id=916, 835.12pt x 1262.7175pt>
+<last.jpg, id=918, 835.12pt x 1262.7175pt>
 File: last.jpg Graphic file (type jpg)
 <use last.jpg>
 Package pdftex.def Info: last.jpg  used on input line 713.
 (pdftex.def)             Requested size: 287.23744pt x 434.30856pt.
-<second2.png, id=917, 529.98pt x 1973.3725pt>
+<second2.png, id=919, 529.98pt x 1973.3725pt>
 File: second2.png Graphic file (type png)
 <use second2.png>
 Package pdftex.def Info: second2.png  used on input line 720.
@@ -828,7 +828,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 743--744
 \T1/ptm/m/n/12 (+20) The re-li-a-bil-ity model stores each stage's con-fi-dence in $\OT1/ztmcm/m/n/12 [0\OML/ztmcm/m/it/12 ; \OT1/ztmcm/m/n/12 1]$ \T1/ptm/m/n/12 (+20) un-der
  []
 
-<backend_architecture.png, id=928, 339.1872pt x 185.0112pt>
+<backend_architecture.png, id=930, 339.1872pt x 185.0112pt>
 File: backend_architecture.png Graphic file (type png)
 <use backend_architecture.png>
 Package pdftex.def Info: backend_architecture.png  used on input line 755.
@@ -873,14 +873,14 @@ Underfull \hbox (badness 10000) in paragraph at lines 801--802
 \T1/cmtt/m/n/12 charts_generated\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 validation_passed/failed\T1/ptm/m/n/12 (+20) , \T1/cmtt/m/n/12 report_generated\T1/ptm/m/n/12 (+20) ,
  []
 
-<frontend_workflow.png, id=939, 339.1872pt x 185.0112pt>
+<frontend_workflow.png, id=941, 339.1872pt x 185.0112pt>
 File: frontend_workflow.png Graphic file (type png)
 <use frontend_workflow.png>
 Package pdftex.def Info: frontend_workflow.png  used on input line 807.
 (pdftex.def)             Requested size: 333.46758pt x 181.9054pt.
 [22] [23 <./frontend_workflow.png>]
 Chapter 6.
-<agent1pic.png, id=949, 416.05438pt x 15.55812pt>
+<agent1pic.png, id=951, 416.05438pt x 15.55812pt>
 File: agent1pic.png Graphic file (type png)
 <use agent1pic.png>
 Package pdftex.def Info: agent1pic.png  used on input line 836.
@@ -905,19 +905,19 @@ Underfull \hbox (badness 2884) in paragraph at lines 882--883
  []
 
 [25]
-<agent21.png, id=991, 632.3625pt x 609.27625pt>
+<agent21.png, id=993, 632.3625pt x 609.27625pt>
 File: agent21.png Graphic file (type png)
 <use agent21.png>
 Package pdftex.def Info: agent21.png  used on input line 897.
 (pdftex.def)             Requested size: 375.15555pt x 361.45938pt.
  [26]
-<agent22.png, id=997, 511.9125pt x 266.9975pt>
+<agent22.png, id=999, 511.9125pt x 266.9975pt>
 File: agent22.png Graphic file (type png)
 <use agent22.png>
 Package pdftex.def Info: agent22.png  used on input line 906.
 (pdftex.def)             Requested size: 375.14589pt x 195.6643pt.
  [27 <./agent21.png> <./agent22.png>]
-<agent23.png, id=1005, 468.75125pt x 265.99374pt>
+<agent23.png, id=1007, 468.75125pt x 265.99374pt>
 File: agent23.png Graphic file (type png)
 <use agent23.png>
 Package pdftex.def Info: agent23.png  used on input line 915.
@@ -968,7 +968,7 @@ Underfull \hbox (badness 1975) in paragraph at lines 960--961
 \T1/ptm/m/n/12 (+20) rows, as-serts the count matches Agent 1's pro-file, and aborts through
  []
 
-<agent3pic.png, id=1016, 459.7175pt x 59.22125pt>
+<agent3pic.png, id=1018, 459.7175pt x 59.22125pt>
 File: agent3pic.png Graphic file (type png)
 <use agent3pic.png>
 Package pdftex.def Info: agent3pic.png  used on input line 974.
@@ -1023,7 +1023,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 1074--1075
 []\T1/ptm/b/n/12 (+20) Column se-lec-tion \T1/ptm/m/n/12 (+20) re-stricts anal-y-sis to mean-ing-ful fields, in-clud-ing
  []
 
-<agent4pic.png, id=1069, 387.4475pt x 173.14688pt>
+<agent4pic.png, id=1071, 387.4475pt x 173.14688pt>
 File: agent4pic.png Graphic file (type png)
 <use agent4pic.png>
 Package pdftex.def Info: agent4pic.png  used on input line 1085.
@@ -1064,7 +1064,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 1175--1176
  []
 
 [37]
-<agent5pic.png, id=1114, 618.31pt x 45.16875pt>
+<agent5pic.png, id=1116, 618.31pt x 45.16875pt>
 File: agent5pic.png Graphic file (type png)
 <use agent5pic.png>
 Package pdftex.def Info: agent5pic.png  used on input line 1196.
@@ -1080,7 +1080,7 @@ Underfull \hbox (badness 10000) in paragraph at lines 1208--1209
  []
 
 [38 <./agent5pic.png>] [39]
-<agent6pic.png, id=1131, 1370.11874pt x 652.4375pt>
+<agent6pic.png, id=1133, 1370.11874pt x 652.4375pt>
 File: agent6pic.png Graphic file (type png)
 <use agent6pic.png>
 Package pdftex.def Info: agent6pic.png  used on input line 1261.
@@ -1293,119 +1293,104 @@ Overfull \hbox (17.50568pt too wide) in paragraph at lines 1498--1513
  []
 
 [51] [52]
-Underfull \hbox (badness 10000) in paragraph at lines 1531--1532
-[]|\T1/ptm/m/n/12 (+20) Hugging Face
+Overfull \hbox (1.091pt too wide) in paragraph at lines 1544--1544
+[]|\T1/ptm/m/n/12 (-20) Precision| 
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1536--1536
-[]|\T1/ptm/m/n/12 (+20) Requires ad-di-
+Overfull \hbox (18.74335pt too wide) in paragraph at lines 1542--1560
+ [][] 
  []
 
-
-Underfull \hbox (badness 10000) in paragraph at lines 1537--1537
-[]|\T1/ptm/m/n/12 (+20) Requires ad-di-
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1538--1538
-[]|\T1/ptm/m/n/12 (+20) Requires ad-di-
- []
-
-
-Underfull \hbox (badness 6078) in paragraph at lines 1539--1539
-[]|\T1/ptm/m/n/12 (+20) Conditionally ap-
- []
-
-[53] [54] [55]
+[53] [54]
 Chapter 8.
-[56
+[55
 
 ]
 Chapter 9.
-[57
+[56
 
 ]
 Chapter 10.
 
 Package hyperref Warning: The anchor of a bookmark and its parent's must not
-(hyperref)                be the same. Added a new anchor on input line 1591.
+(hyperref)                be the same. Added a new anchor on input line 1607.
 
 
-Underfull \hbox (badness 3568) in paragraph at lines 1593--1594
+Underfull \hbox (badness 3568) in paragraph at lines 1609--1610
 \T1/ptm/m/n/12 (+20) The sam-ple dataset used for val-i-da-tion and demon-stra-tion is \T1/cmtt/m/n/12 10000 Sales
  []
 
 
-Underfull \hbox (badness 5939) in paragraph at lines 1624--1625
+Underfull \hbox (badness 5939) in paragraph at lines 1640--1641
 []|\T1/ptm/m/n/12 (+20) Free for lo-cal/-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1625--1626
+Underfull \hbox (badness 10000) in paragraph at lines 1641--1642
 []|\T1/ptm/m/n/12 (+20) Usage-based;
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1626--1627
+Underfull \hbox (badness 10000) in paragraph at lines 1642--1643
 []|\T1/ptm/m/n/12 (+20) Project main-te-
  []
 
-[58
+[57
 
 
 ]
-Underfull \hbox (badness 5726) in paragraph at lines 1649--1649
+Underfull \hbox (badness 5726) in paragraph at lines 1665--1665
 []|\T1/ptm/m/n/12 (+20) Documentation and re-port
  []
 
-[59]
-<project_schedule.png, id=1227, 1102.1175pt x 963.6pt>
+[58]
+<project_schedule.png, id=1226, 1102.1175pt x 963.6pt>
 File: project_schedule.png Graphic file (type png)
 <use project_schedule.png>
-Package pdftex.def Info: project_schedule.png  used on input line 1658.
+Package pdftex.def Info: project_schedule.png  used on input line 1674.
 (pdftex.def)             Requested size: 375.14705pt x 328.00195pt.
- [60]
-<final_report.png, id=1233, 641.89813pt x 431.11063pt>
+ [59]
+<final_report.png, id=1231, 641.89813pt x 431.11063pt>
 File: final_report.png Graphic file (type png)
 <use final_report.png>
-Package pdftex.def Info: final_report.png  used on input line 1668.
+Package pdftex.def Info: final_report.png  used on input line 1684.
 (pdftex.def)             Requested size: 375.1514pt x 251.95859pt.
-<dashboard_screenshot.png, id=1234, 822.57312pt x 429.605pt>
+<dashboard_screenshot.png, id=1232, 822.57312pt x 429.605pt>
 File: dashboard_screenshot.png Graphic file (type png)
 <use dashboard_screenshot.png>
-Package pdftex.def Info: dashboard_screenshot.png  used on input line 1675.
+Package pdftex.def Info: dashboard_screenshot.png  used on input line 1691.
 (pdftex.def)             Requested size: 375.14995pt x 195.92944pt.
- [61 <./project_schedule.png> <./final_report.png>]
-Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on input line 1685.
- [62 <./dashboard_screenshot.png>] [63
+ [60 <./project_schedule.png> <./final_report.png>]
+Package hyperref Info: bookmark level for unknown lstlisting defaults to 0 on input line 1701.
+ [61 <./dashboard_screenshot.png>] [62
 
 
 ]
-Underfull \hbox (badness 10000) in paragraph at lines 1746--1747
+Underfull \hbox (badness 10000) in paragraph at lines 1762--1763
 []\T1/ptm/m/n/12 (+20) N. Shazeer, ``GLU Vari-ants Im-prove Trans-former,'' arXiv preprint
  []
 
-[64] (./report.aux)
+[63] (./report.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: 5FC7FFD17B8ACFF9949E7E8854A3F30C;21852.
+(rerunfilecheck)             Checksum: FB4C3FA1A7364963DA93E5940268078E;21852.
  ) 
 Here is how much of TeX's memory you used:
- 18183 strings out of 474222
- 278761 string characters out of 5748733
+ 18184 strings out of 474222
+ 278791 string characters out of 5748733
  1998975 words of memory out of 5000000
- 39424 multiletter control sequences out of 15000+600000
+ 39425 multiletter control sequences out of 15000+600000
  629374 words of font info for 364 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,12n,79p,1480b,1595s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfit1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1200.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/symbol/usyr.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/symbol/usyr.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texlive/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on report.pdf (77 pages, 4370238 bytes).
+Output written on report.pdf (76 pages, 4368750 bytes).
 PDF statistics:
- 1428 PDF objects out of 1440 (max. 8388607)
+ 1427 PDF objects out of 1440 (max. 8388607)
  1282 compressed objects within 13 object streams
  391 named destinations out of 1000 (max. 500000)
  63523 words of extra memory for PDF output out of 74296 (max. 10000000)

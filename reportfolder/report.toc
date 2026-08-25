@@ -119,12 +119,12 @@
 \contentsline {subsection}{\numberline {7.3.1}API Usage and Runtime Observability}{50}{subsection.7.3.1}%
 \contentsline {subsection}{\numberline {7.3.2}RAG Chat Evaluation Status}{52}{subsection.7.3.2}%
 \contentsline {section}{\numberline {7.4}Error Analysis and Validation Discussion}{54}{section.7.4}%
-\contentsline {chapter}{\numberline {8}FUTURE WORK}{56}{chapter.8}%
-\contentsline {chapter}{\numberline {9}CONCLUSION}{57}{chapter.9}%
-\contentsline {chapter}{\numberline {10}APPENDICES}{58}{chapter.10}%
-\contentsline {section}{Appendix A: Dataset Details}{58}{section*.53}%
-\contentsline {section}{Appendix B: Cost Estimate}{59}{section*.53}%
-\contentsline {section}{Appendix C: Project Timeline}{60}{table.caption.54}%
-\contentsline {section}{Appendix D: Sample Generated Report Screenshots}{61}{figure.caption.56}%
-\contentsline {section}{Appendix E: Agent Run Diagnostics Excerpt}{62}{figure.caption.58}%
-\contentsline {chapter}{REFERENCES}{63}{section*.59}%
+\contentsline {chapter}{\numberline {8}FUTURE WORK}{55}{chapter.8}%
+\contentsline {chapter}{\numberline {9}CONCLUSION}{56}{chapter.9}%
+\contentsline {chapter}{\numberline {10}APPENDICES}{57}{chapter.10}%
+\contentsline {section}{Appendix A: Dataset Details}{57}{section*.54}%
+\contentsline {section}{Appendix B: Cost Estimate}{58}{section*.54}%
+\contentsline {section}{Appendix C: Project Timeline}{59}{table.caption.55}%
+\contentsline {section}{Appendix D: Sample Generated Report Screenshots}{60}{figure.caption.57}%
+\contentsline {section}{Appendix E: Agent Run Diagnostics Excerpt}{61}{figure.caption.59}%
+\contentsline {chapter}{REFERENCES}{62}{section*.60}%

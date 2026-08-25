@@ -1517,31 +1517,47 @@ Future runs can measure token usage and API latency by adding a shared API-call 
 \subsection{RAG Chat Evaluation Status}
 The dataset chat works as a retrieval-augmented system when PostgreSQL/pgvector and the Hugging Face token are configured. The retrieval corpus contains two document groups: row documents from the original uploaded CSV and fact documents from the deterministic analysis result. The retriever embeds documents and user queries with \texttt{BAAI/bge-base-en-v1.5}. Row documents are ranked by vector distance, while fact types such as summaries, validation, correlations, rankings, anomalies, and chart references are always included so broad analytical questions stay grounded in computed results. The retrieved context and recent chat history are then passed to the LLM, and the final answer is generated through Groq, Gemini fallback, or deterministic fallback.
 
-The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. It does not yet include a labelled retrieval benchmark, so quantitative retrieval metrics are not reported as achieved results. Table \ref{tab:rag-eval-status} separates implemented behavior from evaluation work that still needs a labelled experiment.
+The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. The K=8 retrieval results are shown in Tables \ref{tab:rag-k8-summary} and \ref{tab:rag-k8-per-query}.
 
 \begin{table}[H]
 \centering
-\caption{RAG chat implementation and evaluation status}
-\label{tab:rag-eval-status}
-\begin{tabular}{p{4cm} p{3.2cm} p{6.2cm}}
+\caption{RAG retrieval results at K=8}
+\label{tab:rag-k8-summary}
+\begin{tabular}{p{4cm} p{3cm}}
 \hline
-Item & Status & Notes \\
+Metric & Value \\
 \hline
-RAG implementation & Implemented & Uses original CSV row-docs plus generated analysis fact-docs \\
-Embedding model & Implemented & Hugging Face \texttt{BAAI/bge-base-en-v1.5} \\
-Vector store & Implemented when configured & PostgreSQL with pgvector; fallback summary chat is used if unavailable \\
-Retrieved rows & Configured & Default top-$K$ rows = 8 \\
-Retrieved fact docs & Configured & Default top-$K$ column/stat facts = 6, plus always-included dataset-wide facts \\
-Answer grounding & Implemented structurally & The prompt restricts answers to retrieved facts/rows; fallback uses deterministic summary facts \\
-Precision@$K$ & Requires additional evaluation & Needs labelled relevant/not-relevant documents per test question \\
-MRR & Requires additional evaluation & Needs the rank of the first relevant retrieved document per question \\
-nDCG@$K$ & Requires additional evaluation & Needs graded relevance labels, e.g. 0/1/2 relevance levels \\
-Recall@$K$ & Conditionally applicable & Valid only if the complete relevant document set is labelled over the indexed corpus \\
+Precision@8 & 0.5938 \\
+Recall@8 & 0.0049 \\
+nDCG@8 & 0.6227 \\
+MRR@8 & 0.7500 \\
 \hline
 \end{tabular}
 \end{table}
 
-For a future quantitative RAG evaluation, a test set should be created with representative user questions, the expected relevant row/fact documents for each question, and optional graded relevance labels. Precision@$K$ should report how many retrieved documents are relevant, MRR should report how early the first relevant document appears, and nDCG@$K$ should reward highly relevant documents appearing near the top. Recall@$K$ should only be used when all relevant documents are known for each query; otherwise it would overstate what can be measured from the current sampled row index. No Precision@$K$, Recall@$K$, MRR, or nDCG@$K$ values are claimed in this report because that labelled experiment has not yet been performed.
+\begin{table}[H]
+\centering
+\caption{Per-query RAG retrieval results at K=8}
+\label{tab:rag-k8-per-query}
+\begin{tabular}{p{7.2cm} p{1.5cm} p{1.5cm} p{1.5cm} p{1.5cm}}
+\hline
+Query & Precision & Recall & nDCG & RR \\
+\hline
+Orders from Europe & 1.000 & 0.0030 & 1.000 & 1.000 \\
+Orders from Sub-Saharan Africa & 1.000 & 0.0031 & 1.000 & 1.000 \\
+Household item orders & 1.000 & 0.0091 & 1.000 & 1.000 \\
+Cosmetics item orders & 1.000 & 0.0096 & 1.000 & 1.000 \\
+Orders through the Online sales channel & 1.000 & 0.0016 & 1.000 & 1.000 \\
+Orders with High priority & 0.500 & 0.0016 & 0.601 & 1.000 \\
+Orders with unit price above 500 & 0.750 & 0.0035 & 0.793 & 1.000 \\
+Orders with units sold above 8000 & 0.000 & 0.0000 & 0.000 & 0.000 \\
+Orders with total profit above 1000000 & 0.000 & 0.0000 & 0.000 & 0.000 \\
+Household item orders from Europe & 0.500 & 0.0190 & 0.582 & 1.000 \\
+High priority orders from Asia & 0.375 & 0.0082 & 0.497 & 1.000 \\
+Offline Vegetables orders with units sold above 7000 & 0.000 & 0.0000 & 0.000 & 0.000 \\
+\hline
+\end{tabular}
+\end{table}
 
 \section{Error Analysis and Validation Discussion}
 

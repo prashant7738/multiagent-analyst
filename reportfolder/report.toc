@@ -102,28 +102,29 @@
 \contentsline {subsection}{\numberline {6.7.5}RAG Dataset Chat}{42}{subsection.6.7.5}%
 \contentsline {section}{\numberline {6.8}Frontend Implementation}{42}{section.6.8}%
 \contentsline {subsection}{\numberline {6.8.1}Stack and Structure}{42}{subsection.6.8.1}%
-\contentsline {subsection}{\numberline {6.8.2}Routing and Authentication}{43}{subsection.6.8.2}%
+\contentsline {subsection}{\numberline {6.8.2}Routing and Authentication}{42}{subsection.6.8.2}%
 \contentsline {subsection}{\numberline {6.8.3}API Client and SSE}{43}{subsection.6.8.3}%
 \contentsline {subsection}{\numberline {6.8.4}Main Components}{43}{subsection.6.8.4}%
 \contentsline {chapter}{\numberline {7}RESULTS AND ANALYSIS}{44}{chapter.7}%
 \contentsline {section}{\numberline {7.1}Pipeline Execution Summary}{44}{section.7.1}%
-\contentsline {section}{\numberline {7.2}Per-Agent Outputs}{44}{section.7.2}%
-\contentsline {subsection}{\numberline {7.2.1}Agent 1: Structural Profiling}{44}{subsection.7.2.1}%
-\contentsline {subsection}{\numberline {7.2.2}Agent 2: Semantic Tagging}{44}{subsection.7.2.2}%
-\contentsline {subsection}{\numberline {7.2.3}Agent 3: Preprocessing}{45}{subsection.7.2.3}%
-\contentsline {subsection}{\numberline {7.2.4}Agent 4: Statistical Analysis and Visualization}{45}{subsection.7.2.4}%
-\contentsline {subsection}{\numberline {7.2.5}Agent 5: Validation}{46}{subsection.7.2.5}%
-\contentsline {subsection}{\numberline {7.2.6}Agent 6: Report Generation}{47}{subsection.7.2.6}%
-\contentsline {section}{\numberline {7.3}Performance and Reliability}{48}{section.7.3}%
-\contentsline {subsection}{\numberline {7.3.1}API Usage and Runtime Observability}{48}{subsection.7.3.1}%
-\contentsline {subsection}{\numberline {7.3.2}RAG Chat Evaluation Status}{50}{subsection.7.3.2}%
-\contentsline {section}{\numberline {7.4}Error Analysis and Validation Discussion}{52}{section.7.4}%
-\contentsline {chapter}{\numberline {8}FUTURE WORK}{54}{chapter.8}%
-\contentsline {chapter}{\numberline {9}CONCLUSION}{55}{chapter.9}%
-\contentsline {chapter}{\numberline {10}APPENDICES}{56}{chapter.10}%
-\contentsline {section}{Appendix A: Dataset Details}{56}{section*.52}%
-\contentsline {section}{Appendix B: Cost Estimate}{57}{section*.52}%
-\contentsline {section}{Appendix C: Project Timeline}{58}{table.caption.53}%
-\contentsline {section}{Appendix D: Sample Generated Report Screenshots}{59}{figure.caption.55}%
-\contentsline {section}{Appendix E: Agent Run Diagnostics Excerpt}{60}{figure.caption.57}%
-\contentsline {chapter}{REFERENCES}{61}{section*.58}%
+\contentsline {subsection}{\numberline {7.1.1}Comparison with a General-Purpose Qwen LLM}{44}{subsection.7.1.1}%
+\contentsline {section}{\numberline {7.2}Per-Agent Outputs}{46}{section.7.2}%
+\contentsline {subsection}{\numberline {7.2.1}Agent 1: Structural Profiling}{46}{subsection.7.2.1}%
+\contentsline {subsection}{\numberline {7.2.2}Agent 2: Semantic Tagging}{46}{subsection.7.2.2}%
+\contentsline {subsection}{\numberline {7.2.3}Agent 3: Preprocessing}{46}{subsection.7.2.3}%
+\contentsline {subsection}{\numberline {7.2.4}Agent 4: Statistical Analysis and Visualization}{47}{subsection.7.2.4}%
+\contentsline {subsection}{\numberline {7.2.5}Agent 5: Validation}{48}{subsection.7.2.5}%
+\contentsline {subsection}{\numberline {7.2.6}Agent 6: Report Generation}{49}{subsection.7.2.6}%
+\contentsline {section}{\numberline {7.3}Performance and Reliability}{49}{section.7.3}%
+\contentsline {subsection}{\numberline {7.3.1}API Usage and Runtime Observability}{50}{subsection.7.3.1}%
+\contentsline {subsection}{\numberline {7.3.2}RAG Chat Evaluation Status}{52}{subsection.7.3.2}%
+\contentsline {section}{\numberline {7.4}Error Analysis and Validation Discussion}{54}{section.7.4}%
+\contentsline {chapter}{\numberline {8}FUTURE WORK}{56}{chapter.8}%
+\contentsline {chapter}{\numberline {9}CONCLUSION}{57}{chapter.9}%
+\contentsline {chapter}{\numberline {10}APPENDICES}{58}{chapter.10}%
+\contentsline {section}{Appendix A: Dataset Details}{58}{section*.53}%
+\contentsline {section}{Appendix B: Cost Estimate}{59}{section*.53}%
+\contentsline {section}{Appendix C: Project Timeline}{60}{table.caption.54}%
+\contentsline {section}{Appendix D: Sample Generated Report Screenshots}{61}{figure.caption.56}%
+\contentsline {section}{Appendix E: Agent Run Diagnostics Excerpt}{62}{figure.caption.58}%
+\contentsline {chapter}{REFERENCES}{63}{section*.59}%

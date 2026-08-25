@@ -1320,6 +1320,32 @@ A complete run on the sample dataset produces the following per-stage summary (c
 	\item \textbf{Agent 6:} narrative source = Groq, 21/21 claims grounded, report written to \texttt{outputs/reports/<run\_id>/insight\_report.html} (HTML fallback; see below).
 \end{itemize}
 
+\subsection{Comparison with a General-Purpose Qwen LLM}
+
+The same automated insight-generation task was also evaluated against a general-purpose Qwen LLM using the \texttt{10000\_Sales\_Records.csv} dataset. The comparison shows the practical value of separating deterministic analysis from language generation. The multi-agent pipeline completed in approximately 52 seconds, while the standalone Qwen run took approximately 4 minutes 12 seconds, making it about 4.8 times slower.
+
+\begin{table}[H]
+\centering
+\caption{Comparison of the multi-agent pipeline and a general-purpose Qwen LLM}
+\label{tab:qwen-comparison}
+\begin{tabular}{p{3.2cm} p{5.1cm} p{5.1cm}}
+\hline
+Dimension & Multi-agent data analyst & General-purpose Qwen LLM \\
+\hline
+Runtime & Approximately 52 seconds & Approximately 4 minutes 12 seconds, or 4.8 times slower \\
+Numerical accuracy & Exact against the source data; totals, regional and category breakdowns, and rankings matched the ground truth & Rankings and percentages were directionally correct, but absolute dollar figures had a consistent 10 times scaling error. For example, total revenue was reported as \$1.33B instead of the actual \$13.33B \\
+Self-validation & Output Validation cross-checked 23 of 23 narrative figures against pipeline output, with confidence 1.0, and a separate ground-truth row-count reconciliation was performed & No validation layer was used, so numerical errors could reach the final output without being detected \\
+Statistical depth & Pearson correlations with tautology filtering, adaptive z-score/IQR outlier detection, quarterly and year-over-year trends, and shipping-time breakdowns across dimensions & Executive-summary totals, top categories and regions, and high-level recommendations; no outlier detection or correlation analysis \\
+Data quality & Duplicate and missing-value handling, anomaly flagging with estimated business impact of \$412K across 52 rows, and a reported 100/100 validation pass & No data-quality or anomaly-detection section \\
+Traceability & Figures and charts were sourced from deterministic pipeline computations and can be reproduced & The output did not show how figures were derived, so it was not reproducible from the summary alone \\
+Output structure & A 27-page report covering the overview, findings, correlations, distributions, anomalies, recommendations, technical appendix, and glossary & A single-pass Markdown summary of approximately five sections, without an appendix or methodology trail \\
+Actionability & Findings were tied to specific evidence, such as Snacks averaging 26.1 shipping days versus 24.7 days for Fruits & Recommendations were broader and less tied to specific evidence \\
+\hline
+\end{tabular}
+\end{table}
+
+The multi-agent pipeline was therefore approximately five times faster and was the only system in this comparison whose output was independently verifiable against the source data. The general-purpose LLM produced directionally useful results, but its consistent 10 times scaling error shows why a validation layer matters. Output Validation is not only an additional reporting step; it prevents numerical errors of this kind from reaching the user unnoticed.
+
 \section{Per-Agent Outputs}
 
 \subsection{Agent 1: Structural Profiling}

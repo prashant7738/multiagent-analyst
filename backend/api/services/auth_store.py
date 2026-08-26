@@ -10,7 +10,8 @@ from uuid import uuid4
 import psycopg
 from passlib.context import CryptContext
 from psycopg import errors, sql
-from psycopg.rows import dict_row
+
+from api.services.db_pool import get_pool
 
 
 _PWD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
@@ -32,7 +33,7 @@ class PostgresAuthStore:
 
     @contextmanager
     def _connect(self) -> Iterator[psycopg.Connection]:
-        with psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row) as conn:
+        with get_pool(self.dsn).connection() as conn:
             yield conn
 
     def _ensure_schema(self) -> None:

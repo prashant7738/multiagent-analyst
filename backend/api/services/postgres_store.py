@@ -7,9 +7,9 @@ from typing import Any, Iterator
 
 import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from api.services.db_pool import get_pool
 from api.utils.serialization import json_safe
 
 
@@ -22,7 +22,7 @@ class PostgresJobStore:
 
     @contextmanager
     def _connect(self) -> Iterator[psycopg.Connection]:
-        with psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row) as conn:
+        with get_pool(self.dsn).connection() as conn:
             yield conn
 
     def _ensure_schema(self) -> None:

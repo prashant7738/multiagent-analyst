@@ -35,11 +35,11 @@ import numpy as np
 import pandas as pd
 import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pgvector.psycopg import register_vector
 
 from api.config import get_settings
+from api.services.db_pool import get_pool
 from api.services.request_context import get_api_key_override
 from api.utils.serialization import json_safe
 
@@ -97,9 +97,9 @@ def _connect() -> Iterator[psycopg.Connection]:
     dsn = get_settings().database_url
     if not dsn:
         raise RuntimeError("RAG dataset chat requires DATABASE_URL (Postgres + pgvector) to be configured")
-    with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
-        # Note: We skip register_vector() to avoid compatibility issues
-        # PostgreSQL can handle vector operations directly without Python type registration
+    # Note: We skip register_vector() to avoid compatibility issues
+    # PostgreSQL can handle vector operations directly without Python type registration
+    with get_pool(dsn).connection() as conn:
         yield conn
 
 

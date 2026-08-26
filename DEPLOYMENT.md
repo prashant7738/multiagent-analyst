@@ -9,9 +9,9 @@ since those steps require your own login and can't be automated for you.
 
 1. Go to [supabase.com](https://supabase.com), sign in (or create an account), and click **New Project**.
 2. Pick an organization, name the project (e.g. `multiagent-analyst`), set a database password (save it somewhere — you'll need it in the connection string), and choose a region close to you. Wait a minute or two for provisioning.
-3. In the project, open **Settings > Database**. Under **Connection string**, copy the **direct connection** URI (not the pooled/transaction one — the app already pools connections itself, see below, so the direct connection avoids some transaction-pooler quirks around prepared statements). It looks like:
-   `postgresql://postgres:[YOUR-PASSWORD]@db.xxxxxxxxxxxx.supabase.co:5432/postgres`
-4. Replace `[YOUR-PASSWORD]` with the password from step 2. You'll paste this whole string into Render as `DATABASE_URL` in step 2.5 below.
+3. On the project's overview page, click the connect icon next to the branch name (top left) to open **Connect to your project**, then the **Direct** tab. Under **Connection Method**, pick **Session pooler** — not "Direct connection" (that one is IPv6-only unless you pay for Supabase's IPv4 add-on, and Render connects over IPv4, so it won't reach it) and not "Transaction pooler" (that one doesn't support prepared statements, which some Postgres drivers use implicitly). Session pooler is IPv4-proxied for free and behaves like a normal connection. Copy the URI — it looks like:
+   `postgresql://postgres.xxxxxxxxxxxx:[YOUR-PASSWORD]@aws-0-<region>.pooler.supabase.com:5432/postgres`
+4. Replace `[YOUR-PASSWORD]` with the password from step 2 (there's a "Reset database password" button on the same panel if you've lost it). You'll paste this whole string into Render as `DATABASE_URL` in step 2.5 below.
 
 pgvector is available on Supabase's free tier by default — the app creates the `vector` extension itself on first use (`CREATE EXTENSION IF NOT EXISTS vector`), no manual step needed.
 

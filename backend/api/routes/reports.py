@@ -17,7 +17,11 @@ from api.services.job_manager import JobManager, get_job_manager
 try:
     from weasyprint import HTML as WeasyHTML
     HAS_WEASYPRINT = True
-except ImportError:
+except (ImportError, OSError):
+    # OSError (not just ImportError) is WeasyPrint's actual failure mode when
+    # its native Cairo/Pango/GDK-Pixbuf libraries aren't installed on the host
+    # — common on minimal Python-only deployment images. Falling back to HTML
+    # export (see download_report below) keeps reports working either way.
     HAS_WEASYPRINT = False
 
 logger = logging.getLogger("api.reports")

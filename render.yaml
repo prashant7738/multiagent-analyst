@@ -1,0 +1,39 @@
+databases:
+  - name: multiagent-analyst-db
+    plan: free
+    postgresMajorVersion: "16"
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all (tighten later if you want to restrict access)
+
+services:
+  - name: multiagent-analyst-api
+    type: web
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: multiagent-analyst-db
+          property: connectionString
+      - key: APP_ENCRYPTION_KEY
+        generateValue: true
+      # Secrets — fill these in via the Render dashboard after the first
+      # deploy (never committed to the repo). See the deployment README.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      # Tighten this to your exact Vercel URL once the frontend is deployed
+      # (e.g. "https://your-app.vercel.app") — see the deployment README.
+      - key: API_CORS_ORIGINS
+        value: "*"
+      - key: API_LOG_LEVEL
+        value: info
+      - key: PYTHON_VERSION
+        value: "3.12.7"

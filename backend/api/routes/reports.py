@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from api.config import Settings, get_settings
+from api.models.schemas import AuthUser
+from api.routes.auth import get_current_user
 from api.services.job_manager import JobManager, get_job_manager
 
 try:
@@ -38,6 +40,7 @@ async def download_report(
     format: str = Query("html", pattern="^(html|pdf)$"),
     settings: Settings = Depends(get_settings),
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
 ) -> Response:
     """Download the Agent 6 report in HTML or PDF format.
 
@@ -48,7 +51,7 @@ async def download_report(
     Falls back to HTML if PDF generation fails.
     """
     job = manager.get_job(job_id)
-    if job is None:
+    if job is None or job.user_id != user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
 
     state = job.state or {}

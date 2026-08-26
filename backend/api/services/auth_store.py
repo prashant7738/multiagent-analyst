@@ -1,7 +1,8 @@
-"""Optional PostgreSQL persistence for application users."""
+"""Optional PostgreSQL persistence for application users and their login sessions."""
 
 from __future__ import annotations
 
+import secrets
 from contextlib import contextmanager
 from typing import Any, Iterator
 from uuid import uuid4
@@ -16,10 +17,17 @@ _PWD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 class PostgresAuthStore:
-    def __init__(self, dsn: str, schema: str = "public", table: str = "app_users") -> None:
+    def __init__(
+        self,
+        dsn: str,
+        schema: str = "public",
+        table: str = "app_users",
+        sessions_table: str = "app_sessions",
+    ) -> None:
         self.dsn = dsn
         self.schema = schema
         self.table = table
+        self.sessions_table = sessions_table
         self._initialized = False
 
     @contextmanager
@@ -47,6 +55,24 @@ class PostgresAuthStore:
                         );
                         """
                     ).format(sql.Identifier(self.schema), sql.Identifier(self.table))
+                )
+                cur.execute(
+                    sql.SQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS {}.{} (
+                            token TEXT PRIMARY KEY,
+                            user_id TEXT NOT NULL,
+                            created_at TIMESTAMPTZ NOT NULL
+                        );
+                        """
+                    ).format(sql.Identifier(self.schema), sql.Identifier(self.sessions_table))
+                )
+                cur.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} (user_id);").format(
+                        sql.Identifier(f"idx_{self.sessions_table}_user_id"),
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.sessions_table),
+                    )
                 )
         self._initialized = True
 
@@ -120,3 +146,51 @@ class PostgresAuthStore:
         if not _PWD_CONTEXT.verify(password, user["password_hash"]):
             return None
         return self._public_user(user)
+
+    def create_session(self, user_id: str) -> str:
+        """Issue a new opaque bearer token for ``user_id`` and persist it."""
+        self._ensure_schema()
+        token = secrets.token_urlsafe(32)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        "INSERT INTO {}.{} (token, user_id, created_at) VALUES (%s, %s, NOW());"
+                    ).format(sql.Identifier(self.schema), sql.Identifier(self.sessions_table)),
+                    (token, user_id),
+                )
+        return token
+
+    def get_user_by_token(self, token: str) -> dict[str, Any] | None:
+        """Resolve a bearer token to the public user record it belongs to, if valid."""
+        self._ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        """
+                        SELECT u.* FROM {schema}.{users} u
+                        JOIN {schema}.{sessions} s ON s.user_id = u.user_id
+                        WHERE s.token = %s;
+                        """
+                    ).format(
+                        schema=sql.Identifier(self.schema),
+                        users=sql.Identifier(self.table),
+                        sessions=sql.Identifier(self.sessions_table),
+                    ),
+                    (token,),
+                )
+                row = cur.fetchone()
+        return self._public_user(row) if row else None
+
+    def delete_session(self, token: str) -> None:
+        """Invalidate a bearer token (logout). No-op if it doesn't exist."""
+        self._ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("DELETE FROM {}.{} WHERE token = %s;").format(
+                        sql.Identifier(self.schema), sql.Identifier(self.sessions_table)
+                    ),
+                    (token,),
+                )

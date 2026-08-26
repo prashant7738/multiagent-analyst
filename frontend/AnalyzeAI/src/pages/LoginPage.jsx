@@ -29,7 +29,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const response = await loginUser(form.email, form.password);
-      login(response.user);
+      login(response.user, response.token);
       const redirectTo = location.state?.from?.pathname || "/analyze";
       navigate(redirectTo, { replace: true });
     } catch (err) {

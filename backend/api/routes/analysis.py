@@ -10,12 +10,30 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import StreamingResponse
 
 from api.config import Settings, get_settings
-from api.models.schemas import AnalyzeResponse, JobStatus
+from api.models.schemas import AnalyzeResponse, AuthUser, JobStatus
+from api.routes.auth import get_current_user
+from api.routes.settings import get_user_settings_store
 from api.services.job_manager import JobManager, get_job_manager
 from api.services.pipeline_runner import start_pipeline_job
 from api.services.result_builder import build_result
 from api.services.sse import event_stream
 from api.utils.response import success
+
+
+def _api_key_overrides_for(user: AuthUser, settings: Settings) -> dict[str, str]:
+    """Fetch this user's own saved LLM keys, if any, to override the shared/env ones."""
+    if not settings.database_url:
+        return {}
+    try:
+        keys = get_user_settings_store(settings).get_keys(user.user_id)
+    except Exception:  # noqa: BLE001 — a broken settings lookup must never block analysis
+        logger.exception("Failed to load per-user API keys for %s; using shared keys.", user.user_id)
+        return {}
+    return {
+        "groq": keys.get("groq_api_key") or "",
+        "gemini": keys.get("gemini_api_key") or "",
+        "hf_token": keys.get("hf_token") or "",
+    }
 
 logger = logging.getLogger("api.analysis")
 
@@ -86,6 +104,7 @@ async def analyze(
     analysis_config: str | None = Form(None),
     settings: Settings = Depends(get_settings),
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
 ) -> AnalyzeResponse:
     """Accept a CSV, create a job, and launch the pipeline in the background.
 
@@ -95,7 +114,7 @@ async def analyze(
     _validate_upload(file, settings)
     runtime_config = _parse_analysis_config(preprocessing_profile, analysis_config)
 
-    job = manager.create_job(filename=file.filename, analysis_config=runtime_config)
+    job = manager.create_job(filename=file.filename, analysis_config=runtime_config, user_id=user.user_id)
     dest = settings.uploads_dir / f"{job.job_id}.csv"
 
     try:
@@ -112,7 +131,8 @@ async def analyze(
         ) from exc
 
     job.csv_path = str(dest)
-    start_pipeline_job(manager, job.job_id, str(dest), runtime_config)
+    api_key_overrides = _api_key_overrides_for(user, settings)
+    start_pipeline_job(manager, job.job_id, str(dest), runtime_config, api_key_overrides=api_key_overrides)
 
     logger.info("Accepted job %s (file=%s)", job.job_id, file.filename)
     return AnalyzeResponse(
@@ -125,9 +145,14 @@ async def analyze(
 
 
 @router.get("/{job_id}/stream")
-async def stream(job_id: str, manager: JobManager = Depends(get_job_manager)) -> StreamingResponse:
+async def stream(
+    job_id: str,
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+) -> StreamingResponse:
     """Server-Sent-Events stream of pipeline progress for a job."""
-    if manager.get_job(job_id) is None:
+    job = manager.get_job(job_id)
+    if job is None or job.user_id != user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
 
     return StreamingResponse(
@@ -142,10 +167,14 @@ async def stream(job_id: str, manager: JobManager = Depends(get_job_manager)) ->
 
 
 @router.get("/{job_id}/result")
-async def result(job_id: str, manager: JobManager = Depends(get_job_manager)):
+async def result(
+    job_id: str,
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+):
     """Return the full frontend-friendly projection of the final GraphState."""
     job = manager.get_job(job_id)
-    if job is None:
+    if job is None or job.user_id != user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
 
     if job.status == "failed":

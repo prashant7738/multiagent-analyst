@@ -29,6 +29,7 @@ from agents.key_indicator import (
     start_capture,
     usage_fragment,
 )
+from api.services.request_context import get_api_key_override
 
 client = None
 gemini_client = None
@@ -55,7 +56,16 @@ class SchemaBlueprint(dict):
 
 
 def _get_groq_client() -> Groq:
-    """Return the active Groq client or raise a controlled error if unavailable."""
+    """Return the active Groq client or raise a controlled error if unavailable.
+
+    A per-job user-supplied key (see ``api.services.request_context``) always
+    wins over the shared/env-configured client — built fresh, never cached
+    into the module-global ``client``, so it can't leak to another user's job.
+    """
+    override = get_api_key_override("groq")
+    if override:
+        return Groq(api_key=override)
+
     global client
     if client is not None:
         return client
@@ -204,6 +214,15 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
     elif gemini_client is not None:
         ordered_keys = [None]
     else:
+        ordered_keys = []
+
+    # A per-job user-supplied key (see api.services.request_context) is always
+    # tried first, ahead of the shared/env-configured keys.
+    override = get_api_key_override("gemini")
+    if override:
+        ordered_keys = [override] + [k for k in ordered_keys if k != override]
+
+    if not ordered_keys:
         raise RuntimeError("GEMINI_API_KEY is not set")
 
     last_error = None
@@ -892,7 +911,7 @@ def _call_llm_for_schema_blueprint(
                 reasoning_effort=GROQ_REASONING_EFFORT,
             )
             record_key_use(
-                "Agent 2", "Groq", key=os.getenv("GROQ_API_KEY"),
+                "Agent 2", "Groq", key=get_api_key_override("groq") or os.getenv("GROQ_API_KEY"),
                 purpose="schema blueprint", model=GROQ_MODEL,
             )
             raw_text = response.choices[0].message.content.strip()

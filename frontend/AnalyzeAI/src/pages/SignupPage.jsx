@@ -71,7 +71,7 @@ export default function SignupPage() {
         email: form.email,
         password: form.password,
       });
-      login(response.user);
+      login(response.user, response.token);
       setSuccess(true);
       setTimeout(() => navigate("/analyze"), 2000);
     } catch (err) {

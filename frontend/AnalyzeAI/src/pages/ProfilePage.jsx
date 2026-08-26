@@ -5,6 +5,7 @@ import { Trash2, LogOut, Plus, Eye, Settings, History } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
 import useJobHistory from "@/hooks/useJobHistory";
 import { useAuth } from "@/contexts/AuthContext";
+import ApiKeysPanel from "@/components/ApiKeysPanel";
 
 const TabNav = ({ tabs, activeTab, setActiveTab }) => {
   return (
@@ -370,6 +371,8 @@ export default function ProfilePage() {
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">
                       For account security, do not upload files containing personal information you are not authorized to process.
                     </p>
+
+                    <ApiKeysPanel />
                   </motion.div>
                 </div>
               </motion.div>

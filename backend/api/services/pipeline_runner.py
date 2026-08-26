@@ -25,6 +25,7 @@ from typing import Any
 # Importing config first bootstraps sys.path + cwd so the pipeline/agents import.
 from api.config import get_settings
 from api.services.job_manager import JobManager
+from api.services.request_context import set_api_key_overrides
 from api.services.result_builder import build_result
 
 logger = logging.getLogger("api.pipeline_runner")
@@ -85,24 +86,27 @@ def _initial_state(csv_path: str, runtime_config: dict[str, Any] | None = None,
     }
 
 
-def maybe_start_rag_build(manager: JobManager, job_id: str) -> bool:
+def maybe_start_rag_build(
+    manager: JobManager, job_id: str, api_key_overrides: dict[str, Any] | None = None
+) -> bool:
     """Start RAG indexing after analysis, when the RAG dependencies are enabled."""
     job = manager.get_job(job_id)
     settings = get_settings()
+    has_hf_token = bool(settings.hf_token or (api_key_overrides or {}).get("hf_token"))
     if (
         job is None
         or job.status != "completed"
         or job.result is None
         or not job.csv_path
         or not settings.database_url
-        or not settings.hf_token
+        or not has_hf_token
         or job.rag_status == "ready"
     ):
         return False
 
     from api.services.rag_service import start_rag_build
 
-    return start_rag_build(manager, job)
+    return start_rag_build(manager, job, api_key_overrides=api_key_overrides)
 
 
 class _MilestoneEmitter:
@@ -180,8 +184,21 @@ class _MilestoneEmitter:
                            detail={"report_path": state.get("report_path")})
 
 
-def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[str, Any] | None = None) -> None:
-    """Blocking pipeline execution — intended to run inside a daemon thread."""
+def _run(
+    manager: JobManager,
+    job_id: str,
+    csv_path: str,
+    runtime_config: dict[str, Any] | None = None,
+    api_key_overrides: dict[str, Any] | None = None,
+) -> None:
+    """Blocking pipeline execution — intended to run inside a daemon thread.
+
+    ``api_key_overrides`` (e.g. {"groq": "...", "gemini": "...", "hf_token": "..."})
+    is set as this thread's context right away — a new thread starts with no
+    inherited context, so this must happen explicitly rather than relying on
+    contextvar propagation from the request that launched it.
+    """
+    set_api_key_overrides(api_key_overrides)
     emitter = _MilestoneEmitter(manager, job_id)
     try:
         manager.set_status(job_id, "processing")
@@ -207,7 +224,7 @@ def _run(manager: JobManager, job_id: str, csv_path: str, runtime_config: dict[s
 
         result = build_result(job_id, final_state, manager.get_job(job_id).filename if manager.get_job(job_id) else None)
         manager.set_result(job_id, final_state, final_state.get("errors", []) or [], result=result)
-        maybe_start_rag_build(manager, job_id)
+        maybe_start_rag_build(manager, job_id, api_key_overrides=api_key_overrides)
 
         pipeline_errors = final_state.get("errors", []) or []
         manager.append_event(job_id, {
@@ -247,12 +264,13 @@ def start_pipeline_job(
     job_id: str,
     csv_path: str,
     runtime_config: dict[str, Any] | None = None,
+    api_key_overrides: dict[str, Any] | None = None,
 ) -> threading.Thread:
     """Launch the pipeline for ``job_id`` in a background daemon thread."""
     get_settings()  # ensure config/dirs are ready
     thread = threading.Thread(
         target=_run,
-        args=(manager, job_id, csv_path, runtime_config),
+        args=(manager, job_id, csv_path, runtime_config, api_key_overrides),
         name=f"pipeline-{job_id[:8]}",
         daemon=True,
     )

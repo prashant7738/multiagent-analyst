@@ -12,7 +12,8 @@ import shutil
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.config import Settings, get_settings
-from api.models.schemas import JobStatus, JobSummary
+from api.models.schemas import AuthUser, JobStatus, JobSummary
+from api.routes.auth import get_current_user
 from api.services.job_manager import Job, JobManager, get_job_manager
 from api.utils.response import success
 
@@ -38,19 +39,36 @@ def _to_summary(job) -> JobSummary:
     )
 
 
+def _require_owned_job(manager: JobManager, job_id: str, user: AuthUser) -> Job:
+    """Fetch a job and verify ``user`` owns it. 404s on both missing and not-owned
+
+    (never distinguishes the two — that would leak whether a given job_id exists
+    for someone else).
+    """
+    job = manager.get_job(job_id)
+    if job is None or job.user_id != user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+    return job
+
+
 @router.get("", response_model=list[JobSummary])
-async def list_jobs(manager: JobManager = Depends(get_job_manager)) -> list[JobSummary]:
-    """Return summaries of all known jobs (most recent first)."""
-    jobs = sorted(manager.list_jobs(), key=lambda j: j.created_at, reverse=True)
+async def list_jobs(
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+) -> list[JobSummary]:
+    """Return summaries of the caller's own jobs (most recent first)."""
+    jobs = sorted(manager.list_jobs(user_id=user.user_id), key=lambda j: j.created_at, reverse=True)
     return [_to_summary(j) for j in jobs]
 
 
 @router.get("/{job_id}", response_model=JobSummary)
-async def get_job(job_id: str, manager: JobManager = Depends(get_job_manager)) -> JobSummary:
+async def get_job(
+    job_id: str,
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+) -> JobSummary:
     """Return a single job's status snapshot."""
-    job = manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+    job = _require_owned_job(manager, job_id, user)
     return _to_summary(job)
 
 
@@ -96,11 +114,10 @@ async def delete_job(
     job_id: str,
     settings: Settings = Depends(get_settings),
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
 ):
     """Delete a past analysis from history along with all of its artifacts."""
-    job = manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+    job = _require_owned_job(manager, job_id, user)
     if _is_running(job):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -115,11 +132,12 @@ async def delete_job(
 async def delete_all_jobs(
     settings: Settings = Depends(get_settings),
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
 ):
-    """Delete every finished analysis from history. Running jobs are skipped."""
+    """Delete every finished analysis from the caller's own history. Running jobs are skipped."""
     deleted = 0
     skipped = 0
-    for job in sorted(manager.list_jobs(), key=lambda j: j.created_at):
+    for job in sorted(manager.list_jobs(user_id=user.user_id), key=lambda j: j.created_at):
         if _is_running(job):
             skipped += 1
             continue

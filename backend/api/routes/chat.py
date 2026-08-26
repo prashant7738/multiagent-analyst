@@ -6,19 +6,28 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.models.schemas import ChatAskRequest, ChatMessage, ChatResponse
+from api.config import Settings, get_settings
+from api.models.schemas import AuthUser, ChatAskRequest, ChatMessage, ChatResponse
+from api.routes.auth import get_current_user
+from api.routes.settings import get_user_settings_store
 from api.services.chat_service import ask_question, build_fallback_chat_response
 from api.services.job_manager import JobManager, get_job_manager
+from api.services.request_context import set_api_key_overrides
 
 logger = logging.getLogger("api.chat")
 
 router = APIRouter(prefix="/api/analyze/{job_id}/chat", tags=["chat"])
 
 
-def _get_ready_job(job_id: str, manager: JobManager):
+def _get_owned_job(job_id: str, manager: JobManager, user: AuthUser):
     job = manager.get_job(job_id)
-    if job is None:
+    if job is None or job.user_id != user.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+    return job
+
+
+def _get_ready_job(job_id: str, manager: JobManager, user: AuthUser):
+    job = _get_owned_job(job_id, manager, user)
     if job.status != "completed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -31,11 +40,10 @@ def _get_ready_job(job_id: str, manager: JobManager):
 async def get_chat_history(
     job_id: str,
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
 ) -> list[ChatMessage]:
     """Return the stored Q&A transcript for this job."""
-    job = manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+    job = _get_owned_job(job_id, manager, user)
     return [ChatMessage(**message) for message in job.chat_history]
 
 
@@ -44,9 +52,22 @@ async def ask_dataset_question(
     job_id: str,
     payload: ChatAskRequest,
     manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> ChatResponse:
     """Ask a question about the analyzed dataset for ``job_id``."""
-    job = _get_ready_job(job_id, manager)
+    job = _get_ready_job(job_id, manager, user)
+
+    if settings.database_url:
+        try:
+            keys = get_user_settings_store(settings).get_keys(user.user_id)
+            set_api_key_overrides({
+                "groq": keys.get("groq_api_key") or "",
+                "gemini": keys.get("gemini_api_key") or "",
+                "hf_token": keys.get("hf_token") or "",
+            })
+        except Exception:  # noqa: BLE001 — fall back to the shared/env keys
+            logger.exception("Failed to load per-user API keys for %s; using shared keys.", user.user_id)
 
     try:
         outcome = ask_question(manager, job, payload.question)

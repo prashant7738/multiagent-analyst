@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle, AlertTriangle, RotateCw } from "lucide-react";
-import { apiUrl } from "@/lib/api";
+import { AlertCircle, CheckCircle, AlertTriangle, RotateCw, KeyRound } from "lucide-react";
+import { apiUrl, testApiKey } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+
+// Maps this widget's health-payload provider keys to the settings API's
+// provider identifiers (the one mismatch: "huggingface" here vs "hf_token" there).
+const PROVIDER_TEST_KEY = { groq: "groq", gemini: "gemini", huggingface: "hf_token" };
 
 /**
  * Display LLM connectivity status (Groq for semantic tagging, Gemini for fallback, HF for embeddings)
@@ -8,14 +13,22 @@ import { apiUrl } from "@/lib/api";
  * be down even when every LLM shows healthy, since none of the LLM checks touch Postgres.
  * Fetches health from /api/health and shows indicator in navbar.
  * Manual test button triggers /api/health/test-llm for on-demand connectivity check.
+ *
+ * Signed-in users can also type their own key per provider to test THAT key
+ * instead of the app's shared/default one — leaving a field empty tests the
+ * default, exactly like before. Nothing typed here is saved; use Profile >
+ * Settings > API Keys to actually keep a key in place of the shared one.
  */
 export default function LLMHealthIndicator() {
+  const { user } = useAuth();
   const [llmStatus, setLlmStatus] = useState({ groq: "unknown", gemini: "unknown", huggingface: "unknown" });
   const [ragStatus, setRagStatus] = useState({ database: "unknown" });
   const [isChecking, setIsChecking] = useState(true);
   const [isTesting, setIsTesting] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [lastTestTime, setLastTestTime] = useState(null);
+  const [customKeys, setCustomKeys] = useState({ groq: "", gemini: "", huggingface: "" });
+  const [customTested, setCustomTested] = useState({});
 
   const checkHealth = async () => {
     try {
@@ -24,6 +37,7 @@ export default function LLMHealthIndicator() {
         const data = await response.json();
         setLlmStatus(data.llm || { groq: "unknown", gemini: "unknown", huggingface: "unknown" });
         setRagStatus(data.rag || { database: "unknown" });
+        setCustomTested({}); // background check reflects the default keys only
       }
     } catch (error) {
       console.error("Failed to fetch health status:", error);
@@ -35,17 +49,39 @@ export default function LLMHealthIndicator() {
   const testLLMs = async () => {
     setIsTesting(true);
     try {
-      const response = await fetch(apiUrl("/api/health/test-llm"), {
-        method: "POST",
-      });
+      const response = await fetch(apiUrl("/api/health/test-llm"), { method: "POST" });
+      let nextLlm = llmStatus;
+      let nextRag = ragStatus;
       if (response.ok) {
         const data = await response.json();
-        setLlmStatus(data.llm || { groq: "unknown", gemini: "unknown", huggingface: "unknown" });
-        setRagStatus(data.rag || { database: "unknown" });
-        setLastTestTime(new Date().toLocaleTimeString());
+        nextLlm = data.llm || nextLlm;
+        nextRag = data.rag || nextRag;
       } else {
         console.error("Test failed with status:", response.status);
       }
+
+      // Any provider with a key typed in gets tested with THAT key instead,
+      // overriding the default result just fetched above.
+      const overrides = {};
+      const usedCustom = {};
+      await Promise.all(
+        Object.entries(customKeys).map(async ([provider, key]) => {
+          const trimmed = key.trim();
+          if (!trimmed || !user) return;
+          try {
+            const result = await testApiKey(PROVIDER_TEST_KEY[provider], trimmed);
+            overrides[provider] = result.status;
+          } catch {
+            overrides[provider] = "unreachable";
+          }
+          usedCustom[provider] = true;
+        })
+      );
+
+      setLlmStatus({ ...nextLlm, ...overrides });
+      setRagStatus(nextRag);
+      setCustomTested(usedCustom);
+      setLastTestTime(new Date().toLocaleTimeString());
     } catch (error) {
       console.error("Failed to test LLM connections:", error);
     } finally {
@@ -125,6 +161,39 @@ export default function LLMHealthIndicator() {
   const hfStatus = llmStatus.huggingface || "unknown";
   const dbStatus = ragStatus.database || "unknown";
 
+  const setCustomKey = (provider, value) => {
+    setCustomKeys((prev) => ({ ...prev, [provider]: value }));
+  };
+
+  // One row = one provider's status line plus its optional "test with my own key" input.
+  const ProviderRow = ({ statusKey, status, label }) => (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        {getStatusIcon(status)}
+        <div className="flex-1">
+          <div className="font-medium text-ink">{label}</div>
+          <div className="text-ink-secondary">
+            {getStatusLabel(status)}
+            {customTested[statusKey] && (
+              <span className="ml-1.5 text-[10px] font-medium text-accent">(your key)</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="relative">
+        <KeyRound className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ink-muted" />
+        <input
+          type="password"
+          value={customKeys[statusKey]}
+          onChange={(e) => setCustomKey(statusKey, e.target.value)}
+          disabled={!user}
+          placeholder={user ? "Test with your own key…" : "Sign in to test your own key"}
+          className="w-full rounded border border-line bg-raised py-1 pl-6 pr-2 text-[11px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent disabled:cursor-not-allowed disabled:opacity-60"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative">
       <button
@@ -142,7 +211,7 @@ export default function LLMHealthIndicator() {
       </button>
 
       {showTooltip && (
-        <div className="absolute right-0 mt-2 w-64 rounded-lg border border-line bg-canvas p-3 shadow-lg z-50">
+        <div className="absolute right-0 mt-2 w-72 rounded-lg border border-line bg-canvas p-3 shadow-lg z-50">
           <div className="space-y-3 text-xs">
             <div className="flex justify-between items-center">
               <div className="font-semibold text-ink">LLM Connectivity</div>
@@ -154,37 +223,21 @@ export default function LLMHealthIndicator() {
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              {getStatusIcon(groqStatus)}
-              <div>
-                <div className="font-medium text-ink">Semantic Tagging (Groq)</div>
-                <div className="text-ink-secondary">{getStatusLabel(groqStatus)}</div>
-              </div>
-            </div>
+            <ProviderRow statusKey="groq" status={groqStatus} label="Semantic Tagging (Groq)" />
+            <ProviderRow statusKey="gemini" status={geminiStatus} label="Narrative (Gemini)" />
+            <ProviderRow statusKey="huggingface" status={hfStatus} label="RAG Embeddings (Hugging Face)" />
 
-            <div className="flex items-center gap-2">
-              {getStatusIcon(geminiStatus)}
-              <div>
-                <div className="font-medium text-ink">Narrative (Gemini)</div>
-                <div className="text-ink-secondary">{getStatusLabel(geminiStatus)}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {getStatusIcon(hfStatus)}
-              <div>
-                <div className="font-medium text-ink">RAG Embeddings (Hugging Face)</div>
-                <div className="text-ink-secondary">{getStatusLabel(hfStatus)}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 border-t border-line pt-3">
               {getStatusIcon(dbStatus)}
               <div>
                 <div className="font-medium text-ink">RAG Database (Postgres/pgvector)</div>
                 <div className="text-ink-secondary">{getStatusLabel(dbStatus)}</div>
               </div>
             </div>
+
+            {!user && (
+              <p className="text-ink-muted">Sign in to test your own Groq/Gemini/HF keys here — fields above will unlock.</p>
+            )}
 
             {lastTestTime && (
               <div className="text-ink-muted text-xs py-1 border-t border-line">

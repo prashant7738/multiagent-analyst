@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, CheckCircle2, XCircle, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Eye, EyeOff, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { fetchApiKeysStatus, saveApiKeys, deleteApiKey, testApiKey } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const PROVIDERS = [
   {
@@ -66,6 +67,15 @@ function ProviderRow({ config, status, onChanged }) {
   const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // null → derive from server state; otherwise the user's explicit pick for this row.
+  // Reset to null after every save/clear so it re-syncs with the reloaded status.
+  const [modeOverride, setModeOverride] = useState(null);
+  const mode = modeOverride ?? (status?.configured ? "own" : "default");
+
+  const handleChanged = () => {
+    setModeOverride(null);
+    onChanged();
+  };
 
   const handleTest = async () => {
     if (!value.trim()) return;
@@ -88,7 +98,7 @@ function ProviderRow({ config, status, onChanged }) {
       await saveApiKeys({ [config.field]: value.trim() });
       setValue("");
       setTestResult(null);
-      onChanged();
+      handleChanged();
     } catch (err) {
       setError(err.message || "Save failed");
     } finally {
@@ -96,14 +106,25 @@ function ProviderRow({ config, status, onChanged }) {
     }
   };
 
-  const handleClear = async () => {
-    setSaving(true);
+  const selectOwn = () => {
     setError("");
+    setModeOverride("own");
+  };
+
+  const selectDefault = async () => {
+    setError("");
+    setValue("");
+    setTestResult(null);
+    setModeOverride("default");
+    if (!status?.configured) return;
+    // A saved key exists — switching to "shared default" means deleting it.
+    setSaving(true);
     try {
       await deleteApiKey(config.provider);
-      onChanged();
+      handleChanged();
     } catch (err) {
-      setError(err.message || "Clear failed");
+      setModeOverride("own");
+      setError(err.message || "Couldn't switch back to the shared default");
     } finally {
       setSaving(false);
     }
@@ -115,79 +136,102 @@ function ProviderRow({ config, status, onChanged }) {
         <label className="block text-xs uppercase tracking-widest text-neutral-600 dark:text-neutral-400 font-mono">
           {config.label}
         </label>
-        {status?.configured ? (
+        {status?.configured && (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400 whitespace-nowrap">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Configured ({status.masked})
+            <CheckCircle2 className="w-3.5 h-3.5" /> Saved ({status.masked})
           </span>
-        ) : (
-          <span className="text-xs text-neutral-500 dark:text-neutral-500 whitespace-nowrap">Using shared default</span>
         )}
       </div>
       <p className="text-xs text-neutral-500 dark:text-neutral-500 mb-4">{config.hint}</p>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[220px]">
-          <input
-            type={showValue ? "text" : "password"}
-            value={value}
-            onChange={(e) => { setValue(e.target.value); setTestResult(null); }}
-            placeholder={status?.configured ? "Enter a new key to replace it…" : config.placeholder}
-            className="w-full pl-3 pr-10 py-2.5 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-sm text-sm focus:outline-none focus:border-amber-700 dark:focus:border-amber-600"
-          />
+      <div
+        role="radiogroup"
+        aria-label={`${config.label} source`}
+        className="mb-3 inline-flex overflow-hidden rounded-sm border border-neutral-200 text-xs font-medium dark:border-neutral-800"
+      >
+        {[
+          { key: "default", label: "Shared default" },
+          { key: "own", label: "My own key" },
+        ].map((opt, i) => (
           <button
+            key={opt.key}
             type="button"
-            onClick={() => setShowValue((v) => !v)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
-            tabIndex={-1}
-          >
-            {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-
-        <motion.button
-          type="button"
-          whileHover={{ y: -1 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleTest}
-          disabled={!value.trim() || testResult === "testing"}
-          className="px-3 py-2.5 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Test
-        </motion.button>
-
-        <motion.button
-          type="button"
-          whileHover={{ y: -1 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleSave}
-          disabled={!value.trim() || saving}
-          className="px-4 py-2.5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Save
-        </motion.button>
-
-        {status?.configured && (
-          <motion.button
-            type="button"
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleClear}
+            role="radio"
+            aria-checked={mode === opt.key}
             disabled={saving}
-            title="Remove this key and go back to the shared default"
-            className="p-2.5 border border-neutral-200 dark:border-neutral-800 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-700 dark:hover:text-red-400 rounded-sm transition-all disabled:opacity-50"
+            onClick={opt.key === "own" ? selectOwn : selectDefault}
+            className={cn(
+              "px-3 py-1.5 transition-colors disabled:opacity-50",
+              i > 0 && "border-l border-neutral-200 dark:border-neutral-800",
+              mode === opt.key
+                ? "bg-amber-700 text-white"
+                : "bg-white text-neutral-600 hover:bg-neutral-50 dark:bg-neutral-950 dark:text-neutral-400 dark:hover:bg-neutral-900"
+            )}
           >
-            <Trash2 className="w-4 h-4" />
-          </motion.button>
-        )}
+            {opt.label}
+          </button>
+        ))}
       </div>
 
-      <div className="mt-2 min-h-[1.25rem]">
-        {error ? (
-          <span className="text-xs text-red-700 dark:text-red-400">{error}</span>
-        ) : (
-          <ResultBadge result={testResult} />
-        )}
-      </div>
+      {mode === "default" ? (
+        <p className="text-xs text-neutral-500 dark:text-neutral-500">
+          {saving
+            ? "Switching to the shared default…"
+            : "This provider uses the app's shared key. Your quota isn't touched."}
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[220px]">
+              <input
+                type={showValue ? "text" : "password"}
+                value={value}
+                onChange={(e) => { setValue(e.target.value); setTestResult(null); }}
+                placeholder={status?.configured ? "Enter a new key to replace it…" : config.placeholder}
+                className="w-full pl-3 pr-10 py-2.5 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-sm text-sm focus:outline-none focus:border-amber-700 dark:focus:border-amber-600"
+              />
+              <button
+                type="button"
+                onClick={() => setShowValue((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                tabIndex={-1}
+              >
+                {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+
+            <motion.button
+              type="button"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleTest}
+              disabled={!value.trim() || testResult === "testing"}
+              className="px-3 py-2.5 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Test
+            </motion.button>
+
+            <motion.button
+              type="button"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleSave}
+              disabled={!value.trim() || saving}
+              className="px-4 py-2.5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Save
+            </motion.button>
+          </div>
+
+          <div className="mt-2 min-h-[1.25rem]">
+            {error ? (
+              <span className="text-xs text-red-700 dark:text-red-400">{error}</span>
+            ) : (
+              <ResultBadge result={testResult} />
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle, AlertTriangle, RotateCw } from "lucide-react";
+import { apiUrl } from "@/lib/api";
 
 /**
  * Display LLM connectivity status (Groq for semantic tagging, Gemini for fallback, HF for embeddings)
@@ -18,7 +19,7 @@ export default function LLMHealthIndicator() {
 
   const checkHealth = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/health");
+      const response = await fetch(apiUrl("/api/health"));
       if (response.ok) {
         const data = await response.json();
         setLlmStatus(data.llm || { groq: "unknown", gemini: "unknown", huggingface: "unknown" });
@@ -34,7 +35,7 @@ export default function LLMHealthIndicator() {
   const testLLMs = async () => {
     setIsTesting(true);
     try {
-      const response = await fetch("http://localhost:8000/api/health/test-llm", {
+      const response = await fetch(apiUrl("/api/health/test-llm"), {
         method: "POST",
       });
       if (response.ok) {

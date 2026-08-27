@@ -303,8 +303,10 @@ GROQ_TRANSIENT_ERRORS = (GroqRateLimitError, GroqAPIConnectionError, GroqAPITime
 GROQ_MAX_TRANSIENT_RETRIES = 2
 GROQ_RETRY_BACKOFF_SECONDS = 3
 GEMINI_MODEL = "gemini-flash-latest"
-# gemini-2.5-flash/-lite and gemini-2.0-flash 404 on this project; use current Gemini 3.x stable IDs instead
-GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash")
+# gemini-2.5-flash/-lite and gemini-2.0-flash return 404 "no longer available to new
+# users" — keep only the current Gemini 3.x stable IDs. Add newer aliases here as
+# Google publishes them; the failover skips any that 404 at call time anyway.
+GEMINI_MODEL_FALLBACKS = ("gemini-3.6-flash", "gemini-3.5-flash")
 MISSINGNESS_ANALYSIS_THRESHOLD_PCT = 20.0
 # Claude 3.5 Sonnet has higher rate limits than older models
 LLM_BATCH_SIZE = 10
@@ -843,6 +845,20 @@ def _save_schema_cache(cache_key: str, schema_blueprint: dict) -> None:
         pass
 
 
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _loads_lenient(text: str) -> dict:
+    """json.loads, retrying once with trailing commas stripped (a common LLM slip)."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        repaired = _TRAILING_COMMA_RE.sub(r"\1", text)
+        if repaired != text:
+            return json.loads(repaired)
+        raise
+
+
 def _parse_schema_blueprint_response(raw_text: str) -> dict:
     """Parse a model response that may contain raw JSON or a fenced code block."""
     if "```" in raw_text:
@@ -852,18 +868,18 @@ def _parse_schema_blueprint_response(raw_text: str) -> dict:
             if part.startswith("json"):
                 part = part[4:].strip()
             try:
-                return json.loads(part)
+                return _loads_lenient(part)
             except Exception:
                 continue
         raise json.JSONDecodeError("No valid JSON block found", raw_text, 0)
 
     try:
-        return json.loads(raw_text)
+        return _loads_lenient(raw_text)
     except json.JSONDecodeError:
         start = raw_text.find("{")
         end = raw_text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            return json.loads(raw_text[start:end + 1])
+            return _loads_lenient(raw_text[start:end + 1])
         raise
 
 
@@ -945,6 +961,19 @@ def _call_llm_for_schema_blueprint(
         # json.JSONDecodeError) can still split the batch and retry on malformed JSON
         raise
     except Exception as gemini_error:
+        # If Groq's failure was itself a JSON parse error, a smaller batch (fewer
+        # columns -> shorter, simpler response) may well parse. Re-raise as
+        # JSONDecodeError so _call_llm_for_schema_blueprint_with_retry halves and
+        # retries instead of dropping the whole dataset to heuristics. Only a
+        # non-JSON Groq failure (auth, quota, bad request) — which splitting can't
+        # fix — becomes a hard RuntimeError.
+        if isinstance(groq_error, json.JSONDecodeError):
+            raise json.JSONDecodeError(
+                f"Groq returned unparseable JSON and the Gemini fallback also failed "
+                f"(Groq: {groq_error}; Gemini: {gemini_error})",
+                getattr(groq_error, "doc", "") or "",
+                getattr(groq_error, "pos", 0) or 0,
+            ) from gemini_error
         raise RuntimeError(
             f"Groq and Gemini calls failed (Groq: {groq_error}; Gemini: {gemini_error})"
         ) from gemini_error

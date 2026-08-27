@@ -3,7 +3,12 @@
 // local uvicorn dev server started with `python -m api` / `uvicorn api.app:app`.
 import { readStoredToken, clearStoredAuth } from "./authStorage";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+const configuredApiBase =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_BACKEND_URL ||
+  "http://localhost:8000";
+const API_BASE = configuredApiBase.replace(/\/$/, "");
 
 /** Prefix a backend-relative path (e.g. "/api/analyze/x/stream") with the API base. */
 export function apiUrl(path) {

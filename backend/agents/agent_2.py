@@ -227,6 +227,7 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
 
     last_error = None
     total_attempts = 0
+    attempt_errors: list[str] = []  # "model=X (key=Y): <error>" per failed attempt
     for model_name in _gemini_model_candidates():
         for offset, api_key in enumerate(ordered_keys):
             total_attempts += 1
@@ -256,11 +257,18 @@ def _call_gemini_with_failover(*, contents, system_instruction: str, temperature
                 return response
             except Exception as exc:  # noqa: BLE001 - try the next key/model
                 last_error = exc
+                key_label = _mask_gemini_key(api_key) if api_key is not None else "env"
+                attempt_errors.append(f"model={model_name} (key={key_label}): {exc}")
                 if _is_model_unavailable_error(exc):
                     print(f"[{agent_label}] Gemini model '{model_name}' unavailable, trying next model")
                     break
 
-    raise RuntimeError(f"Gemini calls failed across {total_attempts} attempt(s): {last_error}")
+    # Name every model/key that was tried and why it failed, so a bare
+    # "quota exhausted" is always attributable to a specific model.
+    detail = " | ".join(attempt_errors) if attempt_errors else str(last_error)
+    raise RuntimeError(
+        f"Gemini calls failed across {total_attempts} attempt(s): {detail}"
+    ) from last_error
 
 
 def _call_gemini_json_with_failover(*, contents, system_instruction: str, temperature: float,
@@ -945,7 +953,7 @@ def _call_llm_for_schema_blueprint(
             break
 
     if groq_error is not None:
-        print(f"[Agent 2] Groq unavailable; trying Gemini: {groq_error}")
+        print(f"[Agent 2] Groq ({GROQ_MODEL}) unavailable; trying Gemini: {groq_error}")
 
     try:
         return _call_gemini_json_with_failover(
@@ -969,13 +977,13 @@ def _call_llm_for_schema_blueprint(
         # fix — becomes a hard RuntimeError.
         if isinstance(groq_error, json.JSONDecodeError):
             raise json.JSONDecodeError(
-                f"Groq returned unparseable JSON and the Gemini fallback also failed "
+                f"Groq ({GROQ_MODEL}) returned unparseable JSON and the Gemini fallback also failed "
                 f"(Groq: {groq_error}; Gemini: {gemini_error})",
                 getattr(groq_error, "doc", "") or "",
                 getattr(groq_error, "pos", 0) or 0,
             ) from gemini_error
         raise RuntimeError(
-            f"Groq and Gemini calls failed (Groq: {groq_error}; Gemini: {gemini_error})"
+            f"Groq ({GROQ_MODEL}) and Gemini calls failed (Groq: {groq_error}; Gemini: {gemini_error})"
         ) from gemini_error
 
 

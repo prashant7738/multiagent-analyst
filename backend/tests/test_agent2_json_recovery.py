@@ -39,6 +39,28 @@ class TestGeminiFallbackModelList(unittest.TestCase):
         self.assertNotIn("gemini-2.5-flash", agent_2._gemini_model_candidates())
 
 
+class TestGeminiFailureNamesEveryModel(unittest.TestCase):
+    def test_failover_error_lists_each_model_and_its_error(self):
+        class _Boom:
+            class models:
+                @staticmethod
+                def generate_content(**_kw):
+                    raise RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+
+        with patch.object(agent_2, "_get_configured_gemini_api_keys", return_value=["k"]), \
+             patch.object(agent_2, "_has_explicit_multi_gemini_key_config", return_value=False), \
+             patch.object(agent_2, "gemini_client", _Boom()), \
+             patch.object(agent_2, "get_api_key_override", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                agent_2._call_gemini_with_failover(
+                    contents="x", system_instruction="y", temperature=0.1, max_output_tokens=10,
+                )
+        msg = str(ctx.exception)
+        for model in agent_2._gemini_model_candidates():
+            self.assertIn(model, msg)
+        self.assertIn("quota exceeded", msg)
+
+
 class TestGroqBadJsonGeminiDown(unittest.TestCase):
     """When Groq emits unparseable JSON and Gemini is unavailable, the error must
     stay a JSONDecodeError so the caller's batch-halving retry still fires."""

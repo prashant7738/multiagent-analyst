@@ -336,7 +336,7 @@ def _call_groq_then_gemini_json(
         parsed["source"] = "groq"
         return parsed
     except Exception as groq_error:
-        print(f"[Chat] Groq unavailable; trying Gemini: {groq_error}")
+        print(f"[Chat] Groq ({GROQ_MODEL}) unavailable; trying Gemini: {groq_error}")
 
     global _GEMINI_RETRY_AT
     if _gemini_is_disabled():

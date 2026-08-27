@@ -1111,6 +1111,7 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         f"{json.dumps(prompt_facts, separators=(',', ':'), default=str)}"
     )
 
+    groq_error: Exception | None = None
     try:
         response = _get_groq_client().chat.completions.create(
             model=GROQ_MODEL,
@@ -1126,8 +1127,9 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         narrative = _parse_schema_blueprint_response(raw_text)
         narrative["source"] = "groq"
         return narrative
-    except Exception as groq_error:
-        print(f"[Agent 6] Groq unavailable; trying Gemini: {groq_error}")
+    except Exception as exc:
+        groq_error = exc
+        print(f"[Agent 6] Groq ({GROQ_MODEL}) unavailable; trying Gemini: {exc}")
 
     try:
         narrative = _call_gemini_json_with_failover(
@@ -1139,7 +1141,11 @@ def _call_llm_for_narrative(insight_facts: dict) -> dict:
         narrative["source"] = "gemini"
         return narrative
     except Exception as gemini_error:
-        raise RuntimeError(f"Groq and Gemini calls failed: {gemini_error}") from gemini_error
+        # Keep BOTH provider errors, each naming its model, so the deterministic
+        # fallback that follows records exactly which model hit the wall.
+        raise RuntimeError(
+            f"Report narrative LLM failed — Groq ({GROQ_MODEL}): {groq_error}; {gemini_error}"
+        ) from gemini_error
 
 
 def _is_material_difference(top_share_pct, comparison_share_pct, threshold_multiplier=1.5, absolute_threshold_pct=5):
@@ -2088,12 +2094,14 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
         errors.append(f"Agent6: {table_error}")
 
     narrative_source = "llm"
+    narrative_fallback_reason = None
     try:
         narrative = _call_llm_for_narrative(insight_facts)
     except Exception as llm_error:
         print(f"[Agent 6] LLM narrative generation failed, using deterministic fallback: {llm_error}")
         narrative = _fallback_narrative(insight_facts)
         narrative_source = "fallback"
+        narrative_fallback_reason = str(llm_error)
 
     # Hybrid composition: the deterministic narrative is ALWAYS computed and
     # forms the guaranteed floor; the LLM output (when it arrived) is layered
@@ -2110,6 +2118,8 @@ def agent6_insight_report_generator(state: GraphState) -> GraphState:
             narrative_source = "fallback"
     else:
         narrative = deterministic
+    if narrative_fallback_reason:
+        narrative["fallback_reason"] = narrative_fallback_reason
     lint_replacements = _lint_plain_language(narrative, deterministic)
     if lint_replacements:
         print(f"[Agent 6] Jargon linter replaced {lint_replacements} plain-language line(s)")

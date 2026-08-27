@@ -59,8 +59,11 @@ _ALWAYS_INCLUDE_FACT_TYPES = (
     "correlation",
     "trend",
     "ranking",
+    "category_distribution",
 )
-_MAX_ALWAYS_INCLUDED_FACTS = 60
+# Raised from 60 when category_distribution docs joined the always-included set
+# (one per low-cardinality categorical column, typically a handful).
+_MAX_ALWAYS_INCLUDED_FACTS = 80
 
 # BAAI/bge-* models are asymmetric: queries need this instruction prefix, documents don't.
 _HF_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
@@ -259,6 +262,19 @@ def _row_to_text(row_index: int, row: dict[str, Any]) -> str:
     return f"Row {row_index}: " + " | ".join(parts)
 
 
+def _fmt_category_value(raw: Any) -> str:
+    if raw is None or str(raw).strip().lower() in ("", "nan", "none", "nat"):
+        return "(missing)"
+    return str(raw)
+
+
+# A distribution over hundreds of near-unique values (free-text notes, high-card
+# IDs that slipped past identifier tagging) isn't a meaningful "most common" fact
+# and would bloat the always-included set — skip embedding those.
+_MAX_CATEGORY_DISTRIBUTION_UNIQUE = 200
+_MAX_CATEGORY_DISTRIBUTION_SHOWN = 12
+
+
 # Bounds for stratified sampling below - keep the guaranteed-coverage pass cheap
 # and small relative to `cap` even on datasets with many categorical columns.
 _STRAT_MAX_CATEGORICAL_UNIQUE = 20  # same "low-cardinality label" threshold agent_2 uses
@@ -368,6 +384,28 @@ def _facts_to_documents(context: dict[str, Any]) -> list[dict[str, Any]]:
             "doc_type": "ranking",
             "text": f"Top values for {col}: {data.get('top')}. Bottom values: {data.get('bottom')}.",
             "metadata": {"column": col, **data},
+        })
+
+    for col, records in (context.get("category_distributions") or {}).items():
+        if not records or len(records) > _MAX_CATEGORY_DISTRIBUTION_UNIQUE:
+            continue
+        total = len(records)
+        shown = records[:_MAX_CATEGORY_DISTRIBUTION_SHOWN]
+        parts = [
+            f"{_fmt_category_value(rec.get(col))}={rec.get('count')} ({rec.get('pct')}%)"
+            for rec in shown
+        ]
+        text = (
+            f"Value counts for '{col}' (full dataset, {total} "
+            f"categor{'y' if total == 1 else 'ies'}): " + ", ".join(parts)
+        )
+        if total > len(shown):
+            text += f", + {total - len(shown)} more"
+        text += f". Most common: {_fmt_category_value(shown[0].get(col))}."
+        docs.append({
+            "doc_type": "category_distribution",
+            "text": text,
+            "metadata": {"column": col, "categories": total, "distribution": shown},
         })
 
     anomaly = context.get("anomaly_summary") or {}

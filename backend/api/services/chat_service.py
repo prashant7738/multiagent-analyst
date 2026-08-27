@@ -188,9 +188,11 @@ already-analyzed dataset using RETRIEVED evidence, not the whole dataset.
 
 You will be given two kinds of retrieved documents:
 - "facts": deterministic statistics/analysis computed over the FULL dataset (schema, descriptive \
-stats, correlations, growth rates, rankings, anomalies, regression trends, quality/validation \
-scores, narrative summary, and charts already generated). Trust these completely for anything \
-aggregate or dataset-wide.
+stats, correlations, growth rates, rankings, anomalies, regression trends, categorical value \
+counts / distributions, quality/validation scores, narrative summary, and charts already \
+generated). Trust these completely for anything aggregate or dataset-wide — including "most \
+common / most used / share of" questions about a categorical column when a "Value counts for \
+'<column>'" fact is present.
 - "rows": a SAMPLE of actual data rows (only some of the dataset's rows are indexed, not all of \
 them). Use these ONLY for concrete record-level lookups or examples. NEVER claim a row-level \
 answer is complete or exhaustive beyond what is shown here - if the retrieved rows don't contain \
@@ -402,6 +404,26 @@ def _fallback_answer(context: dict[str, Any], question: str) -> dict[str, Any]:
             answer = f"For {col}, the top performer is {top.get(col)} at {top.get('revenue_share_pct')}% share." if top else "I have ranking data but couldn't extract a clear leader."
         else:
             answer = "I don't have ranking data for this dataset."
+    elif any(k in q for k in ("most common", "most used", "most frequent", "most popular",
+                              "distribution", "breakdown", "proportion", "share of")):
+        dists = context.get("category_distributions") or {}
+        if dists:
+            chosen = next((c for c in dists if c.lower() in q), None) or next(iter(dists))
+            records = dists.get(chosen) or []
+            if records:
+                def _label(rec: dict[str, Any]) -> str:
+                    val = rec.get(chosen)
+                    return "(missing)" if val is None or str(val).strip().lower() in ("", "nan", "none") else str(val)
+                top = records[0]
+                spread = ", ".join(f"{_label(r)} ({r.get('pct')}%)" for r in records[:3])
+                answer = (
+                    f"For {chosen}, the most common value is {_label(top)} at {top.get('pct')}% "
+                    f"({top.get('count')} rows). Top values: {spread}."
+                )
+            else:
+                answer = f"I have a breakdown for {chosen} but couldn't read a clear leader."
+        else:
+            answer = "I don't have a categorical breakdown for this dataset."
     elif any(k in q for k in ("anomal", "outlier", "unusual", "weird")):
         anomaly = context.get("anomaly_summary") or {}
         if anomaly.get("unique_flagged_rows"):

@@ -35,7 +35,8 @@ class Job:
     filename: str | None = None
     csv_path: str | None = None
     analysis_config: dict[str, Any] = field(default_factory=dict)
-    status: str = "queued"  # queued | processing | completed | failed
+    status: str = "queued"  # queued | processing | completed | failed | cancelled
+    cancel_requested: bool = False  # user asked to stop; the runner stops at the next agent boundary
     progress: dict[str, str] = field(default_factory=dict)  # agent -> status
     events: list[dict[str, Any]] = field(default_factory=list)  # append-only log
     state: dict[str, Any] | None = None  # final GraphState (post-run)
@@ -63,6 +64,7 @@ class Job:
             "csv_path": self.csv_path,
             "analysis_config": json_safe(self.analysis_config),
             "status": self.status,
+            "cancel_requested": self.cancel_requested,
             "progress": json_safe(self.progress),
             "events": json_safe(self.events),
             "state": json_safe(self.state),
@@ -96,6 +98,7 @@ class Job:
             csv_path=record.get("csv_path"),
             analysis_config=dict(record.get("analysis_config") or {}),
             status=str(record.get("status", "queued")),
+            cancel_requested=bool(record.get("cancel_requested", False)),
             progress=dict(record.get("progress") or {}),
             events=list(record.get("events") or []),
             state=record.get("state"),
@@ -250,6 +253,38 @@ class JobManager:
         with job.condition:
             job.error = message
             job.status = "failed"
+            job.updated_at = _utcnow()
+            job.condition.notify_all()
+        self._persist(job)
+
+    def request_cancel(self, job_id: str) -> bool:
+        """Flag a running job for cancellation. The pipeline runner stops at the
+        next agent boundary (it can't interrupt an agent mid-execution).
+
+        Returns True if the job was still running and the flag was set, False if
+        it was unknown or already finished.
+        """
+        job = self.get_job(job_id)
+        if job is None or job.finished or job.status not in {"queued", "processing"}:
+            return False
+        with job.condition:
+            job.cancel_requested = True
+            job.updated_at = _utcnow()
+            job.condition.notify_all()
+        self._persist(job)
+        return True
+
+    def is_cancel_requested(self, job_id: str) -> bool:
+        job = self.get_job(job_id)
+        return bool(job and job.cancel_requested)
+
+    def set_cancelled(self, job_id: str) -> None:
+        job = self.get_job(job_id)
+        if job is None:
+            return
+        with job.condition:
+            job.status = "cancelled"
+            job.error = "Analysis cancelled by user."
             job.updated_at = _utcnow()
             job.condition.notify_all()
         self._persist(job)

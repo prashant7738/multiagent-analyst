@@ -201,7 +201,21 @@ def _run(
     """
     set_api_key_overrides(api_key_overrides)
     emitter = _MilestoneEmitter(manager, job_id)
+
+    def _emit_cancelled() -> None:
+        manager.append_event(job_id, {
+            "event": "pipeline_cancelled",
+            "status": "cancelled",
+            "message": "Analysis cancelled.",
+        })
+        manager.set_cancelled(job_id)
+        logger.info("Job %s cancelled by user.", job_id)
+
     try:
+        if manager.is_cancel_requested(job_id):
+            _emit_cancelled()
+            return
+
         manager.set_status(job_id, "processing")
         manager.append_event(job_id, {"event": "pipeline_started", "message": "Pipeline started"})
         manager.append_event(job_id, {"event": "csv_loaded", "message": "CSV loaded",
@@ -218,6 +232,12 @@ def _run(
         for snapshot in pipeline.stream(final_state, stream_mode="values"):
             final_state = snapshot
             emitter.observe(snapshot)
+            # Cooperative cancellation: the currently-running agent has already
+            # finished (LangGraph nodes are synchronous and can't be interrupted
+            # mid-run), so this stops before the next one starts.
+            if manager.is_cancel_requested(job_id):
+                _emit_cancelled()
+                return
 
         # Stamp a report-generation timestamp for the frontend (non-mutating).
         if final_state.get("report_path"):

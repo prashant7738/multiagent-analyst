@@ -155,6 +155,7 @@ export function subscribeToJobStream(streamUrl, { onEvent, onOpen, onError } = {
     "pipeline_finished",
     "completed",
     "pipeline_failed",
+    "pipeline_cancelled",
     "error",
   ];
   for (const name of names) {
@@ -177,6 +178,16 @@ export function subscribeToJobStream(streamUrl, { onEvent, onOpen, onError } = {
 /** GET /api/analyze/{job_id}/result — returns the raw AnalysisResult payload. */
 export async function fetchJobResult(jobId) {
   const res = await authedFetch(`/api/analyze/${jobId}/result`);
+  return parseJsonOrThrow(res);
+}
+
+/**
+ * POST /api/analyze/{job_id}/cancel — ask a running analysis to stop.
+ * The pipeline halts at the next agent boundary; the SSE stream then emits
+ * `pipeline_cancelled` and the job ends in the `cancelled` state.
+ */
+export async function cancelJob(jobId) {
+  const res = await authedFetch(`/api/analyze/${jobId}/cancel`, { method: "POST" });
   return parseJsonOrThrow(res);
 }
 

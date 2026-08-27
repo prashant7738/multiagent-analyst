@@ -10,6 +10,7 @@ const StatusBadge = ({ status }) => {
   const statusConfig = {
     done: { bg: "bg-green-100 dark:bg-green-950", text: "text-green-700 dark:text-green-300", label: "Complete" },
     error: { bg: "bg-red-100 dark:bg-red-950", text: "text-red-700 dark:text-red-300", label: "Failed" },
+    cancelled: { bg: "bg-neutral-100 dark:bg-neutral-800", text: "text-neutral-600 dark:text-neutral-300", label: "Cancelled" },
     running: { bg: "bg-blue-100 dark:bg-blue-950", text: "text-blue-700 dark:text-blue-300", label: "Running" },
   };
   const config = statusConfig[status] || statusConfig.running;
@@ -294,7 +295,7 @@ export default function HistoryPage() {
                           )}
                         </>
                       )}
-                      {(job.status === "done" || job.status === "error") && (
+                      {(job.status === "done" || job.status === "error" || job.status === "cancelled") && (
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}

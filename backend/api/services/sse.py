@@ -63,7 +63,7 @@ async def event_stream(manager: JobManager, job_id: str) -> AsyncIterator[bytes]
             idle_ticks = 0
             for event in pending:
                 yield format_sse(event).encode("utf-8")
-                if event.get("event") in {"completed", "pipeline_failed"}:
+                if event.get("event") in {"completed", "pipeline_failed", "pipeline_cancelled"}:
                     terminal_sent = True
         elif not terminal_sent:
             idle_ticks += 1

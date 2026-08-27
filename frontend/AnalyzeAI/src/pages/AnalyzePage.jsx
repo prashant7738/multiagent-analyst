@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertCircle, ArrowLeft, RotateCcw, Upload, Download, CheckCircle2, FileBarChart2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, RotateCcw, Upload, Download, CheckCircle2, FileBarChart2, Ban } from "lucide-react";
 import AppLayout from "@/layouts/AppLayout";
 import Dropzone from "@/components/Dropzone";
 import RunSettings from "@/components/RunSettings";
@@ -10,7 +10,7 @@ import ResultsView from "@/components/ResultsView";
 import ReportDashboard from "@/components/ReportDashboard";
 import DownloadReportModal from "@/components/DownloadReportModal";
 import DatasetChat from "@/components/DatasetChat";
-import { analyzeCsv, subscribeToJobStream, fetchJob, fetchJobResult, reportDownloadUrl } from "@/lib/api";
+import { analyzeCsv, subscribeToJobStream, fetchJob, fetchJobResult, reportDownloadUrl, cancelJob } from "@/lib/api";
 
 const AGENTS = [
   {
@@ -93,6 +93,7 @@ export default function AnalyzePage() {
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
   const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const eventSourceRef = useRef(null);
   const timerRef = useRef(null);
@@ -155,6 +156,18 @@ export default function AnalyzePage() {
         setPhase("done");
       } catch (err) {
         if (cancelled) return;
+        // A cancelled job has no result payload — show it as cancelled, not a load error.
+        try {
+          const job = await fetchJob(routeJobId);
+          if (!cancelled && job?.status === "cancelled") {
+            setJobId(routeJobId);
+            setLoadedJobName(job?.filename || "historical analysis");
+            runStatusRef.current = "cancelled";
+            setPhase("cancelled");
+            return;
+          }
+        } catch { /* fall through to the generic error below */ }
+        if (cancelled) return;
         setErrorMessage(err.message || "Failed to load the saved analysis.");
         setPhase("error");
       } finally {
@@ -200,6 +213,27 @@ export default function AnalyzePage() {
     }
   };
 
+  const handleCancel = async () => {
+    const id = liveJobIdRef.current || jobId;
+    if (!id || cancelling) return;
+    setCancelling(true);
+    try {
+      await cancelJob(id);
+      // The pipeline_cancelled SSE event drives the phase change; this is just
+      // a fallback in case the stream has already dropped.
+      setTimeout(() => {
+        if (runStatusRef.current === "running") {
+          runStatusRef.current = "cancelled";
+          closeStream();
+          setPhase("cancelled");
+        }
+      }, 8000);
+    } catch (err) {
+      setCancelling(false);
+      setErrorMessage(err.message || "Couldn't cancel the analysis.");
+    }
+  };
+
   const handleStreamEvent = (id, name, data) => {
     if (name === "progress" && data.agent) {
       const agentId = agentIdFromLabel(data.agent);
@@ -233,6 +267,13 @@ export default function AnalyzePage() {
       fail(data.message || "Pipeline failed.");
       return;
     }
+    if (name === "pipeline_cancelled") {
+      runStatusRef.current = "cancelled";
+      closeStream();
+      setCancelling(false);
+      setPhase("cancelled");
+      return;
+    }
     if (name === "error") {
       fail(data.message || "Stream error.");
       return;
@@ -261,6 +302,7 @@ export default function AnalyzePage() {
     setPhase("running");
     setErrorMessage(null);
     setResult(null);
+    setCancelling(false);
     agentStartRef.current = {};
     setAgentStates(AGENTS.map((a) => ({ ...a, status: PENDING, duration: null, summary: null })));
 
@@ -290,6 +332,7 @@ export default function AnalyzePage() {
     setJobId(null); setResult(null); setErrorMessage(null);
     setLoadedJobName(null);
     setHistoryLoading(false);
+    setCancelling(false);
     navigate("/analyze");
     setAgentStates(AGENTS.map(a => ({ ...a, status: PENDING, duration: null, summary: null })));
   };
@@ -425,6 +468,24 @@ export default function AnalyzePage() {
           <PipelineTimeline agents={agentStates} elapsedTotal={elapsedTotal} />
         </div>
 
+        {!analysisReady && (
+          <div className="mt-8 flex flex-col items-center gap-2">
+            <motion.button
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-line text-ink-secondary hover:text-danger hover:border-danger/50 text-sm font-medium rounded-sm transition-all disabled:opacity-50"
+            >
+              <Ban className="w-4 h-4" />
+              {cancelling ? "Cancelling…" : "Cancel analysis"}
+            </motion.button>
+            {cancelling && (
+              <p className="text-xs text-ink-faint">Stopping after the current step finishes.</p>
+            )}
+          </div>
+        )}
+
         {analysisReady && (
           <motion.button
             initial={{ opacity: 0, y: 8 }}
@@ -438,6 +499,39 @@ export default function AnalyzePage() {
             View Analysis
           </motion.button>
         )}
+      </AppLayout>
+    );
+  }
+
+  /* ── CANCELLED ──────────────────────────────────────────────────────────*/
+  if (phase === "cancelled") {
+    return (
+      <AppLayout size="content" className="flex items-center justify-center py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="border border-line bg-surface p-8 rounded-sm w-full"
+        >
+          <div className="flex gap-4">
+            <Ban className="w-6 h-6 text-ink-muted shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h2 className="text-xl font-serif font-bold text-ink mb-2">Analysis cancelled</h2>
+              <p className="text-ink-secondary text-sm mb-6">
+                You stopped this run{loadedJobName || file?.name ? ` of ${loadedJobName || file?.name}` : ""}.
+                No report was generated. You can start a new analysis whenever you're ready.
+              </p>
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={reset}
+                className="px-6 py-2 bg-accent hover:bg-accent-hover text-white font-medium rounded-sm transition-all flex items-center gap-2 text-sm"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Start over
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
       </AppLayout>
     );
   }

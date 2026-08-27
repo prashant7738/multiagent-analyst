@@ -251,9 +251,11 @@ export default function ProfilePage() {
                                   ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
                                   : job.status === "error"
                                   ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
+                                  : job.status === "cancelled"
+                                  ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300"
                                   : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
                               }`}>
-                                {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                                {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : job.status === "cancelled" ? "Cancelled" : "Running"}
                               </div>
                               {job.status === "running" && (
                                 <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-500">
@@ -321,9 +323,11 @@ export default function ProfilePage() {
                               ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
                               : job.status === "error"
                               ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
+                              : job.status === "cancelled"
+                              ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300"
                               : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
                           }`}>
-                            {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                            {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : job.status === "cancelled" ? "Cancelled" : "Running"}
                           </span>
                           {job.status === "running" && (
                             <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-500">

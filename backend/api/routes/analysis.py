@@ -166,6 +166,30 @@ async def stream(
     )
 
 
+@router.post("/{job_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel(
+    job_id: str,
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+):
+    """Request cancellation of a running analysis.
+
+    Cooperative: the pipeline runner stops at the next agent boundary (it can't
+    interrupt an agent mid-execution), then the job ends in the ``cancelled``
+    state and the SSE stream closes with a ``pipeline_cancelled`` event.
+    """
+    job = manager.get_job(job_id)
+    if job is None or job.user_id != user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown job_id: {job_id}")
+
+    if not manager.request_cancel(job_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": "This analysis isn't running.", "status": job.status},
+        )
+    return success({"job_id": job_id, "cancelling": True})
+
+
 @router.get("/{job_id}/result")
 async def result(
     job_id: str,

@@ -218,7 +218,7 @@ export default function useJobHistory() {
    */
   const removeAllJobs = useCallback(async () => {
     const snapshot = jobsRef.current;
-    const isFinished = (j) => j.status === "done" || j.status === "error";
+    const isFinished = (j) => j.status === "done" || j.status === "error" || j.status === "cancelled";
     const removedIds = snapshot.filter(isFinished).map((j) => j.id);
     removedIds.forEach((id) => deletedJobIds.add(id));
     setJobs((prev) => {

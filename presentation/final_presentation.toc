@@ -1,0 +1,22 @@
+\beamer@sectionintoc {1}{Outline}{2}{0}{1}
+\beamer@sectionintoc {2}{Motivation}{3}{0}{2}
+\beamer@sectionintoc {3}{Introduction}{4}{0}{3}
+\beamer@sectionintoc {4}{Problem Statement and Objectives}{5}{0}{4}
+\beamer@sectionintoc {5}{Scope of Project}{6}{0}{5}
+\beamer@sectionintoc {6}{Project Applications}{7}{0}{6}
+\beamer@sectionintoc {7}{Methodology}{8}{0}{7}
+\beamer@subsectionintoc {7}{1}{Methodology}{8}{0}{7}
+\beamer@subsectionintoc {7}{2}{Methodology}{9}{0}{7}
+\beamer@subsectionintoc {7}{3}{Methodology}{10}{0}{7}
+\beamer@subsectionintoc {7}{4}{Methodology}{11}{0}{7}
+\beamer@subsectionintoc {7}{5}{Methodology}{18}{0}{7}
+\beamer@sectionintoc {8}{Results}{19}{0}{8}
+\beamer@subsectionintoc {8}{1}{Experimental Setup}{19}{0}{8}
+\beamer@subsectionintoc {8}{2}{Pipeline Results}{20}{0}{8}
+\beamer@subsectionintoc {8}{3}{Statistical Results}{21}{0}{8}
+\beamer@subsectionintoc {8}{4}{Interface Results}{22}{0}{8}
+\beamer@subsectionintoc {8}{5}{RAG Evaluation}{25}{0}{8}
+\beamer@sectionintoc {9}{Analysis / Discussion of Results}{26}{0}{9}
+\beamer@sectionintoc {10}{Future Enhancements}{28}{0}{10}
+\beamer@sectionintoc {11}{Conclusion}{29}{0}{11}
+\beamer@sectionintoc {12}{References}{30}{0}{12}

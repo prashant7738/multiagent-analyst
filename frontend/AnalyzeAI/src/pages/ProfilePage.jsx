@@ -7,6 +7,26 @@ import useJobHistory from "@/hooks/useJobHistory";
 import { useAuth } from "@/contexts/AuthContext";
 import ApiKeysPanel from "@/components/ApiKeysPanel";
 
+// Mirrors the 6-agent pipeline in AnalyzePage.jsx — a running job may be
+// watched from here even though this page never opened its SSE stream.
+const AGENT_NAMES = [
+  "Structural profiling",
+  "Semantic tagging",
+  "Preprocessing",
+  "Statistics & visualization",
+  "Quality guardrail",
+  "Report assembly",
+];
+
+function progressLabel(progress) {
+  if (!progress || Object.keys(progress).length === 0) return "Starting…";
+  const completedCount = Object.values(progress).filter((s) => s === "completed").length;
+  const runningKey = Object.keys(progress).find((k) => progress[k] === "running");
+  const runningIdx = runningKey ? parseInt(runningKey.replace(/\D/g, ""), 10) : null;
+  const runningName = runningIdx ? AGENT_NAMES[runningIdx - 1] : null;
+  return `${runningName || "Finishing up"} · ${completedCount}/${AGENT_NAMES.length}`;
+}
+
 const TabNav = ({ tabs, activeTab, setActiveTab }) => {
   return (
     <div className="flex gap-8 border-b border-neutral-200 dark:border-neutral-800">
@@ -225,14 +245,21 @@ export default function ProfilePage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-3 ml-4">
-                            <div className={`text-xs font-medium px-2 py-1 rounded-sm ${
-                              job.status === "done"
-                                ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
-                                : job.status === "error"
-                                ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
-                                : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
-                            }`}>
-                              {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                            <div className="text-right">
+                              <div className={`text-xs font-medium px-2 py-1 rounded-sm ${
+                                job.status === "done"
+                                  ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-300"
+                                  : job.status === "error"
+                                  ? "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300"
+                                  : "bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+                              }`}>
+                                {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
+                              </div>
+                              {job.status === "running" && (
+                                <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-500">
+                                  {progressLabel(job.progress)}
+                                </p>
+                              )}
                             </div>
                             {job.status === "done" && (
                               <motion.button
@@ -298,6 +325,11 @@ export default function ProfilePage() {
                           }`}>
                             {job.status === "done" ? "Complete" : job.status === "error" ? "Failed" : "Running"}
                           </span>
+                          {job.status === "running" && (
+                            <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-500">
+                              {progressLabel(job.progress)}
+                            </p>
+                          )}
                         </div>
                         <div className="text-sm text-neutral-600 dark:text-neutral-400">
                           {job.confidence != null ? `${Math.round(job.confidence * 100)}%` : "—"}

@@ -237,37 +237,6 @@ export default function DatasetChat({ jobId }) {
       <AnimatePresence>
         {open && (
           <>
-            {/* Close Button - Simple Text */}
-            <motion.button
-              key="close-btn"
-              onClick={closePanel}
-              style={{
-                position: 'fixed',
-                top: '70px',
-                right: '20px',
-                zIndex: 99999,
-                width: '50px',
-                height: '50px',
-                borderRadius: '50%',
-                backgroundColor: '#f59e0b',
-                border: 'none',
-                color: 'white',
-                fontSize: '28px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              title="Close (Esc)"
-              type="button"
-            >
-              ✕
-            </motion.button>
-
             {/* Scrim (mobile only — the dock doesn't block the page on desktop) */}
             <motion.div
               key="scrim"

@@ -12,11 +12,53 @@ const StatusBadge = ({ status }) => {
     error: { bg: "bg-red-100 dark:bg-red-950", text: "text-red-700 dark:text-red-300", label: "Failed" },
     running: { bg: "bg-blue-100 dark:bg-blue-950", text: "text-blue-700 dark:text-blue-300", label: "Running" },
   };
-  const config = statusConfig[status] || statusConfig.done;
+  const config = statusConfig[status] || statusConfig.running;
 
   return (
     <div className={`inline-flex items-center px-2 py-1 rounded-sm text-xs font-medium ${config.bg} ${config.text}`}>
       {config.label}
+    </div>
+  );
+};
+
+// Mirrors the 6-agent pipeline in AnalyzePage.jsx — kept as plain names here
+// since a running job may be watched from a page that never opened its SSE
+// stream (e.g. History, reached straight from another tab).
+const AGENT_NAMES = [
+  "Structural profiling",
+  "Semantic tagging",
+  "Preprocessing",
+  "Statistics & visualization",
+  "Quality guardrail",
+  "Report assembly",
+];
+
+function summarizeProgress(progress) {
+  if (!progress || Object.keys(progress).length === 0) return null;
+  const completedCount = Object.values(progress).filter((s) => s === "completed").length;
+  const runningKey = Object.keys(progress).find((k) => progress[k] === "running");
+  const runningIdx = runningKey ? parseInt(runningKey.replace(/\D/g, ""), 10) : null;
+  const runningName = runningIdx ? AGENT_NAMES[runningIdx - 1] : null;
+  return { completedCount, total: AGENT_NAMES.length, runningName };
+}
+
+const RunningProgress = ({ progress }) => {
+  const summary = summarizeProgress(progress);
+  if (!summary) return <p className="mt-1 text-xs text-ink-muted">Starting…</p>;
+  const pct = Math.round((summary.completedCount / summary.total) * 100);
+  return (
+    <div className="mt-1.5 w-28">
+      <p className="truncate text-xs text-ink-muted" title={summary.runningName || undefined}>
+        {summary.runningName || "Finishing up…"} · {summary.completedCount}/{summary.total}
+      </p>
+      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-line">
+        <motion.div
+          className="h-full rounded-full bg-blue-500"
+          initial={false}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.4 }}
+        />
+      </div>
     </div>
   );
 };
@@ -223,6 +265,7 @@ export default function HistoryPage() {
                     </div>
                     <div>
                       <StatusBadge status={job.status} />
+                      {job.status === "running" && <RunningProgress progress={job.progress} />}
                     </div>
                     <div className="flex justify-end gap-2">
                       {job.status === "done" && (

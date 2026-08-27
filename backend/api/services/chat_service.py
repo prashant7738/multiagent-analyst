@@ -65,7 +65,7 @@ ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "box", "scatter"}
 # Data-query engine (see "6 - AD-HOC DATA QUERIES" below): a fixed whitelist of pandas
 # operations/filter operators the LLM can request by name. The LLM never supplies code -
 # only these validated parameters - so there's no eval/exec surface here.
-ALLOWED_QUERY_OPERATIONS = {"count", "sum", "mean", "median", "min", "max", "nunique"}
+ALLOWED_QUERY_OPERATIONS = {"count", "sum", "mean", "median", "min", "max", "nunique", "missing"}
 ALLOWED_QUERY_FILTER_OPS = {"==", "!=", ">", ">=", "<", "<=", "contains"}
 MAX_QUERY_FILTERS = 5
 MAX_QUERY_GROUP_RESULTS = 20
@@ -199,14 +199,17 @@ answer is complete or exhaustive beyond what is shown here - if the retrieved ro
 the specific record asked about, say honestly that it isn't among the indexed sample.
 
 IMPORTANT - before you say a precise number is unavailable, check this first: if the question \
-asks for a PRECISE count, sum, average, min/max, or a filtered/grouped aggregate that ISN'T \
-verbatim in the retrieved facts (e.g. "how many orders were cancelled", "average discount for \
-Electronics", "total revenue from UPI payments", "orders over 20% discount") - this is NOT a case \
-of "not enough information". Do NOT estimate it from the small row sample, and do NOT say it's \
-unavailable. Set "needs_data_query" to true and fill "data_query" using ONLY column names \
-mentioned in the retrieved documents; it will be computed exactly against the full dataset and \
-your answer will be regenerated with the real number afterward. Set "answer" to a brief holding \
-message like "Let me get the exact number for you." in this case.
+asks for a PRECISE count, sum, average, min/max, distinct count, count of missing/blank values, \
+or a filtered/grouped aggregate that ISN'T verbatim in the retrieved facts (e.g. "how many \
+orders were cancelled", "average discount for Electronics", "total revenue from UPI payments", \
+"orders over 20% discount", "how many rows are missing a region") - this is NOT a case of "not \
+enough information". Do NOT estimate it from the small row sample, and do NOT say it's \
+unavailable. Set "needs_data_query" to true and fill "data_query" using ONLY column names that \
+appear in the retrieved documents - the "All N queryable columns" overview fact lists every \
+column you may use, including derived ones like profit margin. It will be computed exactly \
+against the full cleaned dataset and your answer will be regenerated with the real number \
+afterward. Set "answer" to a brief holding message like "Let me get the exact number for you." \
+in this case.
 
 Example - question: "How many orders in the Electronics category had a discount over 20%?"
 {
@@ -246,8 +249,8 @@ Return ONLY a JSON object with exactly these keys:
   } or null,
   "needs_data_query": true or false,
   "data_query": {
-    "operation": "count" | "sum" | "mean" | "median" | "min" | "max" | "nunique",
-    "column": "column name to aggregate, or null for a plain row count",
+    "operation": "count" | "sum" | "mean" | "median" | "min" | "max" | "nunique" | "missing",
+    "column": "column name to aggregate (required for everything except a plain count); for 'missing' this is the column whose blank/NaN rows are counted",
     "filters": [{"column": "column name", "op": "==" | "!=" | ">" | ">=" | "<" | "<=" | "contains", "value": "..."}],
     "group_by": "column name for a per-group breakdown, or null for a single overall number"
   } or null
@@ -260,8 +263,12 @@ def _build_rag_user_content(retrieved: dict[str, Any], question: str, history: l
 
     facts = retrieved.get("facts") or []
     rows = retrieved.get("rows") or []
+    # Most facts are one short sentence; the column list and per-column value
+    # counts are the useful-when-long exceptions the data-query engine relies on.
+    _fact_budget = {"columns_overview": 1600, "category_distribution": 700}
     compact_facts = [
-        {"type": doc.get("doc_type"), "text": _truncate_text(doc.get("doc_text"), 320)}
+        {"type": doc.get("doc_type"),
+         "text": _truncate_text(doc.get("doc_text"), _fact_budget.get(doc.get("doc_type"), 320))}
         for doc in facts
         if doc.get("doc_text")
     ]
@@ -435,11 +442,38 @@ def _fallback_answer(context: dict[str, Any], question: str) -> dict[str, Any]:
             f"This dataset scored {dataset.get('quality_score')} on data quality, "
             f"with an overall pipeline confidence of {context.get('reliability', {}).get('overall_confidence')}."
         )
+    elif any(k in q for k in ("missing", "null", "blank", "empty", "incomplete", "gaps")):
+        stats = context.get("descriptive_stats") or {}
+        worst = sorted(
+            ((c, m.get("missing_pct")) for c, m in stats.items() if m.get("missing_pct")),
+            key=lambda kv: kv[1] or 0, reverse=True,
+        )[:3]
+        if worst:
+            lines = ", ".join(f"{c} ({pct}% missing)" for c, pct in worst)
+            answer = f"The columns with the most missing values are: {lines}."
+        else:
+            answer = (
+                f"Overall data quality is {dataset.get('quality_score')}; no numeric column stands "
+                "out as heavily incomplete. Ask for a specific column to get an exact count."
+            )
+    elif any(k in q for k in ("what column", "which column", "what field", "list column",
+                              "schema", "what data", "columns are")):
+        cols = context.get("available_columns") or {}
+        if cols:
+            listed = ", ".join(
+                f"{c} ({m.get('intended_type') or m.get('semantic_tag') or 'unknown'})"
+                for c, m in list(cols.items())[:40]
+            )
+            more = "" if len(cols) <= 40 else f" (+{len(cols) - 40} more)"
+            answer = f"This dataset has {len(cols)} columns: {listed}{more}."
+        else:
+            answer = f"This dataset has {dataset.get('columns')} columns."
     else:
         summary = context.get("executive_summary")
         answer = summary or (
             f"This dataset has {dataset.get('rows')} rows and {dataset.get('columns')} columns. "
-            "Ask me about correlations, trends, rankings, anomalies, or data quality for more detail."
+            "Ask me about correlations, trends, rankings, distributions, missing values, "
+            "anomalies, or data quality for more detail."
         )
 
     return {"answer": answer, "needs_new_chart": False, "chart_request": None, "source": "fallback"}
@@ -567,24 +601,52 @@ def render_chart_request(
 # ("how many orders were cancelled", "average discount for Electronics") - facts only
 # cover what Agents 1-6 already precomputed, and the row sample is too small and too
 # narrow (only ~30% of rows by default) to aggregate from reliably. This runs a real,
-# validated pandas query against the job's FULL original dataset instead.
+# validated pandas query against the FULL dataset instead.
 #
-# Reads job.csv_path (not Agent 3's cleaned export) for the same reason
-# rag_service.py's row embedding does: cleaned_csv_path is a single file shared across
-# EVERY job (see agent_3.py _export_cleaned_dataset), so relying on it here could
-# silently query a different job's data. This means only the dataset's ORIGINAL
-# columns are queryable, not Agent 3's derived/one-hot columns - a real limitation,
-# not an oversight, and one worth knowing about.
+# Source (see _load_job_dataframe): Agent 3's in-memory cleaned frame when it's
+# still resident — type-coerced, deduplicated, text-normalized, with derived
+# business-metric / date-part columns and scaled columns swapped back to their
+# raw values — otherwise a re-read of the per-job upload (job.csv_path, NOT the
+# shared cleaned_data.csv export, which agent_3._export_cleaned_dataset
+# overwrites for every job). Encoded one-hot/ordinal columns stay unqueryable
+# via the schema_blueprint analysis_allowed=False guard.
 
 _QUERY_DF_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}  # job_id -> (csv mtime, df)
+_QUERY_DF_CACHE_MAX = 4  # bound resident full DataFrames — one per recent chat session
 
 
 def _load_job_dataframe(job: "Job") -> pd.DataFrame | None:
-    """Load (and cache) the job's original per-job CSV for data queries.
+    """Return the DataFrame ad-hoc data queries run against.
 
-    Cached per job_id, invalidated by the file's mtime - cheap repeat questions in the
-    same chat session don't re-read the CSV from disk every time.
+    Prefers Agent 3's cleaned frame when it's still in memory: it has the
+    type-coerced values (so ``discount > 0.2`` actually compares numerically),
+    deduplicated rows (so counts match the analysis), normalized text (so
+    ``nunique`` isn't split by "Card"/"card"/" CARD "), and the derived
+    business-metric / date-part columns (so "average profit margin" is
+    answerable even when no literal margin column was uploaded).
+
+    Falls back to re-reading the original per-job upload — cached per job_id,
+    mtime-invalidated, and capped at ``_QUERY_DF_CACHE_MAX`` entries — for jobs
+    whose in-memory state is gone (e.g. after a process restart).
     """
+    state = getattr(job, "state", None) or {}
+    cleaned = state.get("cleaned_df")
+    if isinstance(cleaned, pd.DataFrame) and not cleaned.empty:
+        # Agent 3 overwrites scaling-allowed numeric columns in place with their
+        # 0-1 Min-Max values (keeping a "<col>_raw" backup). Swap those back so
+        # an aggregate like "average rating" returns the real number, not ~0.4.
+        scaling_params = state.get("scaling_params") or {}
+        restorable = {
+            col: p["raw_col"]
+            for col, p in scaling_params.items()
+            if isinstance(p, dict) and p.get("raw_col") in cleaned.columns and col in cleaned.columns
+        }
+        if restorable:
+            cleaned = cleaned.copy()
+            for col, raw_col in restorable.items():
+                cleaned[col] = cleaned[raw_col]
+        return cleaned
+
     if not job.csv_path or not os.path.exists(job.csv_path):
         return None
     mtime = os.path.getmtime(job.csv_path)
@@ -592,6 +654,8 @@ def _load_job_dataframe(job: "Job") -> pd.DataFrame | None:
     if cached is not None and cached[0] == mtime:
         return cached[1]
     df = pd.read_csv(job.csv_path, low_memory=False)
+    if len(_QUERY_DF_CACHE) >= _QUERY_DF_CACHE_MAX and job.job_id not in _QUERY_DF_CACHE:
+        _QUERY_DF_CACHE.pop(next(iter(_QUERY_DF_CACHE)))  # evict oldest (insertion order)
     _QUERY_DF_CACHE[job.job_id] = (mtime, df)
     return df
 
@@ -605,7 +669,9 @@ def _apply_query_filter(df: pd.DataFrame, column: str, op: str, value: Any) -> p
     and value both parse as numbers, case-insensitive text match otherwise."""
     series = df[column]
     if op == "contains":
-        return series.astype(str).str.contains(str(value), case=False, na=False)
+        # regex=False: treat the value as a literal substring. Without it "c."
+        # or "(" from the LLM would be interpreted as a regex (or raise).
+        return series.astype(str).str.contains(str(value), case=False, na=False, regex=False)
 
     numeric_series = _coerce_numeric(series)
     try:
@@ -639,11 +705,11 @@ def _apply_query_filter(df: pd.DataFrame, column: str, op: str, value: Any) -> p
 def run_data_query(job: "Job", schema_blueprint: dict, query: dict[str, Any]) -> tuple[bool, Any]:
     """Validate and execute a constrained aggregate query against the job's full dataset.
 
-    No arbitrary code execution: column names must exist in the schema blueprint AND the
-    actual CSV (rejecting Agent 3's derived-only columns); operations and filter operators
-    come from a fixed whitelist and are dispatched through explicit branches, never through
-    a dynamic eval of LLM-supplied text. The LLM only ever supplies these structured
-    parameters - never code.
+    No arbitrary code execution: column names must exist in the loaded DataFrame and pass
+    _column_usable (rejecting encoded one-hot/ordinal columns); operations and filter
+    operators come from a fixed whitelist and are dispatched through explicit branches,
+    never through a dynamic eval of LLM-supplied text. The LLM only ever supplies these
+    structured parameters - never code.
 
     Returns (True, result_dict) on success or (False, reason) on validation/execution failure.
     """
@@ -684,33 +750,45 @@ def run_data_query(job: "Job", schema_blueprint: dict, query: dict[str, Any]) ->
         working = working[mask]
         applied_filters.append(f"{fcol} {fop} {fval}")
 
+    total_groups = 0
     try:
         if group_by:
             if operation == "count":
                 series = working.groupby(group_by).size()
             elif operation == "nunique":
                 series = working.groupby(group_by)[column].nunique()
+            elif operation == "missing":
+                series = working[column].isna().groupby(working[group_by]).sum()
             else:
                 series = _coerce_numeric(working[column]).groupby(working[group_by]).agg(operation)
-            series = series.sort_values(ascending=False).head(MAX_QUERY_GROUP_RESULTS)
+            series = series.sort_values(ascending=False)
+            total_groups = int(series.shape[0])
+            series = series.head(MAX_QUERY_GROUP_RESULTS)
             result: Any = {str(k): v for k, v in series.items()}
         elif operation == "count":
             result = len(working)
         elif operation == "nunique":
             result = working[column].nunique()
+        elif operation == "missing":
+            result = int(working[column].isna().sum())
         else:
             result = getattr(_coerce_numeric(working[column]), operation)()
     except Exception as exc:  # noqa: BLE001 — a query must never crash the chat request
         return False, f"query execution failed ({exc})"
 
-    return True, json_safe({
+    payload = {
         "operation": operation,
         "column": column,
         "group_by": group_by,
         "filters_applied": applied_filters,
         "matched_rows": len(working),
         "result": result,
-    })
+    }
+    if group_by:
+        payload["groups_total"] = total_groups
+        payload["groups_shown"] = len(result)
+        payload["truncated"] = total_groups > len(result)
+    return True, json_safe(payload)
 
 
 DATA_QUERY_ANSWER_SYSTEM_PROMPT = """You are a data analyst. You previously requested a precise \
@@ -719,8 +797,10 @@ FULL dataset (not a sample). Write a short, conversational final answer using ON
 result plus the other retrieved facts already provided - do not invent, recompute, or \
 second-guess any number.
 
-If "group_by" is set on the computed result, "result" is a dict of {group value: aggregated \
-value} for the top groups only (sorted highest first) - say so if you're only showing part of it.
+If "group_by" is set, "result" is a dict of {group value: aggregated value}, sorted highest \
+first. When "truncated" is true it holds only "groups_shown" of "groups_total" groups - say \
+explicitly that it's the top N of M. If "operation" is "missing", the numbers are counts of \
+blank/NaN values.
 
 Return ONLY a JSON object with exactly this key:
 {"answer": "conversational final answer to the user's original question"}
@@ -794,11 +874,16 @@ def _apply_data_query(
     except Exception as exc:  # noqa: BLE001 — never hard-fail on the rephrasing call
         print(f"[Chat] Data query computed but rephrasing failed, using raw result: {exc}")
 
-    return (
-        answer + f"\n\n(Computed result: {result_or_reason.get('result')!r}, "
-        f"from {result_or_reason.get('matched_rows')} matching row(s).)",
-        source,
+    note = (
+        f"\n\n(Computed result: {result_or_reason.get('result')!r}, "
+        f"from {result_or_reason.get('matched_rows')} matching row(s)."
     )
+    if result_or_reason.get("truncated"):
+        note += (
+            f" Showing the top {result_or_reason.get('groups_shown')} of "
+            f"{result_or_reason.get('groups_total')} groups."
+        )
+    return answer + note + ")", source
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -862,6 +947,21 @@ def ask_question(manager: "JobManager", job: "Job", question: str) -> dict[str, 
         }
 
     if status == "building":
+        # A build whose worker thread died (host spun down mid-run) would sit in
+        # "building" forever. Reap it if it's been silent too long, then kick off
+        # a fresh one so this isn't a permanent dead end.
+        if manager.maybe_expire_rag_build(job.job_id):
+            rag_service.start_rag_build(manager, job)
+            return {
+                "answer": (
+                    "The previous indexing run stalled, so I've restarted it. "
+                    "Ask again in a few seconds."
+                ),
+                "source": "fallback",
+                "chart": None,
+                "chart_generated": False,
+                "index_status": "building",
+            }
         return {
             "answer": "Still indexing this dataset for detailed Q&A — try again in a few seconds.",
             "source": "fallback",

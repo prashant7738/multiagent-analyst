@@ -307,6 +307,30 @@ class JobManager:
         self._persist(job)
         return True
 
+    def maybe_expire_rag_build(self, job_id: str, timeout_seconds: int | None = None) -> bool:
+        """Reset a RAG build that's been stuck in "building" with no progress.
+
+        ``try_begin_rag_build`` only lets one build run at a time, so a build
+        whose thread died (host spun down mid-run, process killed) would leave
+        ``rag_status="building"`` forever and block every retry. Every progress
+        update bumps ``updated_at``; if it hasn't moved for ``timeout_seconds``
+        the build is presumed dead and flipped to "failed" so the next
+        ``start_rag_build`` can claim it. Returns True when a build was reaped.
+        """
+        if timeout_seconds is None:
+            timeout_seconds = get_settings().rag_build_timeout_seconds
+        job = self.get_job(job_id)
+        if job is None or job.rag_status != "building":
+            return False
+        age = (_utcnow() - job.updated_at).total_seconds()
+        if age < timeout_seconds:
+            return False
+        self.set_rag_status(
+            job_id, "failed",
+            error=f"index build timed out after {int(age)}s with no progress",
+        )
+        return True
+
     def set_rag_progress(
         self,
         job_id: str,

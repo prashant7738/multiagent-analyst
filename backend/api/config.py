@@ -115,6 +115,13 @@ class Settings:
         self.rag_embed_batch_size: int = _get_int("RAG_EMBED_BATCH_SIZE", 50)
         self.rag_top_k_rows: int = _get_int("RAG_TOP_K_ROWS", 8)
         self.rag_top_k_facts: int = _get_int("RAG_TOP_K_FACTS", 6)
+        # Rows per pandas chunk while reading + reservoir-sampling the upload for
+        # row embedding — caps peak memory regardless of total file size.
+        self.rag_read_chunk_rows: int = _get_int("RAG_READ_CHUNK_ROWS", 25000)
+        # A RAG build stuck in "building" with no progress for this long is
+        # treated as dead (e.g. the host spun the process down mid-build) and
+        # reset so the next chat turn can retry it.
+        self.rag_build_timeout_seconds: int = _get_int("RAG_BUILD_TIMEOUT_SECONDS", 900)
 
         # Filesystem layout (all absolute, derived from backend/).
         self.backend_dir: Path = BACKEND_DIR

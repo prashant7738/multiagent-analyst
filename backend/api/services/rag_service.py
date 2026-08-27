@@ -51,6 +51,7 @@ _MAX_EMBED_RETRIES = 4
 _MAX_BACKOFF_SECONDS = 90
 _ALWAYS_INCLUDE_FACT_TYPES = (
     "dataset_summary",
+    "columns_overview",
     "narrative_summary",
     "key_finding",
     "anomaly_summary",
@@ -61,9 +62,26 @@ _ALWAYS_INCLUDE_FACT_TYPES = (
     "ranking",
     "category_distribution",
 )
-# Raised from 60 when category_distribution docs joined the always-included set
-# (one per low-cardinality categorical column, typically a handful).
-_MAX_ALWAYS_INCLUDED_FACTS = 80
+# When the always-included set is larger than this it's truncated by
+# _ALWAYS_INCLUDE_PRIORITY (below), not arbitrarily by doc_type name. Raised
+# from 60 as columns_overview + category_distribution docs joined the set.
+_MAX_ALWAYS_INCLUDED_FACTS = 110
+# Lower number = kept first when the set overflows _MAX_ALWAYS_INCLUDED_FACTS.
+# Compact, high-value, bounded-count facts rank above the potentially-numerous
+# ones (correlations, per-column distributions) so they never get crowded out.
+_ALWAYS_INCLUDE_PRIORITY = {
+    "dataset_summary": 0,
+    "columns_overview": 1,
+    "quality_validation": 2,
+    "narrative_summary": 3,
+    "anomaly_summary": 4,
+    "existing_charts": 5,
+    "key_finding": 6,
+    "trend": 7,
+    "ranking": 8,
+    "category_distribution": 9,
+    "correlation": 10,
+}
 
 # BAAI/bge-* models are asymmetric: queries need this instruction prefix, documents don't.
 _HF_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
@@ -149,7 +167,32 @@ def _ensure_schema() -> None:
                         sql.Identifier(f"idx_{settings.rag_embeddings_table}_job_id"), _table()
                     )
                 )
+                # Composite (job_id, doc_type) — the always-included-facts query
+                # filters on exactly these two columns; keeps it index-only as the
+                # single shared table accumulates jobs.
+                cur.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} (job_id, doc_type);").format(
+                        sql.Identifier(f"idx_{settings.rag_embeddings_table}_job_doctype"), _table()
+                    )
+                )
                 print("[RAG] Index ensured")
+        # Best-effort ANN index for the vector <=> scans, in its OWN transaction
+        # so a failure (pgvector < 0.5, no hnsw) can't roll back the table above.
+        try:
+            with _connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL(
+                            "CREATE INDEX IF NOT EXISTS {} ON {} "
+                            "USING hnsw (embedding vector_cosine_ops);"
+                        ).format(
+                            sql.Identifier(f"idx_{settings.rag_embeddings_table}_embedding_hnsw"),
+                            _table(),
+                        )
+                    )
+            print("[RAG] HNSW vector index ensured")
+        except Exception as ann_exc:  # noqa: BLE001 — optional acceleration only
+            print(f"[RAG] HNSW index unavailable, using exact search ({ann_exc})")
         _SCHEMA_READY = True
         print("[RAG] Schema initialization complete")
     except Exception as e:
@@ -330,6 +373,39 @@ def _sample_rows(df: pd.DataFrame, cap: int) -> pd.DataFrame:
     return df.loc[sorted(guaranteed_indices)]
 
 
+def _read_and_sample_rows(csv_path: str, cap: int) -> tuple[pd.DataFrame, int]:
+    """Read the upload in chunks, keeping at most ``cap`` sampled rows in memory.
+
+    The previous implementation did ``pd.read_csv(whole_file)`` then sampled — so
+    peak RAM was the entire dataset regardless of ``RAG_MAX_ROWS``, and a large
+    upload could OOM a small instance before a single embedding ran. This bounds
+    the working set to roughly ``cap + one chunk``: each chunk is concatenated
+    onto the running sample and, once that exceeds the budget, re-sampled back
+    down to ``cap`` via the same stratified ``_sample_rows``. The DataFrame
+    index is rewritten to the true 0-based file row number (chunked reads
+    otherwise restart the index at 0 every chunk, so ``row_index`` would
+    collide across chunks).
+
+    Stratification is slightly weaker than a whole-file pass (each re-sample
+    only sees the rows still in the working set) but every low-cardinality
+    category still gets example rows, which is what row retrieval needs.
+    """
+    chunk_rows = max(1000, get_settings().rag_read_chunk_rows)
+    working: pd.DataFrame | None = None
+    total = 0
+    offset = 0
+    for chunk in pd.read_csv(csv_path, low_memory=False, chunksize=chunk_rows):
+        chunk.index = range(offset, offset + len(chunk))
+        offset += len(chunk)
+        total += len(chunk)
+        working = chunk if working is None else pd.concat([working, chunk])
+        if len(working) > cap + chunk_rows:
+            working = _sample_rows(working, cap)
+    if working is None or working.empty:
+        return pd.DataFrame(), total
+    return _sample_rows(working, cap), total
+
+
 def _facts_to_documents(context: dict[str, Any]) -> list[dict[str, Any]]:
     """Turn chat_service.build_dataset_context()'s output into granular embeddable docs."""
     docs: list[dict[str, Any]] = []
@@ -344,11 +420,44 @@ def _facts_to_documents(context: dict[str, Any]) -> list[dict[str, Any]]:
         "metadata": dataset,
     })
 
-    for col, meta in (context.get("available_columns") or {}).items():
+    schema_cols = context.get("available_columns") or {}
+
+    for col, meta in schema_cols.items():
         docs.append({
             "doc_type": "column_meta",
             "text": f"Column '{col}': type={meta.get('intended_type')}, semantic_tag={meta.get('semantic_tag')}.",
             "metadata": {"column": col, **meta},
+        })
+
+    # One always-included doc naming EVERY queryable column (schema columns plus
+    # Agent 3's derived numeric / categorical columns, which never get a
+    # column_meta entry). Without this the data-query engine can only reference
+    # columns that happen to land in the top-k vector-matched column_meta docs,
+    # so on a wide dataset it "can't find" the column the user asked about.
+    def _col_kind(name: str) -> str:
+        tag = (schema_cols.get(name) or {}).get("intended_type")
+        if tag:
+            return str(tag)
+        if name in (context.get("descriptive_stats") or {}):
+            return "numeric"
+        if name in (context.get("category_distributions") or {}):
+            return "categorical"
+        return "unknown"
+
+    all_cols = list(dict.fromkeys([
+        *schema_cols.keys(),
+        *(context.get("descriptive_stats") or {}).keys(),
+        *(context.get("category_distributions") or {}).keys(),
+    ]))
+    if all_cols:
+        shown_cols = all_cols[:120]
+        listed = ", ".join(f"{c}: {_col_kind(c)}" for c in shown_cols)
+        if len(all_cols) > len(shown_cols):
+            listed += f", + {len(all_cols) - len(shown_cols)} more"
+        docs.append({
+            "doc_type": "columns_overview",
+            "text": f"All {len(all_cols)} queryable columns (name: kind): {listed}.",
+            "metadata": {"columns": all_cols},
         })
 
     for col, metrics in (context.get("descriptive_stats") or {}).items():
@@ -490,12 +599,22 @@ def _insert_documents(job_id: str, docs: list[dict[str, Any]], vectors: list[lis
             )
 
 
+_PERSIST_BATCH_MIN = 200  # docs embedded + inserted per pass (>= rag_embed_batch_size)
+
+
 def build_rag_index(job: "Job") -> dict[str, int]:
     """Rebuild the embedding index for ``job`` from scratch. Returns row sampling info.
 
     Publishes live progress via ``JobManager.set_rag_progress`` (phase +
-    embedded/total counters) so the frontend can show an indicator. Storage
-    remains a single bulk insert at the end — progress never implies partial writes.
+    embedded/total counters) so the frontend can show an indicator.
+
+    Documents are embedded and inserted in bounded batches rather than
+    accumulating every vector in memory for one final bulk insert — that peak
+    (all row docs + all their float vectors + the stringified copy for the
+    INSERT, held simultaneously) was the main thing that OOM'd small instances.
+    A build that fails partway leaves partial rows, but ``retrieve`` only runs
+    once ``rag_status == "ready"`` and every build starts by deleting the job's
+    existing docs, so a retry is always clean.
     """
     _ensure_schema()
     _delete_job_docs(job.job_id)
@@ -521,9 +640,7 @@ def build_rag_index(job: "Job") -> dict[str, int]:
     total_rows = 0
     sampled_rows = 0
     if job.csv_path and os.path.exists(job.csv_path):
-        df = pd.read_csv(job.csv_path, low_memory=False)
-        total_rows = len(df)
-        sampled_df = _sample_rows(df, get_settings().rag_max_rows)
+        sampled_df, total_rows = _read_and_sample_rows(job.csv_path, get_settings().rag_max_rows)
         sampled_rows = len(sampled_df)
         for idx, row in sampled_df.iterrows():
             row_dict = row.where(pd.notna(row), None).to_dict()
@@ -534,25 +651,25 @@ def build_rag_index(job: "Job") -> dict[str, int]:
                 "metadata": json_safe(row_dict),
             })
 
-    all_docs = fact_docs + row_docs
+    all_docs = [d for d in (fact_docs + row_docs) if d["text"] and d["text"].strip()]
     if all_docs:
         total_docs = len(all_docs)
         print(f"[RAG] Embedding {total_docs} documents for job {job.job_id[:8]} "
               f"({sampled_rows}/{total_rows} rows + {len(fact_docs)} facts)")
         _report("embedding", embedded=0, total=total_docs)
 
-        def _on_batch(done: int, total: int) -> None:
-            print(f"[RAG] Embedded {done}/{total} documents ({done * 100 // max(total, 1)}%)")
-            _report("embedding", embedded=done, total=total)
-
-        vectors = embed_texts(
-            [d["text"] for d in all_docs],
-            task_type="RETRIEVAL_DOCUMENT",
-            progress_cb=_on_batch,
-        )
+        persist_batch = max(_PERSIST_BATCH_MIN, get_settings().rag_embed_batch_size)
+        embedded = 0
+        for start in range(0, total_docs, persist_batch):
+            part = all_docs[start:start + persist_batch]
+            vectors = embed_texts([d["text"] for d in part], task_type="RETRIEVAL_DOCUMENT")
+            _insert_documents(job.job_id, part, vectors)
+            embedded += len(part)
+            print(f"[RAG] Embedded + saved {embedded}/{total_docs} documents "
+                  f"({embedded * 100 // total_docs}%)")
+            _report("embedding", embedded=embedded, total=total_docs)
 
         _report("saving", embedded=total_docs, total=total_docs)
-        _insert_documents(job.job_id, all_docs, vectors)
 
     return {"total_rows": total_rows, "sampled_rows": sampled_rows}
 
@@ -612,12 +729,22 @@ def retrieve(job_id: str, question: str) -> dict[str, list[dict[str, Any]]]:
             )
             row_docs = cur.fetchall()
 
+            # Order by curated priority (not doc_type name) so that when a
+            # fact-rich dataset overflows the LIMIT, the compact high-value facts
+            # survive and only the long tail (extra correlations / distributions)
+            # is dropped.
+            priority_case = sql.SQL("CASE doc_type {} ELSE 99 END").format(
+                sql.SQL(" ").join(
+                    sql.SQL("WHEN {} THEN {}").format(sql.Literal(dt), sql.Literal(rank))
+                    for dt, rank in _ALWAYS_INCLUDE_PRIORITY.items()
+                )
+            )
             cur.execute(
                 sql.SQL(
                     "SELECT doc_type, doc_text, metadata, row_index FROM {} "
                     "WHERE job_id = %s AND doc_type = ANY(%s) "
-                    "ORDER BY doc_type, row_index NULLS FIRST LIMIT %s;"
-                ).format(_table()),
+                    "ORDER BY {}, row_index NULLS FIRST LIMIT %s;"
+                ).format(_table(), priority_case),
                 (job_id, list(_ALWAYS_INCLUDE_FACT_TYPES), _MAX_ALWAYS_INCLUDED_FACTS),
             )
             always_included_facts = cur.fetchall()

@@ -299,6 +299,87 @@ class TestChartRequestRendering(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class TestDataQueryImprovements(unittest.TestCase):
+    def _job(self, df, schema):
+        return Job(job_id="q1", state={"cleaned_df": df, "schema_blueprint": schema, "scaling_params": {}})
+
+    def test_uses_in_memory_cleaned_df_and_unscales(self):
+        df = pd.DataFrame({"rating": [0.0, 0.5, 1.0], "rating_raw": [1.0, 3.0, 5.0]})
+        job = Job(job_id="q2", state={
+            "cleaned_df": df,
+            "schema_blueprint": {"rating": {}},
+            "scaling_params": {"rating": {"min": 1.0, "max": 5.0, "raw_col": "rating_raw",
+                                          "scaled_col": "rating_scaled"}},
+        })
+        loaded = chat_service._load_job_dataframe(job)
+        self.assertEqual(list(loaded["rating"]), [1.0, 3.0, 5.0])  # raw, not 0-1
+
+    def test_missing_operation_counts_nulls(self):
+        df = pd.DataFrame({"region": ["North", None, "South", None, "East"]})
+        ok, out = chat_service.run_data_query(
+            self._job(df, {"region": {}}), {"region": {}},
+            {"operation": "missing", "column": "region"},
+        )
+        self.assertTrue(ok)
+        self.assertEqual(out["result"], 2)
+
+    def test_group_by_reports_truncation(self):
+        df = pd.DataFrame({"g": [str(i % 30) for i in range(300)], "v": range(300)})
+        ok, out = chat_service.run_data_query(
+            self._job(df, {"g": {}, "v": {}}), {"g": {}, "v": {}},
+            {"operation": "count", "group_by": "g"},
+        )
+        self.assertTrue(ok)
+        self.assertEqual(out["groups_total"], 30)
+        self.assertEqual(out["groups_shown"], chat_service.MAX_QUERY_GROUP_RESULTS)
+        self.assertTrue(out["truncated"])
+
+    def test_contains_filter_treats_value_as_literal_not_regex(self):
+        df = pd.DataFrame({"name": ["a(b)c", "abc", "xyz"]})
+        mask = chat_service._apply_query_filter(df, "name", "contains", "(b)")
+        self.assertEqual(list(mask), [True, False, False])
+
+
+class TestFallbackAnswerBranches(unittest.TestCase):
+    def test_missing_values_branch(self):
+        context = {
+            "dataset": {"rows": 100, "columns": 3, "quality_score": 80},
+            "descriptive_stats": {"a": {"missing_pct": 12.5}, "b": {"missing_pct": 0}},
+        }
+        out = chat_service._fallback_answer(context, "which columns have missing values?")
+        self.assertIn("a (12.5% missing)", out["answer"])
+
+    def test_columns_listing_branch(self):
+        context = {
+            "dataset": {"rows": 10, "columns": 2},
+            "available_columns": {"region": {"intended_type": "string"}, "revenue": {"intended_type": "float"}},
+        }
+        out = chat_service._fallback_answer(context, "what columns are in this dataset?")
+        self.assertIn("region", out["answer"])
+        self.assertIn("revenue", out["answer"])
+
+
+class TestRagBuildWatchdog(unittest.TestCase):
+    def test_stale_building_job_is_reaped(self):
+        from datetime import timedelta
+        from api.services.job_manager import _utcnow
+
+        manager = JobManager()
+        job = Job(job_id="stale", rag_status="building")
+        job.updated_at = _utcnow() - timedelta(seconds=5000)
+        manager._jobs[job.job_id] = job
+
+        self.assertTrue(manager.maybe_expire_rag_build("stale", timeout_seconds=900))
+        self.assertEqual(manager.get_job("stale").rag_status, "failed")
+
+    def test_fresh_building_job_is_left_alone(self):
+        manager = JobManager()
+        job = Job(job_id="fresh", rag_status="building")
+        manager._jobs[job.job_id] = job
+        self.assertFalse(manager.maybe_expire_rag_build("fresh", timeout_seconds=900))
+        self.assertEqual(manager.get_job("fresh").rag_status, "building")
+
+
 class TestJobManagerChatHistory(unittest.TestCase):
     def test_add_and_get_chat_messages(self):
         manager = JobManager()

@@ -202,11 +202,16 @@ def _check_database_health() -> str:
 
 
 @router.get("/health", response_model=HealthResponse)
+@router.head("/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     """Liveness probe for the API layer plus LLM connectivity and RAG infra checks.
 
     Provider checks are cached for _HEALTH_CACHE_TTL_SECONDS — this endpoint is polled
     every 30s by the frontend, and each check is now a real, quota-metered API call.
+
+    Also registered for HEAD (not just GET): uptime monitors (UptimeRobot, etc.) default
+    to HEAD requests, which FastAPI does not auto-derive from a GET-only route — without
+    this, every such monitor gets a 405 and never actually keeps the service warm.
     """
     groq_status = _cached_check("groq", _check_groq_health)
     gemini_status = _cached_check("gemini", _check_gemini_health)

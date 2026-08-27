@@ -17,8 +17,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# GraphState keys that must never be serialized directly (heavy / non-JSON).
-_EXCLUDED_STATE_KEYS = {"_df_cache", "cleaned_df"}
+# GraphState keys holding full pandas DataFrames — heavy, non-JSON, and safe to
+# drop once a job's pipeline run has finished (json_safe() already summarizes
+# any DataFrame it encounters regardless of key, so this isn't needed for
+# serialization correctness; pipeline_runner.py uses it to proactively release
+# the actual in-memory DataFrames from a completed Job's .state instead of
+# leaving multi-MB objects referenced for the process's whole lifetime).
+EXCLUDED_HEAVY_STATE_KEYS = {"_df_cache", "cleaned_df"}
 
 
 def json_safe(value: Any) -> Any:

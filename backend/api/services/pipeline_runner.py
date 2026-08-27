@@ -27,6 +27,7 @@ from api.config import get_settings
 from api.services.job_manager import JobManager
 from api.services.request_context import set_api_key_overrides
 from api.services.result_builder import build_result
+from api.utils.serialization import EXCLUDED_HEAVY_STATE_KEYS
 
 logger = logging.getLogger("api.pipeline_runner")
 
@@ -223,6 +224,16 @@ def _run(
             final_state = {**final_state, "report_generated_at": datetime.now(timezone.utc).isoformat()}
 
         result = build_result(job_id, final_state, manager.get_job(job_id).filename if manager.get_job(job_id) else None)
+
+        # Drop the raw/cleaned DataFrames now that build_result() has extracted
+        # everything it needs from them. Nothing downstream reads these back —
+        # RAG indexing re-reads job.csv_path from disk itself (see rag_service.py)
+        # — but JobManager keeps every Job (including .state) resident in memory
+        # for the life of the process, so leaving multi-MB DataFrames referenced
+        # there is a real contributor to hitting Render's 512MB free-tier cap,
+        # not a one-off spike.
+        final_state = {k: v for k, v in final_state.items() if k not in EXCLUDED_HEAVY_STATE_KEYS}
+
         manager.set_result(job_id, final_state, final_state.get("errors", []) or [], result=result)
         maybe_start_rag_build(manager, job_id, api_key_overrides=api_key_overrides)
 

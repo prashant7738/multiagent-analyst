@@ -264,9 +264,12 @@ export async function deleteApiKey(provider) {
 }
 
 /**
- * POST /api/settings/api-keys/test — try a candidate key against the real
- * provider without saving it. Returns { provider, status }.
+ * POST /api/health/test-llm — on-demand connectivity test.
+ * When a session token is attached, the backend tests the signed-in user's
+ * SAVED key per provider (falling back to the shared default where none is
+ * saved); anonymously it tests the shared defaults. Returns { llm, rag }.
  */
-export async function testApiKey(provider, apiKey) {
-  return authedPostJson("/api/settings/api-keys/test", { provider, api_key: apiKey });
+export async function testLlmConnections() {
+  const res = await authedFetch("/api/health/test-llm", { method: "POST" });
+  return parseJsonOrThrow(res);
 }

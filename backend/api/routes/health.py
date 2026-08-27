@@ -8,7 +8,8 @@ import logging
 from fastapi import APIRouter, Depends
 
 from api.config import Settings, get_settings
-from api.models.schemas import HealthResponse, LLMHealthStatus, RAGHealthStatus
+from api.models.schemas import AuthUser, HealthResponse, LLMHealthStatus, RAGHealthStatus
+from api.routes.auth import get_optional_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["health"])
@@ -229,25 +230,52 @@ async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     )
 
 
-@router.post("/health/test-llm", response_model=HealthResponse)
-async def test_llm(settings: Settings = Depends(get_settings)) -> HealthResponse:
-    """On-demand test of LLM connectivity and RAG infra (called manually from frontend button).
+def _saved_user_keys(settings: Settings, user: AuthUser | None) -> dict[str, str]:
+    """The signed-in user's saved provider keys, or {} for anon / no DB / error.
 
-    Always bypasses the passive-poll cache — a manual "Test Connections" click should
-    reflect the current state, not a stale cached one. The fresh results are written back
-    into the cache so the next passive poll doesn't immediately re-spend quota re-checking
-    what was just verified.
+    Keyed by the settings store's field names: groq_api_key, gemini_api_key, hf_token.
     """
-    logger.info("Running on-demand health tests...")
+    if user is None or not settings.database_url:
+        return {}
+    try:
+        from api.routes.settings import get_user_settings_store  # deferred: avoids import cycle
+
+        return {k: v for k, v in (get_user_settings_store(settings).get_keys(user.user_id) or {}).items() if v}
+    except Exception:  # noqa: BLE001 — fall back to shared/default keys
+        logger.info("test-llm: could not load saved keys for %s; testing shared defaults.", user.user_id)
+        return {}
+
+
+@router.post("/health/test-llm", response_model=HealthResponse)
+async def test_llm(
+    settings: Settings = Depends(get_settings),
+    user: AuthUser | None = Depends(get_optional_user),
+) -> HealthResponse:
+    """On-demand test of LLM connectivity and RAG infra (the "Test Connections" button).
+
+    Tests the *effective* key per provider: the signed-in caller's saved key when
+    they have one, otherwise the shared/default key — so this reflects exactly what
+    a real analysis or chat request for that user would use.
+
+    Always bypasses the passive-poll cache. The results are written back into that
+    cache only when they reflect the shared defaults (no per-user key was used) —
+    otherwise one user's key status would bleed into the public /api/health poll.
+    """
+    logger.info("Running on-demand health tests (user=%s)...", getattr(user, "user_id", None))
     now = time.monotonic()
-    groq_status = _check_groq_health()
-    gemini_status = _check_gemini_health()
-    hf_status = _check_huggingface_health()
+    saved = _saved_user_keys(settings, user)
+
+    groq_status = _check_groq_health(saved.get("groq_api_key"))
+    gemini_status = _check_gemini_health(saved.get("gemini_api_key"))
+    hf_status = _check_huggingface_health(saved.get("hf_token"))
     db_status = _check_database_health()
-    _health_cache["groq"] = (now, groq_status)
-    _health_cache["gemini"] = (now, gemini_status)
-    _health_cache["huggingface"] = (now, hf_status)
+
+    if not saved:  # only cache when we tested the shared defaults
+        _health_cache["groq"] = (now, groq_status)
+        _health_cache["gemini"] = (now, gemini_status)
+        _health_cache["huggingface"] = (now, hf_status)
     _health_cache["database"] = (now, db_status)
+
     logger.info(
         f"Health test results: Groq={groq_status}, Gemini={gemini_status}, "
         f"HuggingFace={hf_status}, Database={db_status}"

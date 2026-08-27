@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
-import { fetchApiKeysStatus, saveApiKeys, deleteApiKey, testApiKey } from "@/lib/api";
+import { Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { fetchApiKeysStatus, saveApiKeys, deleteApiKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const PROVIDERS = [
@@ -28,66 +28,19 @@ const PROVIDERS = [
   },
 ];
 
-const TEST_LABELS = {
-  healthy: { text: "Working", tone: "good" },
-  invalid_key: { text: "Invalid key", tone: "bad" },
-  unauthorized: { text: "Unauthorized", tone: "bad" },
-  quota_exceeded: { text: "Quota exceeded", tone: "warn" },
-  model_unavailable: { text: "Model unavailable", tone: "warn" },
-  not_configured: { text: "No key entered", tone: "warn" },
-  unreachable: { text: "Unreachable", tone: "bad" },
-};
-
-function ResultBadge({ result }) {
-  if (!result) return null;
-  if (result === "testing") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Testing…
-      </span>
-    );
-  }
-  const meta = TEST_LABELS[result] || { text: result, tone: "warn" };
-  const toneClasses = {
-    good: "text-green-700 dark:text-green-400",
-    bad: "text-red-700 dark:text-red-400",
-    warn: "text-amber-700 dark:text-amber-500",
-  }[meta.tone];
-  const Icon = meta.tone === "good" ? CheckCircle2 : meta.tone === "bad" ? XCircle : AlertTriangle;
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${toneClasses}`}>
-      <Icon className="w-3.5 h-3.5" /> {meta.text}
-    </span>
-  );
-}
-
 function ProviderRow({ config, status, onChanged }) {
   const [value, setValue] = useState("");
   const [showValue, setShowValue] = useState(false);
-  const [testResult, setTestResult] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // null → derive from server state; otherwise the user's explicit pick for this row.
-  // Reset to null after every save/clear so it re-syncs with the reloaded status.
+  // null → derive from server state; otherwise the user's explicit pick for this
+  // row. Reset to null after every save/clear so it re-syncs with the reload.
   const [modeOverride, setModeOverride] = useState(null);
   const mode = modeOverride ?? (status?.configured ? "own" : "default");
 
   const handleChanged = () => {
     setModeOverride(null);
     onChanged();
-  };
-
-  const handleTest = async () => {
-    if (!value.trim()) return;
-    setTestResult("testing");
-    setError("");
-    try {
-      const res = await testApiKey(config.provider, value.trim());
-      setTestResult(res.status);
-    } catch (err) {
-      setTestResult(null);
-      setError(err.message || "Test failed");
-    }
   };
 
   const handleSave = async () => {
@@ -97,7 +50,6 @@ function ProviderRow({ config, status, onChanged }) {
     try {
       await saveApiKeys({ [config.field]: value.trim() });
       setValue("");
-      setTestResult(null);
       handleChanged();
     } catch (err) {
       setError(err.message || "Save failed");
@@ -114,7 +66,6 @@ function ProviderRow({ config, status, onChanged }) {
   const selectDefault = async () => {
     setError("");
     setValue("");
-    setTestResult(null);
     setModeOverride("default");
     if (!status?.configured) return;
     // A saved key exists — switching to "shared default" means deleting it.
@@ -186,13 +137,16 @@ function ProviderRow({ config, status, onChanged }) {
               <input
                 type={showValue ? "text" : "password"}
                 value={value}
-                onChange={(e) => { setValue(e.target.value); setTestResult(null); }}
+                onChange={(e) => setValue(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
                 placeholder={status?.configured ? "Enter a new key to replace it…" : config.placeholder}
-                className="w-full pl-3 pr-10 py-2.5 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-sm text-sm focus:outline-none focus:border-amber-700 dark:focus:border-amber-600"
+                className="w-full pl-3 pr-10 py-2.5 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-sm text-sm font-mono focus:outline-none focus:border-amber-700 dark:focus:border-amber-600"
               />
               <button
                 type="button"
                 onClick={() => setShowValue((v) => !v)}
+                aria-label={showValue ? "Hide key" : "Show key"}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
                 tabIndex={-1}
               >
@@ -204,32 +158,17 @@ function ProviderRow({ config, status, onChanged }) {
               type="button"
               whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
-              onClick={handleTest}
-              disabled={!value.trim() || testResult === "testing"}
-              className="px-3 py-2.5 border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Test
-            </motion.button>
-
-            <motion.button
-              type="button"
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.98 }}
               onClick={handleSave}
               disabled={!value.trim() || saving}
               className="px-4 py-2.5 bg-amber-700 hover:bg-amber-800 text-white text-sm font-medium rounded-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save
+              {saving ? "Saving…" : status?.configured ? "Replace" : "Save"}
             </motion.button>
           </div>
 
-          <div className="mt-2 min-h-[1.25rem]">
-            {error ? (
-              <span className="text-xs text-red-700 dark:text-red-400">{error}</span>
-            ) : (
-              <ResultBadge result={testResult} />
-            )}
-          </div>
+          {error && (
+            <p className="mt-2 text-xs text-red-700 dark:text-red-400">{error}</p>
+          )}
         </>
       )}
     </div>
@@ -260,10 +199,17 @@ export default function ApiKeysPanel() {
   return (
     <div className="mt-6">
       <h3 className="text-lg font-serif font-bold mb-2">Your Own API Keys</h3>
-      <p className="text-neutral-600 dark:text-neutral-400 text-sm mb-6">
-        If analysis or report generation isn't working — the shared key may be out of quota or
-        revoked. Add your own key below and it's used for your analyses, chat, and reports
-        instead. Keys are encrypted at rest and never shown again once saved.
+      <p className="text-neutral-600 dark:text-neutral-400 text-sm mb-2">
+        If analysis, chat, or report generation isn't working, the shared key may be out
+        of quota or revoked. Choose <span className="font-medium">Shared default</span> or
+        save <span className="font-medium">your own key</span> per provider — a saved key
+        is used for all of your analyses, chat, and reports. Keys are encrypted at rest and
+        never shown again once saved.
+      </p>
+      <p className="text-neutral-500 dark:text-neutral-500 text-xs mb-6">
+        To check whether a key actually works, use <span className="font-medium">Test
+        Connections</span> in the LLM&nbsp;Status menu (top of the page) — it tests
+        whichever key is in effect for you.
       </p>
 
       {loading ? (

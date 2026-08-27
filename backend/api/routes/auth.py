@@ -53,6 +53,40 @@ async def get_current_user(
     return AuthUser(**user)
 
 
+async def get_optional_user(
+    authorization: str | None = Header(default=None),
+    token: str | None = Query(default=None),
+    settings: Settings = Depends(get_settings),
+) -> AuthUser | None:
+    """Identify the caller when possible, but never 401.
+
+    For endpoints that work anonymously and only *personalize* when a valid
+    session is present (e.g. the manual LLM connectivity test, which should
+    check the signed-in user's saved keys rather than only the shared ones).
+    Any failure — no DB, missing/bad token, store error — resolves to ``None``.
+    """
+    if not settings.database_url:
+        return None
+    raw = None
+    if authorization and authorization.lower().startswith("bearer "):
+        raw = authorization[7:].strip()
+    if not raw and token:
+        raw = token.strip()
+    if not raw:
+        return None
+    try:
+        store = PostgresAuthStore(
+            settings.database_url,
+            schema=settings.postgres_schema,
+            table=settings.postgres_users_table,
+            sessions_table=settings.postgres_sessions_table,
+        )
+        user = store.get_user_by_token(raw)
+    except Exception:  # noqa: BLE001 — anonymous is always an acceptable fallback here
+        return None
+    return AuthUser(**user) if user else None
+
+
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def signup(payload: AuthSignupRequest, store: PostgresAuthStore = Depends(get_auth_store)) -> AuthResponse:
     try:

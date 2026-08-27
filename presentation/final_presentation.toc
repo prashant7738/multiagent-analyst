@@ -15,8 +15,8 @@
 \beamer@subsectionintoc {8}{2}{Pipeline Results}{20}{0}{8}
 \beamer@subsectionintoc {8}{3}{Statistical Results}{21}{0}{8}
 \beamer@subsectionintoc {8}{4}{Interface Results}{22}{0}{8}
-\beamer@subsectionintoc {8}{5}{RAG Evaluation}{25}{0}{8}
-\beamer@sectionintoc {9}{Analysis / Discussion of Results}{26}{0}{9}
-\beamer@sectionintoc {10}{Future Enhancements}{28}{0}{10}
-\beamer@sectionintoc {11}{Conclusion}{29}{0}{11}
-\beamer@sectionintoc {12}{References}{30}{0}{12}
+\beamer@subsectionintoc {8}{5}{RAG Evaluation}{28}{0}{8}
+\beamer@sectionintoc {9}{Analysis / Discussion of Results}{29}{0}{9}
+\beamer@sectionintoc {10}{Future Enhancements}{31}{0}{10}
+\beamer@sectionintoc {11}{Conclusion}{32}{0}{11}
+\beamer@sectionintoc {12}{References}{33}{0}{12}

@@ -40,6 +40,15 @@ let jobsCache = null; // resets on a full page reload, survives SPA navigation
 let fastPollStartedAt = null; // when continuous "running" polling began, module-level so
 // navigating away and back doesn't hand a stuck job a fresh 5-minute fast-poll budget
 
+// Job ids the user just deleted, client-side. The background poll can have a
+// GET /api/jobs already in flight when a delete happens — if that response
+// was fetched before the server processed the delete, it still lists the job
+// and would otherwise silently repopulate it a moment after the optimistic
+// removal. Every poll tick filters this out, so a deleted job can never come
+// back without a real reload — job ids are unique per job, so this is safe to
+// keep for the whole session (no risk of filtering out a genuinely new job).
+const deletedJobIds = new Set();
+
 function normalizeStatus(status) {
   if (status === "completed") return "done";
   if (status === "failed" || status === "error") return "error";
@@ -113,14 +122,16 @@ export default function useJobHistory() {
         if (cancelled) return;
 
         const prevById = new Map(jobsRef.current.map((j) => [j.id, j]));
-        const nextJobs = rawJobs.map((job) => {
-          const fresh = toRow(job);
-          const prev = prevById.get(fresh.id);
-          // Keep already-fetched enrichment (rows/cols/quality/...); refresh live fields.
-          return prev
-            ? { ...prev, status: fresh.status, progress: fresh.progress, duration: fresh.duration }
-            : fresh;
-        });
+        const nextJobs = rawJobs
+          .filter((job) => !deletedJobIds.has(job.job_id))
+          .map((job) => {
+            const fresh = toRow(job);
+            const prev = prevById.get(fresh.id);
+            // Keep already-fetched enrichment (rows/cols/quality/...); refresh live fields.
+            return prev
+              ? { ...prev, status: fresh.status, progress: fresh.progress, duration: fresh.duration }
+              : fresh;
+          });
         setJobs(nextJobs);
         jobsCache = nextJobs;
         jobsRef.current = nextJobs;
@@ -171,6 +182,7 @@ export default function useJobHistory() {
    */
   const removeJob = useCallback(async (jobId) => {
     const snapshot = jobsRef.current.find((j) => j.id === jobId);
+    deletedJobIds.add(jobId);
     setDeletingIds((prev) => new Set(prev).add(jobId));
     setJobs((prev) => {
       const next = prev.filter((j) => j.id !== jobId);
@@ -181,6 +193,7 @@ export default function useJobHistory() {
       await deleteJob(jobId);
       setError(null);
     } catch (err) {
+      deletedJobIds.delete(jobId); // delete failed — it's still real, let polling see it again
       if (snapshot) {
         setJobs((prev) => {
           const next = [...prev, snapshot];
@@ -206,6 +219,8 @@ export default function useJobHistory() {
   const removeAllJobs = useCallback(async () => {
     const snapshot = jobsRef.current;
     const isFinished = (j) => j.status === "done" || j.status === "error";
+    const removedIds = snapshot.filter(isFinished).map((j) => j.id);
+    removedIds.forEach((id) => deletedJobIds.add(id));
     setJobs((prev) => {
       const next = prev.filter((j) => !isFinished(j));
       jobsCache = next;
@@ -217,6 +232,7 @@ export default function useJobHistory() {
       setError(null);
       return out;
     } catch (err) {
+      removedIds.forEach((id) => deletedJobIds.delete(id)); // failed — they're still real
       setJobs(snapshot);
       jobsCache = snapshot;
       setError(err.message || "Failed to clear history.");

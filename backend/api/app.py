@@ -23,6 +23,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# matplotlib.category logs an INFO line every time a chart is given category
+# labels that happen to be numeric-looking strings (year/month/code columns).
+# Categorical treatment is intentional for our distribution/ranking bars, so
+# this is pure noise — drop it below INFO.
+logging.getLogger("matplotlib.category").setLevel(logging.WARNING)
 logger = logging.getLogger("api.app")
 
 

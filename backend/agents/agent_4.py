@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import logging
 import warnings
 from contextvars import ContextVar
 import numpy as np
@@ -17,6 +18,10 @@ from main import update_reliability
 from agents.report_style import safe_filename_component
 
 warnings.filterwarnings("ignore")
+# Category bar charts intentionally pass numeric-looking strings (years, codes)
+# as discrete labels; matplotlib.category logs an INFO line each time. Mute it
+# here too so standalone/CLI pipeline runs aren't noisy either.
+logging.getLogger("matplotlib.category").setLevel(logging.WARNING)
 
 CHARTS_DIR = "outputs/charts"
 os.makedirs(CHARTS_DIR, exist_ok=True)

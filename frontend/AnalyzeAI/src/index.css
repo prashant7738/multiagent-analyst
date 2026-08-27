@@ -166,6 +166,18 @@ html.theme-light {
     border-radius: 2px;
   }
 
+  /* Tailwind v4 Preflight no longer forces cursor:pointer on buttons — restore
+     it for every enabled interactive control so clickable things feel clickable. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
   /* Tabular numbers wherever data is compared */
   .tnum {
     font-variant-numeric: tabular-nums;

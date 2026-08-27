@@ -107,7 +107,9 @@ export default function LandingPage() {
             <motion.button
               whileHover={{ y: -2 }}
               whileTap={{ scale: 0.98 }}
-              onClick={() => navigate("/login")}
+              onClick={() =>
+                document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })
+              }
               className="px-8 py-3 border border-line text-ink hover:bg-raised font-medium text-base transition-all"
             >
               Learn More
@@ -138,7 +140,7 @@ export default function LandingPage() {
       </section>
 
       {/* ─── HOW IT WORKS ─── */}
-      <section className="py-24 px-4 md:px-8 border-t border-line">
+      <section id="how-it-works" className="scroll-mt-24 py-24 px-4 md:px-8 border-t border-line">
         <div className="max-w-5xl mx-auto w-full">
           <motion.h2
             initial={{ opacity: 0, y: 20 }}

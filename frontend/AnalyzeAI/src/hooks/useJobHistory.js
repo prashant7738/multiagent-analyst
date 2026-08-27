@@ -17,17 +17,28 @@ import { fetchJobs, fetchJobResult, deleteJob, deleteAllJobs } from "@/lib/api";
  *    GET /api/jobs on a short interval so an analysis started on another page
  *    (or by a previous visit) keeps updating here too — not just on the page
  *    that opened the SSE stream. `job.progress` (agent -> status) rides along
- *    for the UI to render "3 of 6 agents done" style progress.
+ *    for the UI to render "3 of 6 agents done" style progress. After 5
+ *    minutes of continuous "running" (a real analysis finishes well before
+ *    that), polling backs off to a slow interval instead of continuing to
+ *    hammer the backend for what's almost certainly an orphaned job.
  *  - A module-level cache: the last-fetched list survives navigating away and
  *    back (same SPA session) so the page renders instantly from cache instead
  *    of a blank "Loading…" every time, while a fresh fetch quietly runs in
  *    the background to catch anything that changed.
  */
 const CONCURRENCY = 6;
-const POLL_INTERVAL_MS = 3000;
+const FAST_POLL_MS = 3000;
+const SLOW_POLL_MS = 20000;
+// A normal analysis finishes in well under this. Past it, a "running" job is
+// almost certainly orphaned (e.g. killed mid-run by a backend redeploy/restart)
+// rather than genuinely still working — keep checking in case it does finish,
+// but stop hammering the backend every 3s indefinitely for a job that's dead.
+const FAST_POLL_BUDGET_MS = 5 * 60 * 1000;
 const RUNNING_STATUSES = new Set(["processing", "queued", "running"]);
 
 let jobsCache = null; // resets on a full page reload, survives SPA navigation
+let fastPollStartedAt = null; // when continuous "running" polling began, module-level so
+// navigating away and back doesn't hand a stuck job a fresh 5-minute fast-poll budget
 
 function normalizeStatus(status) {
   if (status === "completed") return "done";
@@ -130,8 +141,14 @@ export default function useJobHistory() {
           if (!cancelled && anyFailed) setPartial(true);
         }
 
-        if (!cancelled && nextJobs.some((j) => RUNNING_STATUSES.has(j.status))) {
-          pollTimer = setTimeout(() => tick(false), POLL_INTERVAL_MS);
+        const stillRunning = nextJobs.some((j) => RUNNING_STATUSES.has(j.status));
+        if (!cancelled && stillRunning) {
+          if (fastPollStartedAt == null) fastPollStartedAt = Date.now();
+          const elapsed = Date.now() - fastPollStartedAt;
+          const nextInterval = elapsed > FAST_POLL_BUDGET_MS ? SLOW_POLL_MS : FAST_POLL_MS;
+          pollTimer = setTimeout(() => tick(false), nextInterval);
+        } else {
+          fastPollStartedAt = null; // clean run — a future new job gets a fresh fast-poll budget
         }
       } catch (err) {
         if (!cancelled && isFirst) setError(err.message || "Failed to load history from the backend.");

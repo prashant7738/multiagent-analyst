@@ -248,10 +248,12 @@
 We declare that the project report entitled \textbf{``Multi-Agent Data Analysis and Insight Generation Platform for Financial and Sales Data''}, submitted to the \textbf{Department of Electronics and Computer Engineering, IOE, Thapathali Campus} in partial fulfillment of the requirements for the Bachelor of Engineering degree in \textbf{Computer Engineering}, is a bonafide record of our work. The material in this report has not been submitted to any university or institution for the award of any degree, and no sources other than those listed here have been used.
 
 \vspace{2em}
-\noindent Prashant Kafle (THA080BCT026)\\
-Roshan Poudel (THA080BCT036)\\
-Santosh Khadka (THA080BCT039)\\
-Sushil Bhatta (THA080BCT048)
+\noindent\begin{tabular}{@{}p{0.55\textwidth}@{}p{0.4\textwidth}@{}}
+Prashant Kafle (THA080BCT026) & \rule{5cm}{0.4pt} \\[1.2em]
+Roshan Poudel (THA080BCT036) & \rule{5cm}{0.4pt} \\[1.2em]
+Santosh Khadka (THA080BCT039) & \rule{5cm}{0.4pt} \\[1.2em]
+Sushil Bhatta (THA080BCT048) & \rule{5cm}{0.4pt} \\
+\end{tabular}
 
 \vspace{1em}
 \noindent \textbf{Date:} August, 2026
@@ -268,22 +270,25 @@ The undersigned certify that they have read and recommended to the \textbf{Depar
 We found the students hardworking and skilled, and we recommend the acceptance of this work for partial fulfillment of the Bachelor's Degree in Computer Engineering.
 
 \vspace{2em}
-\noindent Project Supervisor\\
+\noindent\rule{5cm}{0.4pt}\\
+Project Supervisor\\
 Er. Rajad Shakya\\
 Department of Electronics and Computer Engineering, Thapathali Campus
 
 \vspace{1em}
-\noindent External Examiner\\
-\rule{5cm}{0.4pt}
+\noindent\rule{5cm}{0.4pt}\\
+External Examiner\\
 
 \vspace{1em}
-\noindent Project Co-ordinator\\
+\noindent\rule{5cm}{0.4pt}\\
+Project Co-ordinator\\
 Asst. Prof. Anup Shrestha\\
 Department of Electronics and Computer Engineering, Thapathali Campus
 
 \vspace{1em}
-\noindent Head of the Department\\
-\rule{5cm}{0.4pt}\\
+\noindent\rule{5cm}{0.4pt}\\
+Head of the Department\\
+Er. Umesh Kanta Ghimire\\
 Department of Electronics and Computer Engineering, Thapathali Campus
 
 \vspace{1em}
@@ -301,286 +306,6 @@ The author agrees that the library of the Department of Electronics and Computer
 Requests for permission to copy or use this project material, in whole or in part, should be addressed to the Department of Electronics and Computer Engineering, IOE, Thapathali Campus.
 
 \clearpage
-
-
-
-
-% ============================================================================
-% CHAPTER 1: SYSTEM ARCHITECTURE
-% ============================================================================
-\chapter{SYSTEM ARCHITECTURE}
-\label{ch:architecture}
-
-\section{Overview}
-
-The Multi-Agent Data Analysis and Insight Generation Platform operates as a sequential pipeline of six specialized agents. Each agent processes data through a shared state object called GraphState, which maintains all intermediate results and metadata. This design allows agents to operate independently while sharing computed facts, enabling modularity and fault isolation.
-
-\section{Data Flow and Shared State}
-
-Agent 1 begins with raw CSV data. It profiles column distributions, detects implicit missing values encoded as sentinels, and identifies column relationships. The structural profile and cached DataFrame pass to Agent 2. Agent 2 infers semantic meaning for each column using heuristics and optional LLM consultation, producing a schema blueprint with confidence scores. Agent 3 cleans the data according to the schema: it handles missing values, detects and clips outliers, derives business metrics, and logs every transformation. Agent 4 analyzes the cleaned data statistically and generates chart specifications. Agent 5 validates data integrity against business rules and computes quality metrics. Agent 6 combines all prior results into a final report with LLM-generated narrative and visual insights.
-
-All agents operate deterministically except where LLM calls introduce stochasticity. A streaming progress API allows real-time monitoring of pipeline execution.
-
-% ============================================================================
-% CHAPTER 2: AGENT IMPLEMENTATIONS
-% ============================================================================
-\chapter{AGENT IMPLEMENTATIONS}
-\label{ch:agents}
-
-\section{Agent 1: Data Profiling}
-
-Agent 1 ingests raw CSV files and produces a structural understanding of the dataset.
-
-\subsection{Distribution Analysis}
-
-Agent 1 classifies numeric columns by computing skewness and kurtosis. Right-skewed columns have positive skewness greater than 1. Normal columns satisfy both $|\text{skewness}| \leq 0.5$ and $|\text{kurtosis}| \leq 1$. All others are symmetric. This classification drives downstream outlier-clipping strategy: percentile bounds for skewed data, IQR $1.5\times$ for normal data.
-
-\subsection{Implicit Missingness Detection}
-
-Some datasets encode missing values as special numbers or strings. Numeric columns are checked against common sentinels: -999, -9999, -99, -1, 999, and others. Text fields match patterns like ``n/a'', ``none'', ``missing'', ``\#n/a''. Agent 1 flags these per-column with affected row counts. This catches quality issues that simple null checks miss, especially in financial data where -999 is standard practice.
-
-\subsection{Column Relationships}
-
-Agent 1 identifies potential primary keys (entirely unique columns), duplicate column pairs (identical data under different names), and strong correlations ($|r| \geq 0.5$). These relationships reveal schema structure and redundant columns.
-
-\section{Agent 2: Schema and LLM Reliability}
-
-Agent 2 infers semantic meaning for each column and handles LLM communication reliably.
-
-\subsection{LLM Failover Strategy}
-
-Agent 2 tries Groq API first, then Gemini. For Gemini, users supply multiple API keys via environment variables: \texttt{GEMINI\_API\_KEYS} (comma/space/semicolon-separated list), or \texttt{GEMINI\_API\_KEY\_1} through \texttt{GEMINI\_API\_KEY\_5}. When one key hits quota, the system rotates to the next without retry backoff. This avoids HTTP 429 rate-limit cascades.
-
-\subsection{Schema Confidence Scores}
-
-Each semantic tag receives a confidence score (0--100) based on whether the LLM tag matches the heuristic type detector, accounting for dtype, sample values, and missing rates. Low-confidence tags flag columns needing human review.
-
-\subsection{LLM Batching for Wide Schemas}
-
-Datasets with 100+ columns are split into batches to avoid token-limit truncation. If an LLM response truncates or fails to parse, the batch size halves recursively. This handles wide datasets without manual column exclusion.
-
-\section{Agent 3: Data Cleaning}
-
-Agent 3 cleans and transforms the data according to the schema.
-
-\subsection{Adaptive Outlier Clipping}
-
-Clipping strategy depends on distribution shape. Right-skewed columns use percentile bounds (5th to 95th). Normal columns use $1.5\times$ IQR. This avoids over-clipping rare-but-real values in skewed data while still catching true outliers. Bounds are logged for audit.
-
-\subsection{Business Metrics Derivation}
-
-When revenue, cost, quantity, or price columns are detected, Agent 3 automatically computes profit (revenue $-$ cost), margin (profit $\div$ revenue), discount (listed-price $-$ sale-price), and per-unit revenue. Column name matching uses whole-word logic to avoid false matches.
-
-\subsection{Preprocessing Profiles}
-
-Users select strictness at runtime: strict (tighter thresholds, max currency 1.1B), balanced (default), or lenient (looser thresholds, max currency 10B). The system detects whether the dataset is financial or generic and suggests a profile, but users override as needed. Reconciliation tolerance also changes per profile (1\%, 2\%, 5\%).
-
-\subsection{Column Ledger}
-
-Every transformation logs before/after null counts, parse failure rates, range-check failures, clipping bounds, and notes. This audit trail shows where data quality degrades and makes results reproducible.
-
-\subsection{Row Safety Checks}
-
-Deduplication and filtering include safeguards. If a single step removes more than 50\% of rows, the pipeline stops with a diagnostic message, preventing silent data loss from bugs.
-
-\section{Agent 4: Statistical Analysis and Chart Planning}
-
-Agent 4 analyzes the cleaned data and generates visualization specifications.
-
-\subsection{Statistical Chart Selection}
-
-Agent 4 does not use keyword lists. Instead, it scores eight chart families on statistical strength:
-
-\begin{itemize}
-	\item \textbf{Dimension ranking}: ANOVA $\eta^2$ (category groups vs. numeric metric)
-	\item \textbf{Pareto}: top-N value concentration
-	\item \textbf{Distribution}: histogram (spread, skew, outliers)
-	\item \textbf{Trend}: regression $R^2$ (metric over time)
-	\item \textbf{Seasonality}: coefficient of variation (month effects)
-	\item \textbf{Correlation scatter}: Pearson $r$ (strongest pairs)
-	\item \textbf{Crosstab heatmap}: Cramér's $V$ (two category columns)
-	\item \textbf{Anomaly overlay}: statistical outliers
-\end{itemize}
-
-Builders are independent, so failures in one family do not block others. Charts are ranked and capped at a target count (e.g., 12 charts per report).
-
-\subsection{Materiality Gating}
-
-A ``clear leader'' claim requires either $1.5\times$ higher value or $5+$ percentage points ahead of second place. Pareto charts group weak performers ($<5\%$ share) as ``Other''. This filters out trivial differences.
-
-\subsection{Trend Wording}
-
-Even statistically significant trends with $<3\%$ actual change are labeled ``flat''. Statistical significance does not always mean business relevance.
-
-\subsection{Unified Chart Specifications}
-
-All families output the same ChartSpec JSON format. Data is pre-aggregated so static PNG and interactive ECharts renderers consume identical bytes, preventing inconsistencies between views.
-
-\section{Agent 5: Validation and Data Quality}
-
-Agent 5 validates data against business rules and computes quality metrics.
-
-\subsection{Temporal Logic Validation}
-
-Impossible date sequences flag data defects: orders before creation dates, shipments before orders, deliveries before shipments.
-
-\subsection{Formula Reconciliation}
-
-The system checks quantity $\times$ price $\approx$ revenue within 2\% mean absolute error. Mismatches suggest missing cost data or column artifacts.
-
-\subsection{Near-Perfect Correlation Handling}
-
-Correlations $> 0.98$ usually indicate duplicates or data quality signals, not business relationships. They are logged to quality metrics but excluded from narrative findings.
-
-\subsection{Broken Rule Filtering}
-
-Validation rules firing on $>95\%$ of rows are marked as likely misconfigured. They remain in audit logs but are removed from issue counts, preventing garbage rules from drowning out real problems.
-
-\subsection{Cohen's Kappa}
-
-The system computes Cohen's kappa between LLM semantic tags and the local heuristic type detector. Low agreement flags columns needing review.
-
-\section{Agent 6: Report Generation}
-
-Agent 6 combines all prior results into a final report.
-
-\subsection{Narrative Claim Grounding}
-
-Before publishing, Agent 6 extracts numeric claims from the LLM narrative (e.g., ``revenue increased 25\%'') and verifies them against deterministic facts. Flagged hallucinations are logged with examples.
-
-\subsection{Contradiction Detection}
-
-The narrative is scanned for opposite claims. High-contradiction counts flag LLM inconsistencies.
-
-\subsection{Chart Deduplication}
-
-Identical chart specs appearing in multiple sections render only once, removing redundancy and reducing report size.
-
-\subsection{Dynamic Glossary}
-
-Instead of a full glossary, only terms used in that report are defined. Maximum 12 entries, matched against narrative text.
-
-\subsection{Section Ordering}
-
-Sections reorder by combined chart priority (strongest signal first). Readers encounter impactful findings upfront rather than following fixed order.
-
-% ============================================================================
-% CHAPTER 3: DATA PROCESSING AND QUALITY
-% ============================================================================
-\chapter{DATA PROCESSING AND QUALITY}
-\label{ch:processing}
-
-\section{Data Ingestion}
-
-The platform ingests CSV and Excel files with multiple resilience strategies.
-
-\subsection{Mixed Delimiters}
-
-The CSV reader handles rows with inconsistent delimiters (comma vs. semicolon). When field counts mismatch, the reader attempts to reconstruct rows using both delimiters.
-
-\subsection{Multi-Encoding Fallback}
-
-CSV ingestion tries UTF-8, cp1252, and Latin-1 in sequence. This handles international business datasets.
-
-\section{Quality Metrics and Validation}
-
-A composite Data Quality Score (0--100) combines remaining null percentage, validation failure percentage, and duplicate rate, weighted by preprocessing profile (strict, balanced, or lenient). Reliability metadata include per-stage confidence scores and decision readiness flags (ready, needs-review, blocked).
-
-\section{Audit Trails}
-
-Every transformation logs before/after null counts, parse failures, range-check failures, imputation methods, scaling bounds, and notes. The ColumnLedger enables reproducibility and identifies where quality degrades through the pipeline.
-
-% ============================================================================
-% CHAPTER 4: APIs AND SERVICES
-% ============================================================================
-\chapter{APIs AND SERVICES}
-\label{ch:apis}
-
-\section{RESTful Endpoints}
-
-\subsection{Analysis Pipeline}
-
-\begin{description}
-	\item[POST /api/analyze] Upload CSV or Excel and optional preprocessing profile; returns job ID.
-	\item[GET /api/analyze/\{job\_id\}/stream] Server-Sent-Events progress updates: agent completions, charts ready, validation status, report generation.
-	\item[GET /api/analyze/\{job\_id\}/result] Fetch full analysis results including statistics, charts, quality, and reliability metadata.
-\end{description}
-
-\subsection{Job Management}
-
-\begin{description}
-	\item[GET /api/jobs] List all jobs (completed and in-progress).
-	\item[GET /api/jobs/\{job\_id\}] Fetch single job metadata.
-	\item[DELETE /api/jobs/\{job\_id\}] Delete job and artifacts.
-	\item[DELETE /api/jobs] Delete all jobs.
-\end{description}
-
-\subsection{Report and Artifacts}
-
-\begin{description}
-	\item[GET /api/report/\{job\_id\}] Download HTML or PDF report (PDF falls back to HTML if conversion fails).
-	\item[GET /api/plots/\{file\_path\}] Serve static chart PNG (per-job isolation under \texttt{outputs/charts/\{run\_id\}/}).
-\end{description}
-
-\subsection{Infrastructure}
-
-\begin{description}
-	\item[GET /api/health] LLM provider health check (Groq, Gemini, HuggingFace, PostgreSQL); results cached 90 seconds.
-	\item[POST /api/health/test-llm] Manual provider health test (bypasses cache).
-\end{description}
-
-\section{Dataset Q\&A Service}
-
-After analysis completes, users ask questions about the data. The chat service builds topic-scoped context from relevant sections (correlation, trend, ranking) based on detected question topics, then queries the LLM with grounded facts to prevent hallucination.
-
-\subsection{On-Demand Charts}
-
-Users can request new charts within the chat service. Allowed types: bar, line, histogram, box, scatter. Allowed operations: count, sum, mean, median, min, max, nunique. Whitelists prevent unexpected requests and data abuse.
-
-\section{Progress Streaming}
-
-Server-Sent-Events on \texttt{/api/analyze/\{job\_id\}/stream} provide real-time pipeline progress without polling. Events include agent progress, chart generation, validation status, and report readiness.
-
-% ============================================================================
-% CHAPTER 5: INFRASTRUCTURE AND CONFIGURATION
-% ============================================================================
-\chapter{INFRASTRUCTURE AND CONFIGURATION}
-\label{ch:infrastructure}
-
-\section{LLM Provider Management}
-
-\subsection{Multi-Model Failover}
-
-The system attempts Groq API first, then Gemini. This provides redundancy if one provider is unavailable or rate-limited.
-
-\subsection{Multi-Gemini-Key Rotation}
-
-Environment variables \texttt{GEMINI\_API\_KEYS} (comma/space/semicolon-separated list) or \texttt{GEMINI\_API\_KEY\_1} through \texttt{GEMINI\_API\_KEY\_5} enable key rotation without code changes. When one key hits quota, the system advances to the next without retry backoff, preventing 429 rate-limit cascades.
-
-\subsection{Gemini Model Fallback Chain}
-
-The system tries \texttt{gemini-flash-latest} first, then \texttt{gemini-3.6-flash}, \texttt{gemini-3.5-flash}, and \texttt{gemini-2.5-flash}. If Google retires or renames one of these models, the pipeline moves to the next candidate instead of failing outright.
-
-\subsection{Health Check Caching}
-
-Provider health checks cache results for 90 seconds to avoid quota exhaustion on free-tier accounts. Manual checks available via \texttt{POST /api/health/test-llm}.
-
-\section{Optional Persistence}
-
-Job metadata, authentication, and chat history can store in PostgreSQL (via \texttt{DATABASE\_URL} environment variable) or remain in-memory. This supports multi-instance deployments.
-
-\section{Semantic Search}
-
-Row embeddings and analysis facts store in PostgreSQL pgvector. Two document families are indexed: dataset rows and analysis facts (summaries, correlations, trends, anomalies). This enables semantic dataset discovery across jobs.
-
-\section{Preprocessing Profiles}
-
-Users select preprocessing strictness at runtime via \texttt{analysis\_config.preprocessing\_profile}. This propagates through the entire pipeline.
-
-\section{LLM Context Scoping}
-
-The chat service attaches only relevant analysis sections based on detected question topics. This reduces token usage and grounds responses in dataset facts.
-
 
 % ACKNOWLEDGEMENT
 \chapter*{ACKNOWLEDGEMENT}
@@ -1067,6 +792,10 @@ Endpoint & Method & Description \\
 \texttt{/api/jobs/\{id\}} & GET & Job summary \\
 \texttt{/api/report/\{id\}} & GET & Download PDF/HTML report \\
 \texttt{/api/analyze/\{id\}/chat} & GET/POST & Dataset Q\&A with RAG \\
+\texttt{/api/jobs/\{id\}} & DELETE & Delete a job and its artifacts \\
+\texttt{/api/jobs} & DELETE & Delete all jobs \\
+\texttt{/api/plots/\{file\_path\}} & GET & Serve a static chart PNG, isolated per job \\
+\texttt{/api/health/test-llm} & POST & Manual provider health test, bypasses the health-check cache \\
 \hline
 \end{tabular}
 \end{table}
@@ -1154,7 +883,7 @@ for line in lines[1:]:
 c_1 = \text{clamp}\!\left(1 - 0.5\,\frac{m}{100} - 0.3\,\frac{d}{100},\; 0,\; 1\right)
 \label{eq:agent1-conf}
 \end{equation}
-where $m$ is the overall missing rate and $d$ the duplicate rate as percentages. The stage is marked \texttt{ready} when $c_1 \geq 0.8$ and \texttt{needs\_review} otherwise. On success it writes \texttt{raw\_profile}, caches the DataFrame in \texttt{\_df\_cache}, and passes both to Agent~2; if loading fails, the error is recorded and the pipeline stops early. Tested on the \texttt{10000 Sales Records.csv} dataset, Agent~1 parsed the file without row loss and produced the per-column missingness and duplicate counts consumed by the later agents.
+where $m$ is the overall missing rate and $d$ the duplicate rate as percentages. The stage is marked \texttt{ready} when $c_1 \geq 0.8$ and \texttt{needs\_review} otherwise. This 0.8 cutoff applies only to Agent~1's stage-level confidence; it is separate from the pipeline's overall decision-readiness threshold of 0.85 introduced in Chapter~5. Each stage sets its own readiness cutoff before the pipeline averages the stage confidences into a single overall score. On success it writes \texttt{raw\_profile}, caches the DataFrame in \texttt{\_df\_cache}, and passes both to Agent~2; if loading fails, the error is recorded and the pipeline stops early. Tested on the \texttt{10000 Sales Records.csv} dataset, Agent~1 parsed the file without row loss and produced the per-column missingness and duplicate counts consumed by the later agents.
 
 \section{Agent 2: Semantic Tagger}
 
@@ -1335,7 +1064,7 @@ S_c &= 100 - \text{missing\_penalty\%}, \quad S_v = 100 - \text{valfail\%}, \qua
 with weights per profile (Table \ref{tab:preprocessing-profiles}), and a risk penalty of $-5$ for critical issues or $-2.5$ for high issues, clamped to $[0,100]$.
 
 \subsection{Reliability and Pipeline Interaction}
-Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the sample dataset, Agent~3 parsed the currency fields into numeric values, extracted calendar features from the order and ship dates, one-hot encoded the region, item-type, and sales-channel columns, and derived business metrics, expanding the table from 14 to 61 columns with a data-quality score of 100.0/100. Because the sample contains no missing values, no imputation was required. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
+Every step appends to \texttt{preprocessing\_log} with its null differences, and the cleaned frame is exported to \texttt{outputs/cleaned\_data.csv}. Following the reliability model introduced in Equation~\ref{eq:agent1-conf}, the agent combines the quality score with the row-survival ratio into a confidence value and marks the stage \texttt{ready} or \texttt{needs\_review}. Critical failures trigger \texttt{\_early\_exit\_with\_error} so a corrupted result never propagates. On the sample dataset, Agent~3 parsed the currency fields into numeric values, extracted calendar features from the order and ship dates, one-hot encoded the region, item-type, and sales-channel columns, and derived business metrics, expanding the table from 14 to 58 columns with a data-quality score of 100.0/100. Because the sample contains no missing values, no imputation was required. The \texttt{cleaned\_df} and \texttt{scaling\_params} are the direct inputs to Agent~4.
 
 \section{Agent 4: Statistical Analysis}
 
@@ -1546,7 +1275,7 @@ The report is rendered with Jinja2 (\texttt{insight\_report.html.jinja}) using b
 \section{Backend API Implementation}
 
 \subsection{App and Configuration}
-The FastAPI app is created via \texttt{create\_app()}, which registers routers for health, auth, analysis, reports, jobs, and chat. CORS is enabled via \texttt{middleware/cors.py}. Configuration is managed by \texttt{Settings} (via \texttt{@lru\_cache}) with environment variables for uploads directory, outputs, max upload size (50 MB), allowed extensions (`.csv`), SSE poll interval (0.15s), keepalive (15s), max concurrent jobs (4), job TTL (3600s), PostgreSQL connection, RAG embedding model (\texttt{BAAI/bge-base-en-v1.5}), and Hugging Face token.
+The FastAPI app is created via \texttt{create\_app()}, which registers routers for health, auth, analysis, reports, jobs, and chat. CORS is enabled via \texttt{middleware/cors.py}. Configuration is managed by \texttt{Settings} (via \texttt{@lru\_cache}) with environment variables for uploads directory, outputs, max upload size (50 MB), allowed extensions (`.csv`), SSE poll interval (0.15s), keepalive (15s), max concurrent jobs (4), job TTL (3600s), PostgreSQL connection, RAG embedding model (\texttt{BAAI/bge-base-en-v1.5}), and Hugging Face token. Agent~1's loader (Section~6.1) can also parse Excel, JSON, and Parquet files, but the API accepts only \texttt{.csv} uploads; the other formats are reachable only by invoking the pipeline directly, outside the web API.
 
 \subsection{Endpoints}
 Table \ref{tab:api-endpoints} summarizes the main endpoints. Authentication uses JWT-style tokens with PBKDF2-SHA256 password hashing (via \texttt{passlib}). User and job data are stored in PostgreSQL tables (\texttt{app\_users}, \texttt{analysis\_jobs}) with a file-based fallback (\texttt{outputs/analysis\_jobs.json}) if PostgreSQL is unavailable.
@@ -1557,16 +1286,11 @@ The \texttt{JobManager} maintains thread-safe \texttt{Job} dataclasses with stat
 \subsection{SSE Streaming}
 Server-Sent Events are implemented in \texttt{sse.py} with format: \verb|event: <name>\n data: <json>\n\n|. Past events are replayed on connection, polling occurs every 0.15s, keepalive is sent every 15s, and the stream closes on terminal events. The stream is multi-subscriber safe.
 
+\subsection{LLM Provider Reliability}
+The system calls Groq first and falls back to Gemini when Groq is unavailable or its quota is exhausted. Free-tier Gemini quotas run out quickly, so Agent~2 and the chat service accept several keys through \texttt{GEMINI\_API\_KEYS} (a comma, space, or semicolon-separated list) or the numbered variables \texttt{GEMINI\_API\_KEY\_1} through \texttt{GEMINI\_API\_KEY\_5}. When a key returns a quota error, the caller rotates to the next key immediately instead of retrying with backoff, which keeps the pipeline from stalling on repeated 429 responses. Model selection follows the same pattern: the system tries \texttt{gemini-flash-latest} first, then \texttt{gemini-3.6-flash}, \texttt{gemini-3.5-flash}, and \texttt{gemini-2.5-flash} in order, so a retired or renamed model does not stop the pipeline. Health checks for Groq, Gemini, Hugging Face, and PostgreSQL are cached for 90 seconds to avoid spending quota on passive polling; \texttt{POST /api/health/test-llm} bypasses that cache when an on-demand connectivity test is needed.
+
 \subsection{RAG Dataset Chat}
-The RAG service uses \texttt{BAAI/bge-base-en-v1.5} embeddings via the Hugging Face Inference API when the required \texttt{DATABASE\_URL} and Hugging Face token are configured. pgvector stores embeddings for row documents from the original uploaded CSV and fact documents derived from the generated analysis context. During retrieval, the service fetches top row documents (default $K=8$), top column/statistic fact documents (default $K=6$), and always includes dataset-wide facts such as summaries, validation results, correlations, rankings, anomalies, and existing charts. The chat service passes the retrieved context and recent chat history to Groq $\rightarrow$ Gemini $\rightarrow$ deterministic fallback for response generation. If the database or embedding service is unavailable, the fallback answers from deterministic summary facts rather than claiming vector retrieval. It can also generate a fresh chart based on the query.
-
-\subsection{Constrained Data-Query Path}
-\label{sec:data-query-path}
-Vector retrieval alone cannot answer a question that needs an exact count, sum, average, or a numeric or multi-condition filter, since embedding similarity measures topical closeness between the query text and a row's text, not a numeric comparison. A query such as ``orders with units sold above 8000'' is not converted into \texttt{units\_sold > 8000} anywhere in the vector-search path; the retriever can only return rows whose text happens to read similarly to the query.
-
-To answer this class of question, the chat service adds a second, non-vector path alongside retrieval. The first LLM call can set \texttt{needs\_data\_query} to true and supply a structured \texttt{data\_query} object naming an operation (\texttt{count}, \texttt{sum}, \texttt{mean}, \texttt{median}, \texttt{min}, \texttt{max}, or \texttt{nunique}), a column, up to five filters, and an optional \texttt{group\_by} column. \texttt{run\_data\_query} then validates the request before touching any data: every column name must appear in both the schema blueprint and the job's original CSV, and every filter operator must be one of \texttt{==}, \texttt{!=}, \texttt{>}, \texttt{>=}, \texttt{<}, \texttt{<=}, or \texttt{contains}. No string supplied by the model or the user is evaluated as code; each operation and operator is dispatched through an explicit branch in Python, and pandas performs the actual filtering and aggregation. The function reads the job's original per-job CSV rather than Agent~3's cleaned export, since the cleaned export is a single file shared across concurrent jobs and would risk returning another job's data. Once the result is computed, a second LLM call turns the exact number into a final answer; the model is told to use only that computed result and is not asked to recompute or re-estimate it.
-
-This path is what keeps the low Recall@8 and zero-precision results for numeric queries in Table \ref{tab:rag-k8-per-query} from reaching the user: those specific question types are routed to \texttt{run\_data\_query} instead of being answered from the retrieved rows. Section~\ref{sec:rag-eval-discussion} discusses this connection alongside the retrieval results.
+The RAG service uses \texttt{BAAI/bge-base-en-v1.5} embeddings via the Hugging Face Inference API when the required \texttt{DATABASE\_URL} and Hugging Face token are configured. pgvector stores embeddings for row documents from the original uploaded CSV and fact documents derived from the generated analysis context. During retrieval, the service fetches top row documents (default $K=8$), top column/statistic fact documents (default $K=6$), and always includes dataset-wide facts such as summaries, validation results, correlations, rankings, anomalies, and existing charts. The chat service passes the retrieved context and recent chat history to Groq $\rightarrow$ Gemini $\rightarrow$ deterministic fallback for response generation. If the database or embedding service is unavailable, the fallback answers from deterministic summary facts rather than claiming vector retrieval. Users can also ask for a new chart in plain language within the same chat. \texttt{render\_chart\_request} checks the request against a fixed whitelist of chart types (bar, line, histogram, box, scatter) and, for ad-hoc numeric queries, of aggregation operations (count, sum, mean, median, min, max, nunique). A request outside that whitelist is rejected rather than executed.
 
 \section{Frontend Implementation}
 
@@ -1602,7 +1326,7 @@ A complete run on the sample dataset produces the following per-stage summary (c
 \begin{itemize}
 	\item \textbf{Agent 1:} Profiled 10000 rows $\times$ 14 columns; missing 0.0\%, duplicates 0.
 	\item \textbf{Agent 2:} Type sniffing \{string:5, datetime:2, numeric:7\}; blueprint built for 14 columns.
-	\item \textbf{Agent 3:} profile=strict, domain=finance\_sales, input 10000$\times$14 $\rightarrow$ cleaned 10000$\times$61, quality=100.0/100, remaining nulls 0.0\%.
+	\item \textbf{Agent 3:} profile=strict, domain=finance\_sales, input 10000$\times$14 $\rightarrow$ cleaned 10000$\times$58, quality=100.0/100, remaining nulls 0.0\%.
 	\item \textbf{Agent 4:} 22 descriptive columns, 10 strong correlation pairs, 52 anomalous rows (0.52\%), 16 charts saved.
 	\item \textbf{Agent 5:} validation score 100/100, 9/9 checks passed, Cohen's kappa = 1.0.
 	\item \textbf{Agent 6:} narrative source = Groq, 21/21 claims grounded, report written to \texttt{outputs/reports/<run\_id>/insight\_report.html} (HTML fallback; see below).
@@ -1610,7 +1334,7 @@ A complete run on the sample dataset produces the following per-stage summary (c
 
 \subsection{Comparison with a General-Purpose Qwen LLM}
 
-The same automated insight-generation task was also evaluated against a general-purpose Qwen LLM using the \texttt{10000\_Sales\_Records.csv} dataset. The Qwen run received the complete 10,000-row dataset in a single prompt rather than a sample, so the reported runtime reflects that larger input. The comparison shows the practical value of separating deterministic analysis from language generation. The multi-agent pipeline completed in approximately 52 seconds, while the standalone Qwen run took approximately 4 minutes 12 seconds, making it about 4.8 times slower.
+The same automated insight-generation task was also evaluated against a general-purpose Qwen LLM using the \texttt{10000\_Sales\_Records.csv} dataset. The comparison shows the practical value of separating deterministic analysis from language generation. The multi-agent pipeline completed in approximately 52 seconds, while the standalone Qwen run took approximately 4 minutes 12 seconds, making it about 4.8 times slower.
 
 \begin{table}[H]
 \centering
@@ -1634,7 +1358,7 @@ Actionability & Findings were tied to specific evidence, such as Snacks averagin
 \end{tabular}
 \end{table}
 
-The multi-agent pipeline was therefore approximately five times faster and was the only system in this comparison whose output was independently verifiable against the source data. The general-purpose LLM produced directionally useful results, but its consistent 10 times scaling error shows why a validation layer matters. Output Validation is not only an additional reporting step; it prevents numerical errors of this kind from reaching the user unnoticed.
+The multi-agent pipeline was therefore approximately five times faster and was the only system in this comparison whose output was independently verifiable against the source data. The general-purpose LLM produced directionally useful results, but its consistent 10 times scaling error shows why a validation layer matters. Output Validation does more than add a reporting step. It stops numerical errors of this kind from reaching the user unnoticed.
 
 \section{Per-Agent Outputs}
 
@@ -1664,7 +1388,7 @@ Using the automatically selected \texttt{strict} profile (finance\_sales domain)
 	\item Date-feature extraction and one-hot encoding of Region, Item Type, and Sales Channel; ordinal encoding of Order Priority.
 	\item Business-metric derivation with ground-truth reconciliation against the existing Total Profit column.
 \end{itemize}
-The cleaned dataset expanded from 14 to 61 columns due to one-hot encoding and derived features, with a data-quality score of 100.0/100 and no flagged validation issues.
+The cleaned dataset expanded from 14 to 58 columns due to one-hot encoding and derived features, with a data-quality score of 100.0/100 and no flagged validation issues.
 
 \subsection{Agent 4: Statistical Analysis and Visualization}
 Agent 4 produced descriptive statistics, correlations, trends, and 16 charts. Table \ref{tab:generated-charts} lists a representative subset. The sample run produced these findings:
@@ -1758,27 +1482,7 @@ Overall & 0.97 & \multicolumn{2}{p{8cm}}{Mean of the five stages reporting a num
 \end{table}
 
 \subsection{API Usage and Runtime Observability}
-The system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. Groq's response object also carries per-call usage data directly, without any additional instrumentation: \texttt{prompt\_tokens}, \texttt{completion\_tokens}, \texttt{total\_tokens}, and, specific to Groq, \texttt{queue\_time}, \texttt{prompt\_time}, \texttt{completion\_time}, and \texttt{total\_time} in seconds. Table~\ref{tab:llm-latency-results} reports the mean of these values across eight real dataset-chat questions against \texttt{10000 Sales Records.csv}, the same run described in Section~\ref{sec:rag-eval-discussion}, with the RAG index fully populated ($K=8$).
-
-\begin{table}[H]
-\centering
-\caption{Groq call metrics, mean over 8 dataset-chat questions}
-\label{tab:llm-latency-results}
-\begin{tabular}{p{7cm} p{4cm}}
-\hline
-Metric & Mean value \\
-\hline
-Prompt tokens & 3927.4 \\
-Completion tokens & 128.1 \\
-Prompt processing time & 0.314 s \\
-Completion generation time & 0.249 s \\
-Groq-reported total inference time & 0.563 s \\
-Queue time & 0.305 s \\
-\hline
-\end{tabular}
-\end{table}
-
-Client-observed wall-clock time for the same eight calls averaged around 15 s, roughly 27 times the Groq-reported total inference time. The model was not slower; the account tier used for this run caps requests at 8,000 tokens per minute, and once a call is rate-limited the Groq SDK's default behavior (\texttt{max\_retries=2}) retries silently rather than failing, which is invisible unless server-side and client-side timing are compared separately as done here. Reading \texttt{total\_time} directly from the response, rather than timing the call from the client, is what isolates actual model latency from this account-level throttling.
+The system uses external APIs in bounded locations: Agent~2 calls Groq for schema tagging with Gemini fallback; Agent~6 calls Groq for narrative generation with Gemini fallback; and the RAG chat uses Hugging Face embeddings plus Groq/Gemini/fallback answer generation when vector retrieval is configured. The code records provider/model/key-fingerprint usage for Agent~2 through the API-key usage tracker, and the persisted SSE event log records start/completion timestamps for each pipeline agent. The current implementation does not persist prompt tokens, completion tokens, total tokens, or per-call API response latency. For that reason, token counts and API latency values are not reported as numerical results in this project report.
 
 Table \ref{tab:runtime-results} reports only execution times that can be derived from the saved API job events in \texttt{outputs/analysis\_jobs.json}. These are pipeline-stage wall-clock durations, not provider-level API latency measurements.
 
@@ -1811,10 +1515,10 @@ Metric & Status & Evidence / required change \\
 \hline
 LLM/API models used & Available & Model constants and service configuration identify Groq, Gemini, and Hugging Face embedding models \\
 Number of LLM calls & Partially available & Agent~2 captures provider use; Agent~6 and chat calls are not yet persisted as a complete call count \\
-Input / prompt tokens & Available (Groq) & Present on every Groq response as \texttt{usage.prompt\_tokens}; measured in Table~\ref{tab:llm-latency-results} \\
-Output / completion tokens & Available (Groq) & Present on every Groq response as \texttt{usage.completion\_tokens} \\
-Total tokens & Available (Groq) & Present on every Groq response as \texttt{usage.total\_tokens} \\
-API response latency & Available (Groq) & Groq returns \texttt{queue\_time}, \texttt{prompt\_time}, \texttt{completion\_time}, and \texttt{total\_time} directly; Gemini and Hugging Face usage/latency fields were not measured for this report \\
+Input / prompt tokens & Not recorded & Requires reading provider usage metadata after each response and storing it in the run state \\
+Output / completion tokens & Not recorded & Requires provider response usage capture \\
+Total tokens & Not recorded & Requires prompt and completion token capture per call \\
+API response latency & Not recorded & Requires timing wrapper around Groq, Gemini, and Hugging Face calls \\
 Agent execution time & Derivable & Persisted SSE timestamps record agent running/completed events \\
 Total pipeline time & Derivable & Persisted \texttt{pipeline\_started} and \texttt{pipeline\_finished} events \\
 Fallback calls & Partially observable & Fallback paths exist in code; exact fallback-attempt counts are not yet persisted \\
@@ -1822,13 +1526,12 @@ Fallback calls & Partially observable & Fallback paths exist in code; exact fall
 \end{tabular}
 \end{table}
 
-Groq exposes this usage data on every response already, so no timing wrapper is needed to obtain it for that provider. The values in Table~\ref{tab:llm-latency-results} come from calling the same \texttt{chat\_service} and \texttt{rag\_service} functions the application uses at runtime, not from reading persisted production logs; the running application does not yet write per-call token and latency values into job state or a diagnostics JSON, so this data is not currently visible from the job history API. Persisting it would mean saving the \texttt{response.usage} fields Groq already returns, rather than building new instrumentation around the call. Gemini and Hugging Face usage metadata were not examined for this report and remain future work.
+Future runs can measure token usage and API latency by adding a shared API-call metrics wrapper around Groq, Gemini, and Hugging Face calls. That wrapper should record provider, model, agent, purpose, success/failure, fallback attempt, latency in milliseconds, and any available \texttt{prompt\_tokens}, \texttt{completion\_tokens}, and \texttt{total\_tokens}. The metrics should then be stored in the shared state and included in the diagnostics JSON. Until that instrumentation exists and the pipeline is rerun, this report should not claim numerical token counts or provider response latencies.
 
 \subsection{RAG Chat Evaluation Status}
-\label{sec:rag-eval-discussion}
 The dataset chat works as a retrieval-augmented system when PostgreSQL/pgvector and the Hugging Face token are configured. The retrieval corpus contains two document groups: row documents from the original uploaded CSV and fact documents from the deterministic analysis result. The retriever embeds documents and user queries with \texttt{BAAI/bge-base-en-v1.5}. Row documents are ranked by vector distance, while fact types such as summaries, validation, correlations, rankings, anomalies, and chart references are always included so broad analytical questions stay grounded in computed results. The retrieved context and recent chat history are then passed to the LLM, and the final answer is generated through Groq, Gemini fallback, or deterministic fallback.
 
-The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. The K=8 retrieval results in Tables \ref{tab:rag-k8-summary} and \ref{tab:rag-k8-per-query} were measured against \texttt{10000 Sales Records.csv} with \texttt{RAG\_MAX\_ROWS} set to 10,000, so every row in the dataset is embedded and searchable rather than a sample.
+The implementation has functional tests for RAG triggering, context construction, retrieval branches, fallback behavior, and validated on-demand chart generation. The K=8 retrieval results are shown in Tables \ref{tab:rag-k8-summary} and \ref{tab:rag-k8-per-query}.
 
 \begin{table}[H]
 \centering
@@ -1869,10 +1572,6 @@ Offline Vegetables orders with units sold above 7000 & 0.000 & 0.0000 & 0.000 & 
 \hline
 \end{tabular}
 \end{table}
-
-The two queries scoring 0.000 on every metric, units sold above 8000 and total profit above 1000000, are single-condition numeric thresholds. The two-condition and three-condition compound queries (household orders from Europe, high-priority orders from Asia, offline Vegetables orders with high units sold) score between these two extremes, and every query naming a category directly (Europe, Household, Online, and so on) scores at or near 1.000. This split matches how the embedding model actually works: it matches text that reads similarly to the query, not a numeric comparison, so a query for units sold above 8000 can retrieve a row with units sold in the hundreds if that row's text otherwise resembles the query.
-
-This is also why the numbers in Table \ref{tab:rag-k8-per-query} describe the vector-retrieval path in isolation rather than what the deployed chat service actually returns to a user. As described in Section~\ref{sec:data-query-path}, a question shaped like the two zero-scoring queries is answered through \texttt{run\_data\_query} against the full dataset, not from the eight retrieved rows. Recall@8 is also mechanically small at this $K$ for a different reason: several queries here have hundreds to thousands of matching rows in a 10,000-row dataset, so even a perfect retriever could not exceed roughly $8$ divided by that count.
 
 \section{Error Analysis and Validation Discussion}
 
@@ -2054,6 +1753,8 @@ Below is a representative run summary produced by the pipeline diagnostics:
 
 \bibitem{maynez2020faithfulness} J. Maynez, S. Narayan, B. Bohnet, and R. McDonald, ``On Faithfulness and Factuality in Abstractive Summarization,'' in \textit{Proceedings of ACL}, 2020.
 
+\bibitem{lewis2020rag} P. Lewis, E. Perez, A. Piktus, et al., ``Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,'' in \textit{Advances in Neural Information Processing Systems}, 2020.
+
 \bibitem{dibia2019} V. Dibia and C. Demiralp, ``Data2Vis: Automatic Generation of Data Visualizations Using Sequence-to-Sequence Recurrent Neural Networks,'' \textit{IEEE Computer Graphics and Applications}, vol. 39, no. 5, pp. 33--46, 2019.
 
 \bibitem{hu2019} K. Hu, M. A. Bakker, S. Li, T. Kraska, and C. A. Hidalgo, ``VizML: A Machine Learning Approach to Visualization Recommendation,'' in \textit{Proceedings of the CHI Conference on Human Factors in Computing Systems}, 2019.
@@ -2079,8 +1780,6 @@ Below is a representative run summary produced by the pipeline diagnostics:
 \bibitem{zhang2019rmsnorm} B. Zhang and R. Sennrich, ``Root Mean Square Layer Normalization,'' in \textit{Advances in Neural Information Processing Systems}, 2019.
 
 \bibitem{landis1977} J. R. Landis and G. G. Koch, ``The Measurement of Observer Agreement for Categorical Data,'' \textit{Biometrics}, vol. 33, no. 1, pp. 159--174, 1977.
-
-\bibitem{lewis2020rag} P. Lewis, E. Perez, A. Piktus, et al., ``Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,'' in \textit{Advances in Neural Information Processing Systems}, 2020.
 
 \end{thebibliography}
 

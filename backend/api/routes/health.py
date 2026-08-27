@@ -34,7 +34,7 @@ def _cached_check(key: str, check_fn) -> str:
     return value
 
 
-def _check_groq_health() -> str:
+def _check_groq_health(api_key: str | None = None) -> str:
     """Check Groq using the exact production model + call shape, not just connectivity.
 
     A bare ``models.list()`` call only proves the API key is valid — it stays "healthy"
@@ -43,9 +43,12 @@ def _check_groq_health() -> str:
     real agent call makes, against the same ``agents.agent_2.GROQ_MODEL`` constant, so a
     dead model or exhausted quota shows up here instead of silently degrading every
     semantic-tagging and RAG-chat call to the deterministic fallback.
+
+    ``api_key``, when passed, is tested in place of the configured ``GROQ_API_KEY`` env
+    var — used by the "test my key" flow before a user-submitted key is saved.
     """
     try:
-        api_key = os.getenv("GROQ_API_KEY")
+        api_key = api_key or os.getenv("GROQ_API_KEY")
         if not api_key:
             logger.debug("Groq: API key not configured")
             return "not_configured"
@@ -76,7 +79,7 @@ def _check_groq_health() -> str:
         return "unreachable"
 
 
-def _check_gemini_health() -> str:
+def _check_gemini_health(api_key: str | None = None) -> str:
     """Check Gemini using the exact production model + SDK + call shape, not just connectivity.
 
     Two gaps in the old check: (1) it used the deprecated ``google.generativeai`` package
@@ -86,23 +89,26 @@ def _check_gemini_health() -> str:
     This sends a minimal real ``generate_content`` call with the production
     ``agents.agent_2.GEMINI_MODEL`` and the same client construction agents use, so a
     retired model or exhausted quota (both seen on this project) shows up as non-healthy.
+
+    ``api_key``, when passed, is tested in place of the configured env-var keys — used by
+    the "test my key" flow before a user-submitted key is saved.
     """
     try:
         from agents.agent_2 import GEMINI_MODEL, _get_configured_gemini_api_keys
 
-        api_key = (
+        resolved_key = api_key or (
             os.getenv("GEMINI_API_KEY")
             or os.getenv("Gemini_API_Key")
             or os.getenv("GOOGLE_API_KEY")
         )
-        configured_keys = _get_configured_gemini_api_keys()
-        if not api_key and not configured_keys:
+        configured_keys = [] if api_key else _get_configured_gemini_api_keys()
+        if not resolved_key and not configured_keys:
             logger.debug("Gemini: API key not configured")
             return "not_configured"
 
         from google import genai
 
-        client = genai.Client(api_key=api_key or configured_keys[0])
+        client = genai.Client(api_key=resolved_key or configured_keys[0])
         client.models.generate_content(
             model=GEMINI_MODEL,
             contents="Reply with exactly: OK",
@@ -124,10 +130,14 @@ def _check_gemini_health() -> str:
         return "unreachable"
 
 
-def _check_huggingface_health() -> str:
-    """Check if Hugging Face Inference API is accessible via a lightweight call."""
+def _check_huggingface_health(api_key: str | None = None) -> str:
+    """Check if Hugging Face Inference API is accessible via a lightweight call.
+
+    ``api_key``, when passed, is tested in place of the configured env-var token — used
+    by the "test my key" flow before a user-submitted token is saved.
+    """
     try:
-        api_key = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN")
+        api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN")
         if not api_key:
             logger.debug("Hugging Face: API key not configured")
             return "not_configured"

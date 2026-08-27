@@ -35,11 +35,12 @@ import numpy as np
 import pandas as pd
 import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pgvector.psycopg import register_vector
 
 from api.config import get_settings
+from api.services.db_pool import get_pool
+from api.services.request_context import get_api_key_override
 from api.utils.serialization import json_safe
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ _MAX_ALWAYS_INCLUDED_FACTS = 60
 _HF_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
 _hf_client = None
+_hf_client_cache: dict[str, Any] = {}  # per-user-override tokens — never shared with the global singleton
 
 
 def _is_quota_error(exc: Exception) -> bool:
@@ -95,9 +97,9 @@ def _connect() -> Iterator[psycopg.Connection]:
     dsn = get_settings().database_url
     if not dsn:
         raise RuntimeError("RAG dataset chat requires DATABASE_URL (Postgres + pgvector) to be configured")
-    with psycopg.connect(dsn, autocommit=True, row_factory=dict_row) as conn:
-        # Note: We skip register_vector() to avoid compatibility issues
-        # PostgreSQL can handle vector operations directly without Python type registration
+    # Note: We skip register_vector() to avoid compatibility issues
+    # PostgreSQL can handle vector operations directly without Python type registration
+    with get_pool(dsn).connection() as conn:
         yield conn
 
 
@@ -157,12 +159,28 @@ def _ensure_schema() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_hf_client():
-    """Return the cached Hugging Face Inference client, importing the SDK only when needed."""
+    """Return the active Hugging Face Inference client, importing the SDK only when needed.
+
+    A per-job user-supplied token (see ``api.services.request_context``) always
+    wins over the shared/env-configured client — cached per-token, never into
+    the module-global ``_hf_client``, so it can't leak to another user's job.
+    """
+    settings = get_settings()
+    override = get_api_key_override("hf_token")
+    if override:
+        cached = _hf_client_cache.get(override)
+        if cached is not None:
+            return cached
+        from huggingface_hub import InferenceClient
+
+        client = InferenceClient(model=settings.rag_embedding_model, provider="hf-inference", token=override)
+        _hf_client_cache[override] = client
+        return client
+
     global _hf_client
     if _hf_client is not None:
         return _hf_client
 
-    settings = get_settings()
     if not settings.hf_token:
         raise RuntimeError("HF_TOKEN is not set")
 
@@ -501,15 +519,21 @@ def build_rag_index(job: "Job") -> dict[str, int]:
     return {"total_rows": total_rows, "sampled_rows": sampled_rows}
 
 
-def start_rag_build(manager: "JobManager", job: "Job") -> bool:
+def start_rag_build(manager: "JobManager", job: "Job", api_key_overrides: dict[str, str] | None = None) -> bool:
     """Kick off an async index build for ``job`` unless one is already running.
 
     Returns True if a build was (re)started, False if one was already in flight.
+    ``api_key_overrides`` (e.g. {"hf_token": "..."}) is re-applied at the top of
+    the build thread — a new thread starts with no inherited context, so it
+    must be passed explicitly rather than relying on contextvar propagation.
     """
     if not manager.try_begin_rag_build(job.job_id):
         return False
 
     def _run() -> None:
+        from api.services.request_context import set_api_key_overrides
+
+        set_api_key_overrides(api_key_overrides)
         try:
             sample_info = build_rag_index(job)
             manager.set_rag_status(job.job_id, "ready", sample_info=sample_info)

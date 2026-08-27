@@ -1,0 +1,396 @@
+\documentclass[10pt,aspectratio=43]{beamer}
+
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+
+\usetheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=10mm,text margin right=10mm}
+
+\setbeamercolor{background canvas}{bg=white}
+\setbeamercolor{normal text}{fg=black,bg=white}
+\setbeamercolor{structure}{fg=black}
+\setbeamercolor{frametitle}{fg=black,bg=white}
+\setbeamercolor{title}{fg=black,bg=white}
+\setbeamercolor{author}{fg=black,bg=white}
+\setbeamercolor{date}{fg=black,bg=white}
+\setbeamercolor{item}{fg=black}
+\setbeamercolor{subitem}{fg=black}
+\setbeamercolor{caption name}{fg=black}
+
+\setbeamertemplate{itemize item}{\raise0.15ex\hbox{\scriptsize$\bullet$}}
+\setbeamertemplate{itemize subitem}{\raise0.15ex\hbox{\tiny$\bullet$}}
+\setbeamertemplate{caption}[numbered]
+\setbeamerfont{itemize/enumerate body}{size=\large}
+\setbeamerfont{itemize/enumerate subbody}{size=\normalsize}
+\setbeamerfont{caption}{size=\small}
+\setbeamertemplate{frametitle}{%
+  \vspace{3mm}
+  \begin{center}
+    \bfseries\fontsize{19}{22}\selectfont\insertframetitle
+  \end{center}
+  \vspace{1mm}
+}
+
+\newcommand{\presentationdate}{August, 2026}
+\setbeamertemplate{footline}{%
+  \leavevmode%
+  \hbox{%
+    \begin{beamercolorbox}[wd=.5\paperwidth,ht=2.5ex,dp=1.2ex,leftskip=1.2em]{normal text}%
+      \presentationdate
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.5\paperwidth,ht=2.5ex,dp=1.2ex,rightskip=1.2em plus1fil]{normal text}%
+      \hfill\insertframenumber
+    \end{beamercolorbox}%
+  }%
+}
+
+\newcommand{\fitimage}[1]{\includegraphics[width=0.90\textwidth,height=0.46\textheight,keepaspectratio]{#1}}
+\newcommand{\largefitimage}[1]{\includegraphics[width=0.94\textwidth,height=0.58\textheight,keepaspectratio]{#1}}
+\newcommand{\placeholder}[1]{\fbox{\parbox[b][0.42\textheight][c]{0.88\textwidth}{\centering #1}}}
+\newcommand{\imagecaption}[1]{\par\vspace{1.5mm}{\centering\footnotesize #1\par}}
+
+\begin{document}
+
+\begin{frame}[plain,t]
+\centering
+\vspace{3mm}
+{\bfseries\fontsize{18}{22}\selectfont MULTI-AGENT DATA ANALYSIS AND INSIGHT\\GENERATION PLATFORM FOR FINANCIAL AND SALES DATA\par}
+\vspace{5mm}
+{\bfseries\fontsize{11}{14}\selectfont Team Members:\par}
+\vspace{1mm}
+{\fontsize{10}{13}\selectfont
+Prashant Kafle (THA080BCT026)\\
+Roshan Poudel (THA080BCT036)\\
+Santosh Khadka (THA080BCT039)\\
+Sushil Bhatta (THA080BCT048)\par}
+\vspace{4mm}
+{\bfseries\fontsize{11}{14}\selectfont Supervised By:\par}
+{\fontsize{10}{13}\selectfont Er. Rajad Shakya\par}
+\vspace{7mm}
+{\fontsize{9}{12}\selectfont Department of Electronics and Computer Engineering\\
+Institute of Engineering, Thapathali Campus\\
+\presentationdate\par}
+\end{frame}
+
+\section{Outline}
+\begin{frame}{Presentation Outline}
+\begin{itemize}
+  \item Motivation
+  \item Introduction
+  \item Problem Statement \& Objectives
+  \item Scope of Project
+  \item Project Applications
+  \item Methodology
+  \item Results
+  \item Analysis / Discussion
+  \item Future Enhancements
+  \item Conclusion
+  \item References
+\end{itemize}
+\end{frame}
+
+\section{Motivation}
+\begin{frame}{Motivation}
+\begin{itemize}
+  \item Data remains underused in organizations.
+  \item Analytics tools require technical expertise.
+  \item Manual reporting is slow and inconsistent.
+  \item LLM insights need verification.
+  \item Agentic AI enables automated analysis.
+\end{itemize}
+\end{frame}
+
+\section{Introduction}
+\begin{frame}{Introduction}
+\begin{itemize}
+  \item Web-based multi-agent data analyst.
+  \item Targets financial and sales CSV data.
+  \item Uses LangGraph for stateful orchestration.
+  \item Combines statistics and LLM reasoning.
+  \item Produces validated reports and charts.
+\end{itemize}
+\end{frame}
+
+\section{Problem Statement and Objectives}
+\begin{frame}{Problem Statement \& Objectives}
+\begin{itemize}
+  \item Convert raw data into insights.
+  \item Reduce manual cleaning effort.
+  \item Generate professional analytical reports.
+  \item Enable analytics without coding.
+  \item Verify claims before reporting.
+\end{itemize}
+\end{frame}
+
+\section{Scope of Project}
+\begin{frame}{Scope of Project}
+\begin{itemize}
+  \item Web upload supports CSV datasets.
+  \item Internal loader supports more formats.
+  \item Six-agent pipeline is implemented.
+  \item FastAPI backend provides services.
+  \item React frontend supports workflow.
+\end{itemize}
+\end{frame}
+
+\section{Project Applications}
+\begin{frame}{Project Applications}
+\begin{itemize}
+  \item Sales performance tracking.
+  \item Financial reporting and budgeting.
+  \item Retail and e-commerce analytics.
+  \item Small business operations analysis.
+  \item Reports for non-finance teams.
+\end{itemize}
+\end{frame}
+
+\section{Methodology}
+\subsection{Methodology}
+\begin{frame}{Methodology-(a) Qwen LLM Architecture}
+\centering
+\largefitimage{../reportfolder/qwen3_architecture.png}
+\imagecaption{Figure: LLM Architecture}
+\end{frame}
+
+\subsection{Methodology}
+\begin{frame}{Methodology-(b) Backend Architecture}
+\centering
+\largefitimage{../reportfolder/backend_architecture.png}
+\imagecaption{Figure: Backend Architecture}
+\end{frame}
+
+\subsection{Methodology}
+\begin{frame}{Methodology-(c) Frontend Workflow}
+\centering
+\largefitimage{../reportfolder/frontend_workflow.png}
+\imagecaption{Figure: Frontend Flow}
+\end{frame}
+
+\subsection{Methodology}
+\begin{frame}{Methodology-(d) Agentic Workflow}
+\centering
+\largefitimage{fiximag.png}
+\imagecaption{Figure: Agentic Workflow}
+\end{frame}
+
+\begin{frame}{Agent 1: Structural Profiler}
+\begin{itemize}
+  \item Loads the raw CSV file.
+  \item Profiles shape and types.
+  \item Detects missingness and duplicates.
+  \item Caches DataFrame downstream.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent1pic.png}
+\imagecaption{Figure: Agent 1 Structural Profiler}
+\end{frame}
+
+\begin{frame}{Agent 2: Semantic Tagger}
+\begin{itemize}
+  \item Sniffs technical column types.
+  \item Uses Groq with Gemini fallback.
+  \item Builds processing blueprint.
+  \item Adds confidence scores.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent21.png}
+\imagecaption{Figure: Agent 2 Semantic Tagger}
+\end{frame}
+
+\begin{frame}{Agent 3: Preprocessor}
+\begin{itemize}
+  \item Cleans currency and text.
+  \item Coerces dates and numbers.
+  \item Handles imputation and outliers.
+  \item Derives business metrics.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent3pic.png}
+\imagecaption{Figure: Agent 3 Preprocessor}
+\end{frame}
+
+\begin{frame}{Agent 4: Statistical Analysis}
+\begin{itemize}
+  \item Computes descriptive statistics.
+  \item Detects correlations and anomalies.
+  \item Scores chart families.
+  \item Saves chart artifacts.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent4pic.png}
+\imagecaption{Figure: Agent 4 Statistical Analysis}
+\end{frame}
+
+\begin{frame}{Agent 5: Validation Gate}
+\begin{itemize}
+  \item Checks deterministic contracts.
+  \item Validates chart integrity.
+  \item Applies business rules.
+  \item Blocks unsafe reports.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent5pic.png}
+\imagecaption{Figure: Agent 5 Validation Gate}
+\end{frame}
+
+\begin{frame}{Agent 6: Report Generator}
+\begin{itemize}
+  \item Extracts deterministic facts.
+  \item Generates grounded narrative.
+  \item Verifies numeric claims.
+  \item Builds HTML/PDF report.
+\end{itemize}
+\vfill
+\centering\fitimage{../reportfolder/agent6pic.png}
+\imagecaption{Figure: Agent 6 Report Generator}
+\end{frame}
+
+\subsection{Methodology}
+\begin{frame}{Methodology-(e) RAG Dataset Chat}
+\begin{itemize}
+  \item Indexes rows and facts.
+  \item Uses BGE embeddings.
+  \item Stores vectors in pgvector.
+  \item Retrieves dataset context.
+  \item Grounds answers in results.
+\end{itemize}
+\end{frame}
+
+\section{Results}
+\subsection{Experimental Setup}
+\begin{frame}{Results-(a) Experimental Setup}
+\begin{itemize}
+  \item Dataset: 10000 Sales Records.csv.
+  \item Input: 10000 rows, 14 columns.
+  \item Profile: finance sales.
+  \item Outputs: diagnostics and charts.
+  \item Report generated from code.
+\end{itemize}
+\end{frame}
+
+\subsection{Pipeline Results}
+\begin{frame}{Results-(b)Pipeline Execution Results}
+\begin{itemize}
+  \item Agent 1: no missing values.
+  \item Agent 2: 14-column blueprint.
+  \item Agent 3: 10000 x 58 output.
+  \item Agent 4: 16 charts generated.
+  \item Agent 5: 9/9 checks passed.
+  \item Agent 6: 21/21 claims grounded.
+\end{itemize}
+\end{frame}
+
+\subsection{Statistical Results}
+\begin{frame}{Results-(c)Statistical Analysis Results}
+\begin{itemize}
+  \item 22 numeric columns summarized.
+  \item 10 strong correlations found.
+  \item 52 anomalous rows detected.
+  \item Revenue/profit rankings generated.
+  \item Seasonal charts generated.
+\end{itemize}
+\end{frame}
+
+\subsection{Interface Results}
+\begin{frame}{ Dashboard}
+\centering
+\IfFileExists{../reportfolder/dashboard_screenshot.png}{\largefitimage{../reportfolder/dashboard_screenshot.png}}{\placeholder{Dashboard screenshot placeholder\\Expected file: dashboard.png}}
+\imagecaption{Figure: Dashboard}
+\end{frame}
+
+\begin{frame}{Final Generated Report}
+\centering
+\largefitimage{../reportfolder/final_report.png}
+\imagecaption{Figure: Final Generated Report}
+\end{frame}
+
+\begin{frame}{Analysis Interface}
+\centering
+\IfFileExists{../reportfolder/analysis.png}{\largefitimage{../reportfolder/analysis.png}}{\placeholder{Analysis interface placeholder\\Expected file: analysis.png}}
+\imagecaption{Figure: Analysis Interface}
+\end{frame}
+
+\subsection{RAG Evaluation}
+\begin{frame}{Analysis-RAG Chat Evaluation}
+\begin{itemize}
+  \item Retrieval evaluated at K=8.
+  \item Precision@8 = 0.5938.
+  \item nDCG@8 = 0.6227.
+  \item MRR@8 = 0.7500.
+  \item Fallback answer path exists.
+\end{itemize}
+\end{frame}
+
+\section{Analysis / Discussion of Results}
+\begin{frame}{Analysis / Discussion I}
+\begin{itemize}
+  \item Pipeline completed in about 52s.
+  \item Standalone Qwen took 4m 12s.
+  \item Pipeline was about 4.8x faster.
+  \item Qwen had scaling errors.
+  \item Validation blocked unchecked claims.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Analysis / Discussion II}
+\begin{itemize}
+  \item Validation score was 100/100.
+  \item Cohen's kappa was 1.0.
+  \item Overall confidence was 0.97.
+  \item Decision readiness was ready.
+  \item Token metrics need instrumentation.
+\end{itemize}
+\end{frame}
+
+\section{Future Enhancements}
+\begin{frame}{Future Enhancements}
+\begin{itemize}
+  \item Extend API file ingestion.
+  \item Add provider configuration.
+  \item Store API usage metrics.
+  \item Improve chart interaction.
+  \item Add feedback learning loop.
+\end{itemize}
+\end{frame}
+
+\section{Conclusion}
+\begin{frame}{Conclusion}
+\begin{itemize}
+  \item Six-agent pipeline implemented.
+  \item LangGraph controls execution.
+  \item FastAPI and React provide access.
+  \item Validation improves reporting trust.
+  \item Project objectives achieved.
+\end{itemize}
+\end{frame}
+
+\section{References}
+\begin{frame}{References I}
+\footnotesize
+\begin{enumerate}
+  \item Y. K. Dwivedi et al., ``So what if ChatGPT wrote it?,'' \emph{International Journal of Information Management}, vol. 71, 2023.
+  \item OpenAI, ``GPT-4 Technical Report,'' 2024.
+  \item M. Sun et al., ``LAMBDA: A Large Model Based Data Agent,'' arXiv:2407.17535, 2024.
+  \item J. Maynez et al., ``On Faithfulness and Factuality in Abstractive Summarization,'' ACL, 2020.
+  \item V. Dibia and C. Demiralp, ``Data2Vis,'' \emph{IEEE CG\&A}, vol. 39, no. 5, 2019.
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{References II}
+\footnotesize
+\begin{enumerate}
+  \setcounter{enumi}{5}
+  \item K. Hu et al., ``VizML,'' CHI, 2019.
+  \item D. Moritz et al., ``Formalizing Visualization Design Knowledge as Constraints,'' \emph{IEEE TVCG}, 2018.
+  \item Y. Luo et al., ``DeepEye,'' IEEE ICDE, 2018.
+  \item LangChain, ``LangGraph: Stateful Multi-Agent Applications,'' 2024.
+  \item Q. Wu et al., ``AutoGen,'' 2023.
+\end{enumerate}
+\end{frame}
+
+\end{document}

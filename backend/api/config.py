@@ -102,6 +102,8 @@ class Settings:
         self.postgres_schema: str = os.getenv("POSTGRES_SCHEMA", "public")
         self.postgres_jobs_table: str = os.getenv("POSTGRES_JOBS_TABLE", "analysis_jobs")
         self.postgres_users_table: str = os.getenv("POSTGRES_USERS_TABLE", "app_users")
+        self.postgres_sessions_table: str = os.getenv("POSTGRES_SESSIONS_TABLE", "app_sessions")
+        self.postgres_user_settings_table: str = os.getenv("POSTGRES_USER_SETTINGS_TABLE", "user_api_keys")
 
         # RAG dataset-chat: pgvector-backed row + fact embeddings (requires database_url).
         # Embeddings are computed via the Hugging Face Inference API (HF_TOKEN required).

@@ -99,6 +99,38 @@ class AuthUser(BaseModel):
 class AuthResponse(BaseModel):
     message: str = "ok"
     user: AuthUser
+    token: str
+
+
+# ---------------------------------------------------------------------------
+# Per-user LLM API key settings
+# ---------------------------------------------------------------------------
+class ApiKeyStatus(BaseModel):
+    configured: bool
+    masked: str | None = None
+
+
+class ApiKeysStatusResponse(BaseModel):
+    groq: ApiKeyStatus
+    gemini: ApiKeyStatus
+    hf_token: ApiKeyStatus
+
+
+class ApiKeysUpdateRequest(BaseModel):
+    """Any field omitted/None leaves that key unchanged; "" clears it."""
+    groq_api_key: str | None = None
+    gemini_api_key: str | None = None
+    hf_token: str | None = None
+
+
+class ApiKeyTestRequest(BaseModel):
+    provider: str = Field(pattern="^(groq|gemini|hf_token)$")
+    api_key: str = Field(min_length=1)
+
+
+class ApiKeyTestResponse(BaseModel):
+    provider: str
+    status: str  # healthy | invalid_key | quota_exceeded | model_unavailable | unauthorized | unreachable | not_configured
 
 
 # ---------------------------------------------------------------------------

@@ -7,9 +7,9 @@ from typing import Any, Iterator
 
 import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from api.services.db_pool import get_pool
 from api.utils.serialization import json_safe
 
 
@@ -22,7 +22,7 @@ class PostgresJobStore:
 
     @contextmanager
     def _connect(self) -> Iterator[psycopg.Connection]:
-        with psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row) as conn:
+        with get_pool(self.dsn).connection() as conn:
             yield conn
 
     def _ensure_schema(self) -> None:
@@ -66,12 +66,20 @@ class PostgresJobStore:
                     "rag_built_at TIMESTAMPTZ",
                     "rag_sample_info JSONB NOT NULL DEFAULT '{{}}'::jsonb",
                     "rag_progress JSONB NOT NULL DEFAULT '{{}}'::jsonb",
+                    "user_id TEXT",
                 ):
                     cur.execute(
                         sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS " + column_def + ";").format(
                             sql.Identifier(self.schema), sql.Identifier(self.table)
                         )
                     )
+                cur.execute(
+                    sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {}.{} (user_id);").format(
+                        sql.Identifier(f"idx_{self.table}_user_id"),
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table),
+                    )
+                )
         self._initialized = True
 
     def save_job(self, record: dict[str, Any]) -> None:
@@ -94,11 +102,12 @@ class PostgresJobStore:
                     sql.SQL(
                         """
                         INSERT INTO {}.{}
-                        (job_id, filename, csv_path, status, progress, events, state, result, chat_history,
+                        (job_id, user_id, filename, csv_path, status, progress, events, state, result, chat_history,
                          rag_status, rag_error, rag_built_at, rag_sample_info, rag_progress, errors, error, created_at, updated_at, finished)
-                        VALUES (%(job_id)s, %(filename)s, %(csv_path)s, %(status)s, %(progress)s, %(events)s, %(state)s, %(result)s, %(chat_history)s,
+                        VALUES (%(job_id)s, %(user_id)s, %(filename)s, %(csv_path)s, %(status)s, %(progress)s, %(events)s, %(state)s, %(result)s, %(chat_history)s,
                                 %(rag_status)s, %(rag_error)s, %(rag_built_at)s, %(rag_sample_info)s, %(rag_progress)s, %(errors)s, %(error)s, %(created_at)s, %(updated_at)s, %(finished)s)
                         ON CONFLICT (job_id) DO UPDATE SET
+                            user_id = EXCLUDED.user_id,
                             filename = EXCLUDED.filename,
                             csv_path = EXCLUDED.csv_path,
                             status = EXCLUDED.status,

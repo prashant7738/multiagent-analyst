@@ -31,6 +31,7 @@ class Job:
     """A single background analysis job."""
 
     job_id: str
+    user_id: str | None = None  # owner — None for jobs created before per-user scoping
     filename: str | None = None
     csv_path: str | None = None
     analysis_config: dict[str, Any] = field(default_factory=dict)
@@ -57,6 +58,7 @@ class Job:
     def to_record(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
+            "user_id": self.user_id,
             "filename": self.filename,
             "csv_path": self.csv_path,
             "analysis_config": json_safe(self.analysis_config),
@@ -89,6 +91,7 @@ class Job:
 
         return cls(
             job_id=str(record.get("job_id")),
+            user_id=record.get("user_id"),
             filename=record.get("filename"),
             csv_path=record.get("csv_path"),
             analysis_config=dict(record.get("analysis_config") or {}),
@@ -136,10 +139,12 @@ class JobManager:
         filename: str | None = None,
         csv_path: str | None = None,
         analysis_config: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> Job:
         job_id = uuid.uuid4().hex
         job = Job(
             job_id=job_id,
+            user_id=user_id,
             filename=filename,
             csv_path=csv_path,
             analysis_config=dict(analysis_config or {}),
@@ -160,14 +165,22 @@ class JobManager:
                     self._jobs[job_id] = job
         return job
 
-    def list_jobs(self) -> list[Job]:
+    def list_jobs(self, user_id: str | None = None) -> list[Job]:
+        """List jobs, optionally scoped to one owner.
+
+        ``user_id=None`` returns every job (used internally, e.g. cache warmup);
+        route handlers should always pass the authenticated caller's id.
+        """
         if self._store is not None:
             for job_data in self._store.list_jobs():
                 job = Job.from_record(job_data)
                 with self._lock:
                     self._jobs[job.job_id] = job
         with self._lock:
-            return list(self._jobs.values())
+            jobs = list(self._jobs.values())
+        if user_id is not None:
+            jobs = [job for job in jobs if job.user_id == user_id]
+        return jobs
 
     def delete_job(self, job_id: str) -> bool:
         """Forget a job entirely — memory and persistent store.

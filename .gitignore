@@ -28,6 +28,10 @@ backend/uploads/
 backend/outputs/
 backend/*.csv
 
+# Auto-generated symmetric key encrypting user-submitted API keys at rest
+# (only used when APP_ENCRYPTION_KEY isn't set in the environment).
+backend/.encryption_key
+
 # Local tooling caches
 .graphify/
 

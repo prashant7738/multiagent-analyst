@@ -30,3 +30,8 @@ services:
         value: info
       - key: PYTHON_VERSION
         value: "3.12.7"
+      # Cap rows embedded per RAG index build. The free instance has 512 MB RAM;
+      # the default (20000) OOMs during build_rag_index. 1000 keeps the peak
+      # well under the limit while stratified sampling preserves category coverage.
+      - key: RAG_MAX_ROWS
+        value: "1000"

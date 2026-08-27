@@ -12,9 +12,9 @@ from typing import Any, Iterator
 
 import psycopg
 from psycopg import sql
-from psycopg.rows import dict_row
 
 from api.services.crypto import decrypt, encrypt
+from api.services.db_pool import get_pool
 
 _FIELDS = ("groq_api_key", "gemini_api_key", "hf_token")
 
@@ -28,7 +28,7 @@ class PostgresUserSettingsStore:
 
     @contextmanager
     def _connect(self) -> Iterator[psycopg.Connection]:
-        with psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row) as conn:
+        with get_pool(self.dsn).connection() as conn:
             yield conn
 
     def _ensure_schema(self) -> None:

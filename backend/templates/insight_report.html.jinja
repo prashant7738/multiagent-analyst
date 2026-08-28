@@ -189,6 +189,12 @@
   .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .chart-sub { color: var(--muted); font-size: 9.5pt; margin: .05em 0 .45em; }
   .chart-desc { font-size: 10pt; margin: .3em 0; }
+  .chart-read { font-size: 10pt; margin: .3em 0; line-height: 1.5; }
+  .chart-read .lbl {
+    display: inline-block; min-width: 92px; font-weight: 600; color: var(--muted);
+    font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px;
+  }
+  .chart-read.is-why { color: var(--accent-ink); }
   .llm-caption {
     font-size: 10pt; color: var(--accent-ink); background: var(--accent-soft);
     border-left: 3px solid var(--accent); padding: 6px 11px; border-radius: 0 8px 8px 0; margin: .5em 0;
@@ -595,8 +601,11 @@
         {% if c.subtitle %}<p class="chart-sub">{{ c.subtitle }}</p>{% endif %}
       </div>
     </div>
-    {% set desc = c.plain_summary or c.why_it_matters %}
-    {% if desc %}<p class="chart-desc">{{ desc | abbr_glossary(glossary) }}</p>{% endif %}
+    {% set overview = c.plain_summary or c.why_it_matters %}
+    {% if overview %}<p class="chart-desc">{{ overview | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.descriptive %}<p class="chart-read"><span class="lbl">What it shows</span>{{ c.descriptive | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.diagnostic %}<p class="chart-read"><span class="lbl">Why it looks this way</span>{{ c.diagnostic | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.why_it_matters and c.why_it_matters != overview %}<p class="chart-read is-why"><span class="lbl">So what</span>{{ c.why_it_matters | abbr_glossary(glossary) }}</p>{% endif %}
     {% if c.llm_caption %}<p class="llm-caption">{{ c.llm_caption | abbr_glossary(glossary) }}</p>{% endif %}
     {% if c.annotations %}
     <div class="chips">

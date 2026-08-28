@@ -672,7 +672,8 @@ def _extract_chart_summaries(state, limit: int = 12) -> list[dict]:
         out.append({
             "id": spec.get("id"),
             "title": spec.get("title"),
-            "what_it_shows": spec.get("plain_summary") or spec.get("why_it_matters") or "",
+            "what_it_shows": spec.get("descriptive") or spec.get("plain_summary") or spec.get("why_it_matters") or "",
+            "why_it_looks_that_way": spec.get("diagnostic") or "",
         })
     return out
 
@@ -1707,6 +1708,8 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
             "subtitle": spec.get("subtitle", ""),
             "why_it_matters": spec.get("why_it_matters", ""),
             "plain_summary": spec.get("plain_summary", ""),
+            "descriptive": spec.get("descriptive", ""),
+            "diagnostic": spec.get("diagnostic", ""),
             "llm_caption": captions.get(chart_id, ""),
             "alt_text": spec.get("alt_text") or spec.get("title", ""),
             "section": spec.get("section", "what_matters"),
@@ -1889,6 +1892,7 @@ def _render_html(insight_facts, narrative, chart_paths, state):
                 "id": f"legacy_{path.stem}",
                 "title": path.stem.replace("_", " ").title(),
                 "subtitle": "", "why_it_matters": "", "plain_summary": "",
+                "descriptive": "", "diagnostic": "",
                 "llm_caption": "", "alt_text": path.stem.replace("_", " "),
                 "section": "what_matters",
                 "render": "image", "annotations": [],

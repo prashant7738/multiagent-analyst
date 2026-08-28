@@ -2231,8 +2231,56 @@ def agent4_analysis(state: GraphState) -> GraphState:
             _RUN_SUBDIR.reset(run_token)
 
 
+def _restore_scaled_columns(df, scaling_params):
+    """Report every statistic and chart in real-world units, not 0..1.
+
+    Agent 3 min-max scales some numeric columns *in place* (``df[col] = df[col_scaled]``),
+    keeping the pre-scale values in ``<col>_raw`` and the scaled copy in
+    ``<col>_scaled`` plus the ``{min, max}`` bounds in ``scaling_params``. Left as-is,
+    histograms, ranking bars, trend lines, scatters, seasonality and the descriptive
+    stats table all show squashed 0..1 values against a currency/number axis, which
+    can't be read. Swap the true values back for the duration of Agent 4.
+
+    Preference order per column:
+      1. inverse-transform ``<col>_scaled`` with the stored min/max — recovers the
+         exact post-clip real values the scaling was derived from;
+      2. fall back to the ``<col>_raw`` backup column.
+
+    The scaled representation stays available to any modelling code via
+    ``state['scaling_params']`` and the untouched ``<col>_scaled`` column.
+    """
+    if not scaling_params:
+        return df
+    restored = df.copy()
+    swapped = []
+    for col, params in scaling_params.items():
+        params = params or {}
+        if col not in restored.columns:
+            continue
+        scaled_col = params.get("scaled_col") or f"{col}_scaled"
+        raw_col = params.get("raw_col") or f"{col}_raw"
+        cmin, cmax = params.get("min"), params.get("max")
+        if scaled_col in restored.columns and cmin is not None and cmax is not None:
+            restored[col] = restored[scaled_col] * (float(cmax) - float(cmin)) + float(cmin)
+            swapped.append(col)
+        elif raw_col in restored.columns:
+            restored[col] = restored[raw_col]
+            swapped.append(col)
+    if swapped:
+        print(
+            f"[Agent 4] Restored pre-scaling units for {len(swapped)} column(s): "
+            f"{', '.join(swapped[:8])}{' …' if len(swapped) > 8 else ''}"
+        )
+    return restored
+
+
 def _agent4_analysis_inner(state: GraphState, errors: list, schema_blueprint, df) -> GraphState:
     _clear_chart_dir()
+
+    # Everything below (descriptive stats, planner + legacy charts, anomaly $ impact,
+    # formula reconciliation) must run on real units, so undo Agent 3's in-place
+    # min-max scaling first. State's cleaned_df is left untouched for agents 5/6.
+    df = _restore_scaled_columns(df, state.get("scaling_params") or {})
 
     print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
 

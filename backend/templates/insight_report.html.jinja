@@ -134,6 +134,14 @@
     font-size: 9.5pt; font-weight: 700; color: white;
   }
   .badge.good { background: var(--good); } .badge.warn { background: var(--warn); } .badge.bad { background: var(--bad); }
+  .badge.info { background: var(--accent, #6366f1); }
+  .badge.neutral { background: #6b7280; }
+  .provenance {
+    margin: .6em 0 0; padding: 9px 13px; font-size: 9.5pt; line-height: 1.5;
+    border: 1px solid var(--border); border-left: 3px solid var(--accent, #6366f1);
+    border-radius: 0 8px 8px 0; background: var(--surface); color: var(--muted);
+  }
+  .provenance strong { color: var(--ink); }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 8px; }
   .kpi-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -421,6 +429,13 @@
     {% else %}
       <span class="badge bad">Validation issues</span>
     {% endif %}
+    {% if narrative_provenance %}
+      {% if narrative_provenance.is_llm %}
+      <span class="badge info">AI-assisted narrative</span>
+      {% else %}
+      <span class="badge neutral">Rule-based narrative</span>
+      {% endif %}
+    {% endif %}
   </div>
   <div class="cover-stats">
     {% for card in kpis[:4] %}
@@ -486,6 +501,20 @@
       <span class="badge bad">Validation Failed</span>
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if narrative_provenance %}
+  <p class="provenance">
+    <strong>How this report was written:</strong>
+    {{ narrative_provenance.detail }}
+    {%- if narrative_provenance.is_llm and narrative_provenance.claims_checked %}
+      {{ narrative_provenance.claims_grounded }} of {{ narrative_provenance.claims_checked }}
+      checked claims matched the computed facts{% if narrative_provenance.claims_flagged %}; unmatched claims are flagged in this report{% endif %}.
+    {%- endif %}
+    {%- if not narrative_provenance.is_llm and narrative_provenance.fallback_reason %}
+      <br><em>Reason the model was not used:</em> {{ narrative_provenance.fallback_reason }}
+    {%- endif %}
+  </p>
   {% endif %}
 
   {% if quality is not none %}
@@ -1013,7 +1042,7 @@
   <span>Validation score: {% if facts.validation.overall_validation_score is not none %}{{ facts.validation.overall_validation_score | round(0, 'common') | int }}/100{% else %}not available{% endif %}</span>
   <span>Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}</span>
   <span>Pipeline confidence: {{ facts.reliability.overall_confidence }} ({{ facts.reliability.decision_readiness }})</span>
-  <span>Narrative source: {{ narrative.source }}</span>
+  <span>Narrative: {{ narrative_provenance.label if narrative_provenance else narrative.source }}{% if narrative_provenance %} &mdash; {{ narrative_provenance.engine }}{% if narrative_provenance.claims_checked %}; {{ narrative_provenance.claims_grounded }}/{{ narrative_provenance.claims_checked }} claims verified{% endif %}{% endif %}</span>
 </div>
 
 </main>

@@ -1,7 +1,7 @@
 \beamer@sectionintoc {1}{Outline}{2}{0}{1}
 \beamer@sectionintoc {2}{Motivation}{3}{0}{2}
 \beamer@sectionintoc {3}{Introduction}{4}{0}{3}
-\beamer@sectionintoc {4}{Problem Statement and Objectives}{5}{0}{4}
+\beamer@sectionintoc {4}{Objectives}{5}{0}{4}
 \beamer@sectionintoc {5}{Scope of Project}{6}{0}{5}
 \beamer@sectionintoc {6}{Project Applications}{7}{0}{6}
 \beamer@sectionintoc {7}{Methodology}{8}{0}{7}

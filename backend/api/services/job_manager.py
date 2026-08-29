@@ -318,6 +318,22 @@ class JobManager:
             return []
         return list(job.chat_history)
 
+    def clear_chat_history(self, job_id: str) -> Job | None:
+        """Wipe the job's Q&A transcript only.
+
+        The RAG index (row + fact embeddings in pgvector) and every rag_* build
+        field on the job are left untouched, so the next question is answered
+        immediately without re-embedding the dataset.
+        """
+        job = self.get_job(job_id)
+        if job is None:
+            return None
+        with job.condition:
+            job.chat_history = []
+            job.updated_at = _utcnow()
+        self._persist(job)
+        return job
+
     def try_begin_rag_build(self, job_id: str) -> bool:
         """Atomically claim the "building" state. Returns False if a build is already in flight."""
         job = self.get_job(job_id)

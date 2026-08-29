@@ -236,6 +236,15 @@ export async function askDatasetQuestion(jobId, question) {
 }
 
 /**
+ * DELETE /api/analyze/{job_id}/chat — clear the Q&A transcript only.
+ * The dataset's RAG index (embeddings) stays built. Returns the empty history.
+ */
+export async function clearChatHistory(jobId) {
+  const res = await authedFetch(`/api/analyze/${jobId}/chat`, { method: "DELETE" });
+  return parseJsonOrThrow(res);
+}
+
+/**
  * GET /api/settings/api-keys — per-provider configured/masked status for the
  * signed-in user's own Groq/Gemini/HF keys. Never returns the raw key.
  */

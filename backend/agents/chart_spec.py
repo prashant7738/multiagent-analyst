@@ -231,6 +231,26 @@ def _dedup_identity(spec: dict) -> tuple[tuple, bool]:
     return ((section, group, tuple(sorted(tokens))), bool(tokens))
 
 
+# Legacy PNGs are titled from their filename slug, which yields cryptic labels
+# ("Dist Order Status", "Boxplot Numeric Cols"). Give the common ones a title a
+# non-technical reader can parse at a glance.
+_LEGACY_TITLE_OVERRIDES = {
+    "distribution_boxplot": "Spread of the main number columns",
+    "correlation_heatmap": "How the number columns move together",
+    "derived_metrics_summary": "Summary of the calculated business metrics",
+}
+
+
+def _friendly_legacy_title(title: str, family: str) -> str:
+    if family in _LEGACY_TITLE_OVERRIDES:
+        return _LEGACY_TITLE_OVERRIDES[family]
+    t = str(title or "").strip()
+    m = re.match(r"(?:dist(?:ribution)?)\s+(?:of\s+)?(.+)", t, re.I)
+    if family == "category_distribution" and m:
+        return f"{m.group(1).strip()} — how common each value is"
+    return t
+
+
 def wrap_legacy_candidate(candidate: dict) -> dict | None:
     """Convert an agent_4 legacy chart candidate ({path, family, score, reason})
     into an image-render spec so old families keep their slot in the unified
@@ -238,7 +258,9 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
     path = candidate.get("path")
     family = candidate.get("family", "legacy")
     reason = candidate.get("reason") or ""
-    title = candidate.get("title") or _title_from_path(path, family)
+    title = _friendly_legacy_title(
+        candidate.get("title") or _title_from_path(path, family), family
+    )
     blurb = _FAMILY_BLURBS.get(family) or reason or f"Shows {family.replace('_', ' ')} patterns found in your data."
     try:
         priority = float(candidate.get("score", 0.0))
@@ -246,9 +268,9 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
         priority = 0.0
     if not path:
         return None
-    diagnostic = candidate.get("diagnostic") or (
-        f"Selected because {reason}." if reason else ""
-    )
+    # `reason` is an internal scoring string ("max |pearson r|=1.00",
+    # "skewness=2.97"). Never surface it to readers — the family blurb already
+    # says, in plain words, what the chart shows.
     return {
         "id": f"legacy_{family}_{abs(hash(path)) % 10_000}",
         "family": family,
@@ -260,10 +282,10 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
         "why_it_matters": blurb,
         "plain_summary": blurb,
         "descriptive": candidate.get("descriptive") or blurb,
-        "diagnostic": diagnostic,
+        "diagnostic": candidate.get("diagnostic") or "",
         "alt_text": title,
         "data": {},
-        "annotations": [{"label": "Signal", "value": reason}] if reason else [],
+        "annotations": [],
         "axis": {},
         "priority": round(priority, 2),
         "png_path": path,

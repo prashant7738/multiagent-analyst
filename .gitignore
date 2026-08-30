@@ -41,3 +41,27 @@ backend_run.log.err
 vite_run.log.err
 
 .pgdata
+
+# LaTeX build artifacts (keep the .tex sources and compiled .pdf only)
+reportfolder/*.aux
+reportfolder/*.fdb_latexmk
+reportfolder/*.fls
+reportfolder/*.lof
+reportfolder/*.log
+reportfolder/*.lot
+reportfolder/*.out
+reportfolder/*.synctex.gz
+reportfolder/*.toc
+presentation/*.aux
+presentation/*.fdb_latexmk
+presentation/*.fls
+presentation/*.log
+presentation/*.nav
+presentation/*.out
+presentation/*.snm
+presentation/*.synctex.gz
+presentation/*.toc
+
+# Claude Code skill-marketplace installs (not project content)
+.github/skills/
+skills-lock.json

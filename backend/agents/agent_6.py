@@ -1974,7 +1974,7 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         narrative_provenance=_narrative_provenance(narrative),
         has_interactive=bool(echarts_lib),
         echarts_lib=echarts_lib,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC"),
         # Prefer the name the user actually uploaded — csv_path is the server-side
         # "<job_id>.csv" storage path once a job is created (see analysis.py), so
         # deriving the display name from it shows a UUID-looking filename instead.

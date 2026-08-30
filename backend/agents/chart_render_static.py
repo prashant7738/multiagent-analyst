@@ -164,7 +164,7 @@ def _draw(spec: dict, out_path: str) -> None:
         box = data.get("box") or {}
         if len(bins) < 2 or len(counts) != len(bins) - 1:
             raise ValueError("histbox data missing")
-        gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.08)
+        gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.32)
         axh = fig.add_subplot(gs[0])
         axh.stairs(counts, bins, fill=True, color=PALETTE["primary"], alpha=0.82)
         has_stat_lines = False
@@ -176,6 +176,12 @@ def _draw(spec: dict, out_path: str) -> None:
         if has_stat_lines:
             axh.legend(fontsize=8)
         _style(fig, axh, spec, axis_cfg, tight=False)
+        # The box strip below carries the shared x-axis; without this the
+        # histogram's own x tick labels print in the gap and collide with the
+        # box plot. Drop the x label off the histogram too — it belongs on the
+        # bottom axis where the ticks actually are.
+        axh.tick_params(labelbottom=False)
+        axh.set_xlabel("")
         fig.subplots_adjust(top=0.86)
         axb = fig.add_subplot(gs[1], sharex=axh)
         bx_stats = {
@@ -187,10 +193,15 @@ def _draw(spec: dict, out_path: str) -> None:
             axb.bxp([bx_stats], vert=False, patch_artist=True, widths=0.7,
                     boxprops={"facecolor": "#fde68a", "alpha": 0.9},
                     medianprops={"color": PALETTE["warning"], "linewidth": 2},
-                    flierprops={"marker": "o", "markersize": 4,
-                                "markerfacecolor": PALETTE["accent"], "alpha": 0.7})
+                    flierprops={"marker": "o", "markersize": 3,
+                                "markerfacecolor": PALETTE["accent"], "alpha": 0.4})
         axb.set_yticks([])
         axb.set_ylabel("")
+        # Human-unit x ticks ("200M") instead of matplotlib's "1e8" offset, and
+        # the x label moved down here from the histogram.
+        axb.xaxis.set_major_formatter(mticker.FuncFormatter(_formatter(axis_cfg)))
+        if axis_cfg.get("x_label"):
+            axb.set_xlabel(axis_cfg["x_label"], fontsize=10)
         axb.tick_params(labelsize=8)
 
     elif kind == "heatmap":

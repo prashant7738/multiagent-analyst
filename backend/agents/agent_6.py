@@ -672,7 +672,8 @@ def _extract_chart_summaries(state, limit: int = 12) -> list[dict]:
         out.append({
             "id": spec.get("id"),
             "title": spec.get("title"),
-            "what_it_shows": spec.get("plain_summary") or spec.get("why_it_matters") or "",
+            "what_it_shows": spec.get("descriptive") or spec.get("plain_summary") or spec.get("why_it_matters") or "",
+            "why_it_looks_that_way": spec.get("diagnostic") or "",
         })
     return out
 
@@ -1707,6 +1708,8 @@ def _build_chart_view_models(state, narrative: dict) -> list[dict]:
             "subtitle": spec.get("subtitle", ""),
             "why_it_matters": spec.get("why_it_matters", ""),
             "plain_summary": spec.get("plain_summary", ""),
+            "descriptive": spec.get("descriptive", ""),
+            "diagnostic": spec.get("diagnostic", ""),
             "llm_caption": captions.get(chart_id, ""),
             "alt_text": spec.get("alt_text") or spec.get("title", ""),
             "section": spec.get("section", "what_matters"),
@@ -1855,6 +1858,58 @@ def _dataset_intro(facts: dict) -> list[str]:
     return lines
 
 
+def _narrative_provenance(narrative: dict) -> dict:
+    """Reader-facing summary of HOW the prose in this report was produced.
+
+    The report is always a hybrid: every number, table and chart read-out
+    ("What it shows" / "Why it looks this way") is computed deterministically
+    from the dataset. This only describes the *narrative* layer — executive
+    summary, key findings, recommendations, and the optional per-chart captions —
+    which is either drafted by an LLM (and then grounded against the computed
+    facts) or, when no model is reachable, assembled from fixed templates.
+    """
+    narrative = narrative or {}
+    source = narrative.get("source") or "fallback"
+    raw_reason = str(narrative.get("fallback_reason") or "").strip()
+    # Provider failures arrive as a full exception dump (nested JSON, both
+    # providers' errors). Keep just the human-readable head so the report stays
+    # legible: everything up to the first embedded JSON / dict, capped.
+    short_reason = re.split(r"\s*[-–—]\s*\{|\s*\{['\"]|\n", raw_reason, maxsplit=1)[0].strip()
+    if len(short_reason) > 200:
+        short_reason = short_reason[:197].rstrip() + "…"
+    grounding = narrative.get("claims_grounding") or {}
+    captions = narrative.get("chart_captions") or {}
+    engines = {
+        "groq": f"Groq · {GROQ_MODEL}",
+        "gemini": "Google Gemini",
+        "fallback": "deterministic templates (no LLM)",
+    }
+    is_llm = source in ("groq", "gemini")
+    engine = engines.get(source, source)
+    return {
+        "source": source,
+        "is_llm": is_llm,
+        "label": "AI-assisted narrative" if is_llm else "Rule-based narrative",
+        "engine": engine,
+        "fallback_reason": short_reason or None,
+        "llm_chart_captions": len(captions),
+        "claims_checked": grounding.get("claims_checked") or 0,
+        "claims_grounded": grounding.get("claims_grounded") or 0,
+        "claims_flagged": bool(grounding.get("claims_flagged")),
+        "detail": (
+            f"The executive summary, key findings and recommendations were drafted by "
+            f"{engine} from the pipeline's computed facts, then checked back against "
+            f"those facts. Every figure, table and chart read-out in this report is "
+            f"computed deterministically, not written by the model."
+            if is_llm else
+            "No language model was reachable, so the executive summary, key findings "
+            "and recommendations were assembled from fixed templates over the "
+            "pipeline's computed facts. Every figure, table and chart read-out is "
+            "computed deterministically."
+        ),
+    }
+
+
 def _render_html(insight_facts, narrative, chart_paths, state):
     """Render the report. Signature kept compatible with existing tests:
     legacy `chart_paths` PNGs are still embedded as base64 images."""
@@ -1889,6 +1944,7 @@ def _render_html(insight_facts, narrative, chart_paths, state):
                 "id": f"legacy_{path.stem}",
                 "title": path.stem.replace("_", " ").title(),
                 "subtitle": "", "why_it_matters": "", "plain_summary": "",
+                "descriptive": "", "diagnostic": "",
                 "llm_caption": "", "alt_text": path.stem.replace("_", " "),
                 "section": "what_matters",
                 "render": "image", "annotations": [],
@@ -1915,9 +1971,10 @@ def _render_html(insight_facts, narrative, chart_paths, state):
         dataset_intro=_dataset_intro(insight_facts),
         quality_verdict=_quality_verdict(quality),
         chart_sections=_group_by_section(entries),
+        narrative_provenance=_narrative_provenance(narrative),
         has_interactive=bool(echarts_lib),
         echarts_lib=echarts_lib,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        generated_at=datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC"),
         # Prefer the name the user actually uploaded — csv_path is the server-side
         # "<job_id>.csv" storage path once a job is created (see analysis.py), so
         # deriving the display name from it shows a UUID-looking filename instead.

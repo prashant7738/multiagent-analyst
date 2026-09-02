@@ -123,17 +123,32 @@
   .page { min-width: 0; }
 
   /* ── hero / badges / kpis ───────────────────────────────────────────── */
-  .hero-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+  /* align-items:center keeps flex children from stretching to the row height;
+     an explicit line-height + a small fixed border-radius keep these pills
+     crisp in WeasyPrint (a 999px radius on a stretched inline-block renders
+     as a distorted ellipse there — see the PDF cover). white-space:nowrap
+     stops a label ever wrapping to a second line inside its pill. */
+  .hero-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; }
   .chip {
-    font-size: 8.5pt; background: var(--surface-2); border: 1px solid var(--border);
-    color: var(--muted); border-radius: 999px; padding: 3px 11px;
+    display: inline-block; font-size: 8.5pt; line-height: 1.4; white-space: nowrap;
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--muted); border-radius: 6px; padding: 4px 10px; vertical-align: middle;
   }
-  .badge-row { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge-row { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .badge {
-    display: inline-block; padding: 4px 12px; border-radius: 999px;
-    font-size: 9.5pt; font-weight: 700; color: white;
+    display: inline-block; padding: 4px 11px; border-radius: 6px;
+    font-size: 9pt; font-weight: 600; line-height: 1.4; color: white;
+    white-space: nowrap; vertical-align: middle;
   }
   .badge.good { background: var(--good); } .badge.warn { background: var(--warn); } .badge.bad { background: var(--bad); }
+  .badge.info { background: var(--accent, #6366f1); }
+  .badge.neutral { background: #6b7280; }
+  .provenance {
+    margin: .6em 0 0; padding: 9px 13px; font-size: 9.5pt; line-height: 1.5;
+    border: 1px solid var(--border); border-left: 3px solid var(--accent, #6366f1);
+    border-radius: 0 8px 8px 0; background: var(--surface); color: var(--muted);
+  }
+  .provenance strong { color: var(--ink); }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 8px; }
   .kpi-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -189,6 +204,12 @@
   .chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
   .chart-sub { color: var(--muted); font-size: 9.5pt; margin: .05em 0 .45em; }
   .chart-desc { font-size: 10pt; margin: .3em 0; }
+  .chart-read { font-size: 10pt; margin: .3em 0; line-height: 1.5; }
+  .chart-read .lbl {
+    display: inline-block; min-width: 92px; font-weight: 600; color: var(--muted);
+    font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; margin-right: 4px;
+  }
+  .chart-read.is-why { color: var(--accent-ink); }
   .llm-caption {
     font-size: 10pt; color: var(--accent-ink); background: var(--accent-soft);
     border-left: 3px solid var(--accent); padding: 6px 11px; border-radius: 0 8px 8px 0; margin: .5em 0;
@@ -341,6 +362,17 @@
     .toc a { display: flex; }
     .section-head, h2 { page-break-after: avoid; }
     .panel, .two-col { page-break-inside: avoid; }
+    /* WeasyPrint's flexbox is only partial: the cover's nested flex columns can
+       stretch each badge to the full row height, and the pills then print as
+       ellipses. Take the hero rows out of flex for the PDF and lay the pills
+       out as plain inline-block chips with margins — identical look, no stretch. */
+    .cover { display: block; }
+    .badge-row, .hero-chips, .cover-stats { display: block; }
+    .badge-row .badge, .badge-row .chip, .hero-chips .chip {
+      margin: 0 6px 6px 0;
+    }
+    .cover-stats .cover-stat { display: inline-block; vertical-align: top; margin: 0 26px 0 0; }
+    .health-track, .health-fill { border-radius: 5px; }
   }
 </style>
 </head>
@@ -415,6 +447,13 @@
     {% else %}
       <span class="badge bad">Validation issues</span>
     {% endif %}
+    {% if narrative_provenance %}
+      {% if narrative_provenance.is_llm %}
+      <span class="badge info">AI-assisted narrative</span>
+      {% else %}
+      <span class="badge neutral">Rule-based narrative</span>
+      {% endif %}
+    {% endif %}
   </div>
   <div class="cover-stats">
     {% for card in kpis[:4] %}
@@ -480,6 +519,20 @@
       <span class="badge bad">Validation Failed</span>
     {% endif %}
   </div>
+  {% endif %}
+
+  {% if narrative_provenance %}
+  <p class="provenance">
+    <strong>How this report was written:</strong>
+    {{ narrative_provenance.detail }}
+    {%- if narrative_provenance.is_llm and narrative_provenance.claims_checked %}
+      {{ narrative_provenance.claims_grounded }} of {{ narrative_provenance.claims_checked }}
+      checked claims matched the computed facts{% if narrative_provenance.claims_flagged %}; unmatched claims are flagged in this report{% endif %}.
+    {%- endif %}
+    {%- if not narrative_provenance.is_llm and narrative_provenance.fallback_reason %}
+      <br><em>Reason the model was not used:</em> {{ narrative_provenance.fallback_reason }}
+    {%- endif %}
+  </p>
   {% endif %}
 
   {% if quality is not none %}
@@ -595,8 +648,11 @@
         {% if c.subtitle %}<p class="chart-sub">{{ c.subtitle }}</p>{% endif %}
       </div>
     </div>
-    {% set desc = c.plain_summary or c.why_it_matters %}
-    {% if desc %}<p class="chart-desc">{{ desc | abbr_glossary(glossary) }}</p>{% endif %}
+    {% set overview = c.plain_summary or c.why_it_matters %}
+    {% if overview %}<p class="chart-desc">{{ overview | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.descriptive %}<p class="chart-read"><span class="lbl">What it shows</span>{{ c.descriptive | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.diagnostic %}<p class="chart-read"><span class="lbl">Why it looks this way</span>{{ c.diagnostic | abbr_glossary(glossary) }}</p>{% endif %}
+    {% if c.why_it_matters and c.why_it_matters != overview %}<p class="chart-read is-why"><span class="lbl">So what</span>{{ c.why_it_matters | abbr_glossary(glossary) }}</p>{% endif %}
     {% if c.llm_caption %}<p class="llm-caption">{{ c.llm_caption | abbr_glossary(glossary) }}</p>{% endif %}
     {% if c.annotations %}
     <div class="chips">
@@ -1004,7 +1060,7 @@
   <span>Validation score: {% if facts.validation.overall_validation_score is not none %}{{ facts.validation.overall_validation_score | round(0, 'common') | int }}/100{% else %}not available{% endif %}</span>
   <span>Cohen&rsquo;s kappa: {{ facts.validation.cohen_kappa }}</span>
   <span>Pipeline confidence: {{ facts.reliability.overall_confidence }} ({{ facts.reliability.decision_readiness }})</span>
-  <span>Narrative source: {{ narrative.source }}</span>
+  <span>Narrative: {{ narrative_provenance.label if narrative_provenance else narrative.source }}{% if narrative_provenance %} &mdash; {{ narrative_provenance.engine }}{% if narrative_provenance.claims_checked %}; {{ narrative_provenance.claims_grounded }}/{{ narrative_provenance.claims_checked }} claims verified{% endif %}{% endif %}</span>
 </div>
 
 </main>

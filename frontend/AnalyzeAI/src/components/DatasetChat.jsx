@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, CheckCircle2, Loader2, MessageCircleQuestion, Send, X } from "lucide-react";
-import { askDatasetQuestion, fetchChatHistory, fetchJob, chartUrl } from "@/lib/api";
+import { AlertTriangle, CheckCircle2, Loader2, MessageCircleQuestion, Send, Trash2, X } from "lucide-react";
+import { askDatasetQuestion, clearChatHistory, fetchChatHistory, fetchJob, chartUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const SUGGESTED_QUESTIONS = [
@@ -31,6 +31,7 @@ export default function DatasetChat({ jobId }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState(null);
   // RAG embedding-index state polled from GET /api/jobs/{id}
@@ -174,6 +175,26 @@ export default function DatasetChat({ jobId }) {
     }
   };
 
+  // Wipe the conversation only. The RAG embedding index stays built, so the
+  // next question is answered without re-indexing the dataset.
+  const clearConversation = useCallback(async () => {
+    if (clearing || loading || !jobId || messages.length === 0) return;
+    if (typeof window !== "undefined" &&
+        !window.confirm("Clear this conversation? The dataset stays indexed — only the chat is removed.")) {
+      return;
+    }
+    setClearing(true);
+    setError(null);
+    try {
+      await clearChatHistory(jobId);
+      setMessages([]);
+    } catch (err) {
+      setError(err.message || "Couldn't clear the conversation.");
+    } finally {
+      setClearing(false);
+    }
+  }, [clearing, loading, jobId, messages.length]);
+
   // ── RAG indexing indicator state (derived) ──────────────────────────────
   const ragBuilding = rag?.status === "building";
   const ragReady = rag?.status === "ready";
@@ -268,15 +289,29 @@ export default function DatasetChat({ jobId }) {
                     {ragFailed && "Index build failed—questions unavailable"}
                   </p>
                 </div>
-                <button
-                  onClick={closePanel}
-                  type="button"
-                  className="ml-auto flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface hover:bg-line text-ink-secondary hover:text-ink transition-colors"
-                  title="Close (Esc)"
-                  aria-label="Close chat"
-                >
-                  <X size={22} strokeWidth={2} />
-                </button>
+                <div className="ml-auto flex flex-shrink-0 items-center gap-1">
+                  {messages.length > 0 && (
+                    <button
+                      onClick={clearConversation}
+                      type="button"
+                      disabled={clearing || loading}
+                      className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface hover:bg-line text-ink-secondary hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Clear conversation (keeps the dataset indexed)"
+                      aria-label="Clear conversation"
+                    >
+                      {clearing ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} strokeWidth={2} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={closePanel}
+                    type="button"
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface hover:bg-line text-ink-secondary hover:text-ink transition-colors"
+                    title="Close (Esc)"
+                    aria-label="Close chat"
+                  >
+                    <X size={22} strokeWidth={2} />
+                  </button>
+                </div>
               </header>
 
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">

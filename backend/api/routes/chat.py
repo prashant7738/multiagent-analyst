@@ -47,6 +47,23 @@ async def get_chat_history(
     return [ChatMessage(**message) for message in job.chat_history]
 
 
+@router.delete("", response_model=list[ChatMessage])
+async def clear_chat_history(
+    job_id: str,
+    manager: JobManager = Depends(get_job_manager),
+    user: AuthUser = Depends(get_current_user),
+) -> list[ChatMessage]:
+    """Clear the Q&A transcript for this job.
+
+    Only the conversation is removed. The dataset's RAG index (row + fact
+    embeddings) stays built, so the next question needs no re-embedding.
+    Returns the now-empty history.
+    """
+    _get_owned_job(job_id, manager, user)
+    manager.clear_chat_history(job_id)
+    return []
+
+
 @router.post("", response_model=ChatResponse)
 async def ask_dataset_question(
     job_id: str,

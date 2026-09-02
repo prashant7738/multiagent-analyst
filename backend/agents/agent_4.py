@@ -15,7 +15,7 @@ from agents.agent_1 import GraphState
 from agents.agent_3 import _is_count_field
 from agents.rule_definitions import rule_manifest
 from main import update_reliability
-from agents.report_style import safe_filename_component
+from agents.report_style import humanize_number, safe_filename_component
 
 warnings.filterwarnings("ignore")
 # Category bar charts intentionally pass numeric-looking strings (years, codes)
@@ -69,8 +69,13 @@ CHART_SAVE_DPI = 150
 MAX_CHART_DIM_PX = 1600
 MAX_CHART_DIM_INCHES = MAX_CHART_DIM_PX / CHART_SAVE_DPI
 # Beyond this many x-axis ticks, labels overlap into illegible mush - thin them
-# to an evenly-spaced readable subset instead of drawing all of them.
-MAX_XTICK_LABELS = 40
+# to an evenly-spaced readable subset instead of drawing all of them. Kept low
+# because the report renders these PNGs scaled down to ~700px wide, where even
+# ~20 horizontal date labels ("2010-Q1" ...) collide.
+MAX_XTICK_LABELS = 18
+# Above this many ticks (but at/below the thinning cap) we still can't fit them
+# horizontally at display size - rotate them so they stay readable.
+ROTATE_XTICK_LABELS_ABOVE = 8
 # Beyond this many time-series periods (months/quarters), a bar-per-period
 # chart is illegible even after tick thinning - roll the chart up to a
 # coarser grain (e.g. monthly -> yearly) instead.
@@ -95,9 +100,9 @@ def _thin_axis_tick_labels(ax, max_labels=MAX_XTICK_LABELS):
     type with a dense category/time axis degrades gracefully."""
     labels = ax.get_xticklabels()
     n = len(labels)
-    if n <= max_labels:
+    if n <= ROTATE_XTICK_LABELS_ABOVE:
         return
-    step = math.ceil(n / max_labels)
+    step = math.ceil(n / max_labels) if n > max_labels else 1
     for i, label in enumerate(labels):
         label.set_visible(i % step == 0)
     for label in ax.get_xticklabels():
@@ -645,6 +650,87 @@ def _correlation(df, schema_blueprint):
 # 3 — GROWTH RATES (MoM and QoQ)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _time_series_movement_text(chart_data, value_col, growth_col, value_label, period_word):
+    """Plain-language (descriptive, diagnostic) for a bar + growth-line time chart,
+    grounded in this data's real start/end, up-vs-down periods and biggest swings.
+
+    Legacy growth charts otherwise carry only a generic one-liner and no
+    "why does it look like this" read — this fills both in from the actual series.
+    """
+    try:
+        d = chart_data.dropna(subset=[value_col]).reset_index(drop=True)
+    except Exception:  # noqa: BLE001 — narration is best-effort, never fatal
+        return "", ""
+    n = len(d)
+    if n < 2:
+        return "", ""
+    noun = {"monthly": "month", "quarterly": "quarter", "yearly": "year"}.get(
+        str(period_word).lower(), "period")
+    first_v, last_v = float(d[value_col].iloc[0]), float(d[value_col].iloc[-1])
+    first_lbl, last_lbl = str(d["label"].iloc[0]), str(d["label"].iloc[-1])
+    net_pct = (last_v / first_v - 1.0) * 100 if first_v else 0.0
+    peak_i, trough_i = int(d[value_col].idxmax()), int(d[value_col].idxmin())
+
+    if growth_col in d.columns:
+        g = d[growth_col].dropna()
+    else:
+        g = (d[value_col].pct_change() * 100).dropna()
+    ups, downs = int((g > 0).sum()), int((g < 0).sum())
+    typical = float(g.abs().median()) if not g.empty else 0.0
+    up_lbl = dn_lbl = ""
+    up_val = dn_val = 0.0
+    if not g.empty:
+        up_val, dn_val = float(g.max()), float(g.min())
+        up_lbl = str(d["label"].iloc[int(g.idxmax())])
+        dn_lbl = str(d["label"].iloc[int(g.idxmin())])
+
+    descriptive = (
+        f"{value_label} is shown for {n} {noun}s, from about {humanize_number(first_v)} in "
+        f"{first_lbl} to {humanize_number(last_v)} in {last_lbl} "
+        f"({'+' if net_pct >= 0 else ''}{net_pct:.0f}% across the whole span). It rose in "
+        f"{ups} {noun}s and fell in {downs}. The high point was {d['label'].iloc[peak_i]} "
+        f"({humanize_number(float(d[value_col].iloc[peak_i]))}); the low point "
+        f"{d['label'].iloc[trough_i]} ({humanize_number(float(d[value_col].iloc[trough_i]))})."
+    )
+
+    if abs(net_pct) < 5 and ups and downs:
+        shape = (
+            f"{value_label} bounces up and down from one {noun} to the next with no clear overall "
+            f"direction — the gains and losses roughly cancel out, so most of this is ordinary "
+            f"{noun}-to-{noun} variation rather than a real trend."
+        )
+    elif net_pct >= 5 and ups >= downs:
+        shape = (
+            f"The {noun}s jump around, but the up moves outweigh the down ones, so "
+            f"{value_label.lower()} is on a genuine upward path over the period; the dips are "
+            f"noise around that rise."
+        )
+    elif net_pct <= -5 and downs >= ups:
+        shape = (
+            f"The up moves don't keep pace with the down ones, so {value_label.lower()} drifts "
+            f"lower over the period — the occasional strong {noun} interrupts the decline without "
+            f"reversing it."
+        )
+    else:
+        shape = (
+            f"{value_label} moves unevenly from {noun} to {noun} with no strong overall direction."
+        )
+
+    if up_lbl and dn_lbl:
+        shape += (
+            f" The sharpest single jump was {up_val:+.0f}% ({up_lbl}) and the sharpest drop "
+            f"{dn_val:.0f}% ({dn_lbl})."
+        )
+    if (not g.empty and g.iloc[-1] == dn_val and dn_val < 0
+            and abs(dn_val) > 3 * max(typical, 1e-9)):
+        shape += (
+            f" That biggest drop is the final bar ({last_lbl}) and is far larger than a normal "
+            f"{noun}'s move, so it is most likely a partial or incomplete {noun} rather than a true "
+            f"collapse — check where the data actually ends before acting on it."
+        )
+    return descriptive, shape
+
+
 def _growth_rates(df, schema_blueprint):
     result = {}
     chart_candidates = []
@@ -689,7 +775,7 @@ def _growth_rates(df, schema_blueprint):
                 x_axis_label, period_word, growth_word = "Month", "Monthly", "MoM"
                 title_suffix = ""
 
-            fig, ax = plt.subplots(figsize=(max(8, len(chart_data)), 4))
+            fig, ax = plt.subplots(figsize=(min(max(8, len(chart_data) * 0.5), 16), 4.2))
             ax.bar(chart_data["label"], chart_data[rev_col],
                    color=COLORS["primary"], alpha=0.85, label=label)
             ax2 = ax.twinx()
@@ -699,6 +785,8 @@ def _growth_rates(df, schema_blueprint):
             ax2.axhline(0, color="gray", linewidth=0.8, linestyle="--")
             ax.set_xlabel(x_axis_label, fontsize=10)
             ax.set_ylabel(label, fontsize=10)
+            ax.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda x, _: humanize_number(x)))
             ax2.set_ylabel(f"{growth_word} Growth %", fontsize=10)
             ax.set_title(f"{period_word} {label} & {growth_word} Growth{title_suffix}", fontsize=13, fontweight="bold")
             plt.xticks(rotation=45, ha="right")
@@ -708,10 +796,13 @@ def _growth_rates(df, schema_blueprint):
             fig.tight_layout()
             growth_path = _save(fig, f"monthly_{slug}_growth")
             max_swing = float(valid["growth_pct"].abs().max()) if not valid.empty else 0.0
+            desc_txt, diag_txt = _time_series_movement_text(
+                chart_data, rev_col, "growth_pct", label, period_word)
             chart_candidates.append({
                 "path": growth_path, "family": "growth_rates_monthly",
                 "score": round(min(100.0, max_swing), 1),
                 "reason": f"max {growth_word} swing={max_swing:.1f}%",
+                "descriptive": desc_txt, "diagnostic": diag_txt,
             })
 
     quarter_col = next((c for c in df.columns if c.endswith("_quarter")), None)
@@ -730,25 +821,55 @@ def _growth_rates(df, schema_blueprint):
         result["quarterly"] = quarterly.dropna().to_dict(orient="records")
 
         if len(quarterly) >= 2 and _has_meaningful_variation(quarterly[rev_col]):
-            chart_data = quarterly
-            title = f"Quarterly {label}"
-            fig, ax = plt.subplots(figsize=(max(6, len(chart_data)+2), 4))
-            bars = ax.bar(chart_data["label"], chart_data[rev_col],
-                          color=COLORS["secondary"], alpha=0.85)
-            for bar, val in zip(bars, chart_data[rev_col]):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                        f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
+            # Chart grain: one bar per quarter is unreadable once there are many
+            # quarters (the labels and any on-bar numbers overlap into mush at the
+            # report's display width). Roll the CHART up to yearly past the cap;
+            # result["quarterly"] above stays full-fidelity for the stats.
+            if len(quarterly) > MAX_TIME_SERIES_CHART_POINTS:
+                chart_data = quarterly.groupby(year_col, as_index=False)[rev_col].sum()
+                chart_data["label"] = chart_data[year_col].astype(str)
+                chart_data["qoq_growth_pct"] = chart_data[rev_col].pct_change() * 100
+                title = f"Yearly {label} (rolled up from {len(quarterly)} quarters)"
+                growth_word, x_axis_label, period_word = "YoY", "Year", "Yearly"
+            else:
+                chart_data = quarterly
+                title = f"Quarterly {label}"
+                growth_word, x_axis_label, period_word = "QoQ", "Quarter", "Quarterly"
+
+            fig, ax = plt.subplots(figsize=(min(max(7, len(chart_data) * 0.5 + 2), 16), 4.2))
+            ax.bar(chart_data["label"], chart_data[rev_col],
+                   color=COLORS["secondary"], alpha=0.85, label=label)
+            # No per-bar value labels: with this many bars they overlap and the
+            # y-axis + growth line already carry the magnitude. (Mirrors the
+            # interactive charts, which only label when there are very few bars.)
+            valid_line = chart_data.dropna(subset=["qoq_growth_pct"])
+            if not valid_line.empty:
+                ax2 = ax.twinx()
+                ax2.plot(valid_line["label"], valid_line["qoq_growth_pct"],
+                         color=COLORS["accent"], marker="o", linewidth=1.8,
+                         markersize=4, label=f"{growth_word} Growth %")
+                ax2.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+                ax2.set_ylabel(f"{growth_word} Growth %", fontsize=10)
+                lines1, labels1 = ax.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=8)
             ax.set_title(title, fontsize=13, fontweight="bold")
-            ax.set_ylabel(label)
-            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
+            ax.set_xlabel(x_axis_label, fontsize=10)
+            ax.set_ylabel(label, fontsize=10)
+            ax.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda x, _: humanize_number(x)))
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
             fig.tight_layout()
             quarterly_path = _save(fig, f"quarterly_{slug}")
             valid_q = quarterly.dropna(subset=["qoq_growth_pct"])
             max_swing_q = float(valid_q["qoq_growth_pct"].abs().max()) if not valid_q.empty else 0.0
+            desc_txt_q, diag_txt_q = _time_series_movement_text(
+                chart_data, rev_col, "qoq_growth_pct", label, period_word)
             chart_candidates.append({
                 "path": quarterly_path, "family": "growth_rates_quarterly",
                 "score": round(min(100.0, max_swing_q), 1),
                 "reason": f"max QoQ swing={max_swing_q:.1f}%",
+                "descriptive": desc_txt_q, "diagnostic": diag_txt_q,
             })
 
     return result, chart_candidates
@@ -1017,10 +1138,10 @@ def _seasonality(df, schema_blueprint):
                           color=COLORS["bars"][:4], alpha=0.88, width=0.5)
             for bar, val in zip(bars, quarterly_avg[rev_col]):
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                        f"{val:,.0f}", ha="center", va="bottom", fontsize=9)
+                        humanize_number(val), ha="center", va="bottom", fontsize=9)
             ax.set_title(f"Quarterly {label} Seasonality", fontsize=13, fontweight="bold")
             ax.set_ylabel(f"Avg {label}", fontsize=10)
-            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:,.0f}"))
+            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: humanize_number(x)))
             fig.tight_layout()
             quarterly_path = _save(fig, f"quarterly_{slug}_seasonality")
             spread_q = abs(float(best_q[rev_col]) - float(worst_q[rev_col]))
@@ -1516,18 +1637,34 @@ def _category_distributions(df, schema_blueprint):
         # Use explicit Python str() to avoid pandas 3.x StringDtype / pd.NA
         # values reaching matplotlib's category converter as floats.
         x_labels = [str(v) for v in chart_counts.index]
-        fig, ax = plt.subplots(figsize=(max(6, len(chart_counts)), 4))
-        bar_colors = [COLORS["bars"][i % len(COLORS["bars"])] for i in range(len(chart_counts))]
+        # The report scales this PNG down to ~640px wide, so a figure that grows
+        # 1"/bar turns 15 bars into unreadable mush. Cap the width and truncate
+        # long category names instead.
+        n_bars = len(chart_counts)
+        fig, ax = plt.subplots(figsize=(min(max(6, n_bars * 0.7), 13), 4))
+        bar_colors = [COLORS["bars"][i % len(COLORS["bars"])] for i in range(n_bars)]
         bars = ax.bar(x_labels, chart_counts.values, color=bar_colors, alpha=0.88)
-        for bar, p in zip(bars, chart_pct.values):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
-                    f"{p:.1f}%", ha="center", va="bottom", fontsize=9)
+        # On-bar % labels only when there are few enough bars to space them out;
+        # past that they collide into each other (mirrors the interactive charts,
+        # which label only <=8 bars). Skip sub-1% slivers so a long tail of
+        # "0.0%"/"0.1%" doesn't stack up along the baseline either way.
+        if n_bars <= 8:
+            for bar, p in zip(bars, chart_pct.values):
+                if p < 1.0:
+                    continue
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
+                        f"{p:.0f}%" if p >= 10 else f"{p:.1f}%",
+                        ha="center", va="bottom", fontsize=9)
         title = f"Distribution of {col}"
         if len(chart_counts) < len(counts):
             title += f" (top {CATEGORY_CHART_TOP_N} + Other, {len(counts)} categories total)"
         ax.set_title(title, fontsize=13, fontweight="bold")
         ax.set_ylabel("Count", fontsize=10)
-        plt.xticks(rotation=30, ha="right")
+        ax.set_xticks(range(n_bars))
+        ax.set_xticklabels(
+            [s if len(s) <= 16 else s[:15] + "…" for s in x_labels],
+            rotation=40, ha="right", fontsize=8,
+        )
         fig.tight_layout()
         dist_path = _save(fig, f"dist_{col.lower()}")
         # A distribution that's far from uniform (one category dominating
@@ -1782,9 +1919,17 @@ def _derived_metrics_charts(df):
             val = df[col].mean()
             label = col.replace("derived_", "").replace("_", " ").title()
             ax.bar([label], [val], color=color, alpha=0.88, width=0.5)
-            ax.text(0, val, f"{val:,.1f}", ha="center", va="bottom", fontsize=9)
+            # humanize_number ("16.0M") instead of "16,047,501.1" + a "1e7" axis
+            # offset that otherwise overlaps the panel title in these narrow subplots.
+            ax.text(0, val, humanize_number(val), ha="center",
+                    va="bottom" if val >= 0 else "top", fontsize=9)
+            ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+            ax.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda x, _: humanize_number(x)))
+            ax.tick_params(axis="y", labelsize=7)
             ax.set_title(label, fontsize=10)
-            ax.tick_params(axis="x", labelsize=8)
+            ax.set_xticks([])
+            ax.margins(y=0.18)
         fig.suptitle("Derived Business Metrics — Averages", fontsize=13, fontweight="bold")
         fig.tight_layout()
         summary_path = _save(fig, "derived_metrics_summary")
@@ -2231,8 +2376,56 @@ def agent4_analysis(state: GraphState) -> GraphState:
             _RUN_SUBDIR.reset(run_token)
 
 
+def _restore_scaled_columns(df, scaling_params):
+    """Report every statistic and chart in real-world units, not 0..1.
+
+    Agent 3 min-max scales some numeric columns *in place* (``df[col] = df[col_scaled]``),
+    keeping the pre-scale values in ``<col>_raw`` and the scaled copy in
+    ``<col>_scaled`` plus the ``{min, max}`` bounds in ``scaling_params``. Left as-is,
+    histograms, ranking bars, trend lines, scatters, seasonality and the descriptive
+    stats table all show squashed 0..1 values against a currency/number axis, which
+    can't be read. Swap the true values back for the duration of Agent 4.
+
+    Preference order per column:
+      1. inverse-transform ``<col>_scaled`` with the stored min/max — recovers the
+         exact post-clip real values the scaling was derived from;
+      2. fall back to the ``<col>_raw`` backup column.
+
+    The scaled representation stays available to any modelling code via
+    ``state['scaling_params']`` and the untouched ``<col>_scaled`` column.
+    """
+    if not scaling_params:
+        return df
+    restored = df.copy()
+    swapped = []
+    for col, params in scaling_params.items():
+        params = params or {}
+        if col not in restored.columns:
+            continue
+        scaled_col = params.get("scaled_col") or f"{col}_scaled"
+        raw_col = params.get("raw_col") or f"{col}_raw"
+        cmin, cmax = params.get("min"), params.get("max")
+        if scaled_col in restored.columns and cmin is not None and cmax is not None:
+            restored[col] = restored[scaled_col] * (float(cmax) - float(cmin)) + float(cmin)
+            swapped.append(col)
+        elif raw_col in restored.columns:
+            restored[col] = restored[raw_col]
+            swapped.append(col)
+    if swapped:
+        print(
+            f"[Agent 4] Restored pre-scaling units for {len(swapped)} column(s): "
+            f"{', '.join(swapped[:8])}{' …' if len(swapped) > 8 else ''}"
+        )
+    return restored
+
+
 def _agent4_analysis_inner(state: GraphState, errors: list, schema_blueprint, df) -> GraphState:
     _clear_chart_dir()
+
+    # Everything below (descriptive stats, planner + legacy charts, anomaly $ impact,
+    # formula reconciliation) must run on real units, so undo Agent 3's in-place
+    # min-max scaling first. State's cleaned_df is left untouched for agents 5/6.
+    df = _restore_scaled_columns(df, state.get("scaling_params") or {})
 
     print(f"[Agent 4] Starting analysis: {df.shape[0]} rows × {df.shape[1]} cols")
 

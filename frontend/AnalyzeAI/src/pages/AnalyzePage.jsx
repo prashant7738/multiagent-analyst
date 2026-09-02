@@ -409,7 +409,7 @@ export default function AnalyzePage() {
             transition={{ delay: 0.1 }}
             className="border border-neutral-200 dark:border-neutral-800 p-6 rounded-sm"
           >
-            <RunSettings config={runConfig} onConfigChange={setRunConfig} />
+            <RunSettings config={runConfig} onChange={setRunConfig} />
           </motion.div>
 
           {/* Run Button */}

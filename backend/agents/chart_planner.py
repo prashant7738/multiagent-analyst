@@ -26,7 +26,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 from agents.chart_spec import make_spec
-from agents.report_style import humanize_pct, titleize
+from agents.report_style import humanize_number, humanize_pct, titleize
 
 # ── payload caps ──────────────────────────────────────────────────────────────
 MAX_BAR_LABELS = 15          # bars per ranking/spec chart before "Other"
@@ -36,7 +36,7 @@ MIN_GROUP_ROWS = 3           # smallest usable category group
 MIN_ROWS_FOR_GROUPS = 8      # minimum rows before group comparisons make sense
 CAT_MAX_UNIQUE = 25          # above this a categorical isn't readable anyway
 CROSSTAB_MAX_UNIQUE = 8      # heatmap cells stay readable
-MAX_SPECS_PER_FAMILY = 3     # let up to N qualifying trends/pairs compete for a chart slot, not just the single best
+MAX_SPECS_PER_FAMILY = 2     # let up to N qualifying trends/pairs compete for a chart slot, not just the single best
 
 
 # ── local column classification (kept independent of agent_4) ────────────────
@@ -181,6 +181,7 @@ def _dimension_ranking_specs(df, schema_blueprint) -> list[dict]:
             continue
         ordered = sorted(means.items(), key=lambda kv: kv[1], reverse=True)
         top_name, top_val = ordered[0]
+        bottom_name, bottom_val = ordered[-1]
         total_mean = float(pd.Series(list(means.values())).mean()) or 1e-9
         lift = (top_val / total_mean - 1.0) * 100
         specs.append(make_spec(
@@ -198,6 +199,22 @@ def _dimension_ranking_specs(df, schema_blueprint) -> list[dict]:
                 f"{titleize(top_name)} comes out ahead; the gap between groups is "
                 f"{'noticeable' if eta2 >= 0.14 else 'modest'}."
             ),
+            descriptive=(
+                f"Each bar is one {titleize(cat).lower()}. The average {titleize(metric).lower()} "
+                f"per bar runs from {humanize_number(bottom_val)} for the lowest "
+                f"({titleize(str(bottom_name))}) to {humanize_number(top_val)} for the highest "
+                f"({titleize(str(top_name))}). The overall average is "
+                f"{humanize_number(total_mean)}."
+            ),
+            diagnostic=(
+                f"Which {titleize(cat).lower()} a record belongs to makes "
+                + ("a real difference to " + titleize(metric).lower() + ", so the gap "
+                   "between the tallest and shortest bars is worth acting on."
+                   if eta2 >= 0.14 else
+                   "only a small difference to " + titleize(metric).lower() + ", so treat "
+                   "the gaps between bars as minor.")
+            ),
+            dedup_key=f"ranking:{metric}:{cat}",
             alt_text=f"Bar chart of average {metric} for each {cat} group",
             data={"labels": [str(k) for k, _ in ordered[:MAX_BAR_LABELS]],
                   "values": [round(float(v), 4) for _, v in ordered[:MAX_BAR_LABELS]]},
@@ -275,6 +292,9 @@ def _pareto_spec(df, schema_blueprint) -> list[dict]:
 
     top_label = best_data["labels"][0]
     top_share = best_data["cumulative_pct"][0]
+    n_shown = len(best_data["labels"])
+    top_k = min(3, len(best_data["cumulative_pct"]))
+    top_k_share = best_data["cumulative_pct"][top_k - 1]
     return [make_spec(
         spec_id=f"pareto_{best_cat}_{metric}",
         family="pareto",
@@ -291,9 +311,23 @@ def _pareto_spec(df, schema_blueprint) -> list[dict]:
             f"The line tracks the running total: where it climbs steeply, that small set of "
             f"items drives most of the business."
         ),
+        descriptive=(
+            f"'{top_label}' on its own makes up {humanize_pct(top_share)} of all "
+            f"{titleize(metric).lower()}. The {top_k} biggest together make up "
+            f"{humanize_pct(top_k_share)}, out of {n_shown} shown."
+        ),
+        diagnostic=(
+            f"A few {titleize(best_cat).lower()} values bring in most of the "
+            f"{titleize(metric).lower()} and the rest add very little, so effort focused on "
+            f"those few has the biggest payoff."
+            if top_share >= 50 else
+            f"No single {titleize(best_cat).lower()} carries the business — the total is "
+            f"spread fairly evenly across many of them."
+        ),
+        dedup_key=f"pareto:{best_cat}:{metric}",
         alt_text=f"Pareto chart of {metric} concentration across {best_cat}",
         data=best_data,
-        annotations=[{"label": f"{top_label} = {humanize_pct(top_share)}", "value": round(top_share, 2)}],
+        annotations=[{"label": f"Biggest: {top_label}", "value": humanize_pct(top_share)}],
         axis={**_unit_for(metric, schema_blueprint), "x_label": titleize(best_cat),
               "y_label": titleize(metric)},
         priority=round(min(95.0, best_score), 2),
@@ -330,6 +364,8 @@ def _distribution_specs(df, schema_blueprint) -> list[dict]:
             else "most values sit at the high end with a long tail of low ones" if skew < -0.8
             else "values are fairly balanced around the middle"
         )
+        mean_v = float(s.mean())
+        mean_gap = 0.05 * abs(med) if med else 0.0
         specs.append(make_spec(
             spec_id=f"distribution_{col}",
             family="distribution",
@@ -337,14 +373,34 @@ def _distribution_specs(df, schema_blueprint) -> list[dict]:
             title=f"How are {titleize(col)} values spread?",
             subtitle=f"{len(s):,} records · typical range highlighted",
             why_it_matters=(
-                f"{titleize(col)} is {'strongly skewed' if abs(skew) > 1 else 'moderately skewed' if abs(skew) > 0.5 else 'roughly symmetric'} — "
-                f"{shape_word}. Averages alone would hide that."
+                f"{titleize(col)} is {'very lopsided' if abs(skew) > 1 else 'somewhat lopsided' if abs(skew) > 0.5 else 'fairly even'} — "
+                f"{shape_word}. The average on its own would hide that."
             ),
             plain_summary=(
-                "Tall bars mark where most records fall; the box underneath shows the middle "
-                "half of the data and the dots beyond it are unusually high or low entries "
-                "worth knowing about."
+                "Tall bars mark where most records fall; the bar underneath shows the range "
+                "the middle half of records sit in, and the dots past it are unusually high "
+                "or low entries worth knowing about."
             ),
+            descriptive=(
+                f"Out of {len(s):,} records, the typical (middle) {titleize(col).lower()} is "
+                f"about {humanize_number(med)}, and half of all records fall between "
+                f"{humanize_number(q1)} and {humanize_number(q3)}. The average is "
+                f"{humanize_number(mean_v)}. {len(outliers)} records sit well outside the "
+                f"normal range."
+            ),
+            diagnostic=(
+                f"The average ({humanize_number(mean_v)}) is much higher than the typical "
+                f"value ({humanize_number(med)}) because a few very large records pull it up — "
+                f"most records are smaller than the average."
+                if mean_v > med + mean_gap and abs(skew) > 0.5 else
+                f"The average ({humanize_number(mean_v)}) is much lower than the typical "
+                f"value ({humanize_number(med)}) because a few very small records pull it "
+                f"down — most records are larger than the average."
+                if mean_v < med - mean_gap and abs(skew) > 0.5 else
+                "Records are spread fairly evenly around the middle, with roughly as many "
+                "above as below, so the average is a fair summary here."
+            ),
+            dedup_key=f"distribution:{col}",
             alt_text=f"Histogram and box summary of {col}",
             data={
                 "bins": [round(float(b), 6) for b in bin_edges_arr],
@@ -357,7 +413,7 @@ def _distribution_specs(df, schema_blueprint) -> list[dict]:
                 "mean": round(float(s.mean()), 4), "median": round(float(med), 4),
             },
             annotations=[
-                {"label": "Median", "value": round(float(med), 4)},
+                {"label": "Typical value", "value": round(float(med), 4)},
                 {"label": "Average", "value": round(float(s.mean()), 4)},
             ],
             axis={**_unit_for(col, schema_blueprint), "x_label": titleize(col), "y_label": "Records"},
@@ -417,28 +473,42 @@ def _trend_spec(df, schema_blueprint, stats) -> list[dict]:
         y_values = [round(float(v), 4) for v in monthly["y"]]
         direction = _trend_direction_word(y_fit, y_values, info.get("trend", "upward"))
 
+        strong = r_squared >= 0.3 and direction != "flat"
         if direction == "flat":
             subtitle = "monthly averages · little overall change"
             why_it_matters = (
-                f"{titleize(col)} is statistically significant but the actual month-to-month change is "
-                f"small — the fitted line explains {humanize_pct(r_squared * 100)} of the pattern, but this "
-                f"looks stable rather than a meaningful trend."
+                f"{titleize(col)} has barely changed over the period — the month-to-month "
+                f"wobble is bigger than any overall drift, so treat it as holding steady."
             )
             plain_summary = (
-                f"Each point is one month's typical {titleize(col).lower()}. The dashed line stays "
-                f"roughly flat — this metric has held steady over the period shown."
+                f"Each point is one month's typical {titleize(col).lower()}. The dashed line "
+                f"stays roughly flat — this has held steady over the period shown."
             )
         else:
             subtitle = f"monthly averages · {direction} direction"
             why_it_matters = (
-                f"{titleize(col)} has been moving steadily {direction} — the fitted line explains "
-                f"{humanize_pct(r_squared * 100)} of the month-to-month pattern, so this looks like a real trend rather than noise."
+                f"{titleize(col)} has been moving steadily {direction} across the period — "
+                f"a clear direction rather than random month-to-month noise."
             )
             plain_summary = (
-                f"Each point is one month's typical {titleize(col).lower()}. The dashed line is the "
-                f"overall direction of travel: {'rising' if direction == 'upward' else 'falling'} over the period shown."
+                f"Each point is one month's typical {titleize(col).lower()}. The dashed line is "
+                f"the overall direction of travel: {'rising' if direction == 'upward' else 'falling'} over the period shown."
             )
 
+        descriptive = (
+            f"Each point is one month's typical {titleize(col).lower()} — {len(monthly)} "
+            f"months in total, starting near {humanize_number(y_values[0])} and ending near "
+            f"{humanize_number(y_values[-1])}."
+        )
+        diagnostic = (
+            f"Once the monthly ups and downs are smoothed out, {titleize(col).lower()} is "
+            f"{'rising' if direction == 'upward' else 'falling'} steadily — this looks like a "
+            f"genuine {direction} trend, not random noise."
+            if strong else
+            f"The month-to-month changes are mostly random wobble with no strong direction — "
+            f"don't read too much into the apparent "
+            f"{direction if direction != 'flat' else 'up-or-down'} movement."
+        )
         specs.append(make_spec(
             spec_id=f"trend_{col}",
             family="trend",
@@ -447,6 +517,9 @@ def _trend_spec(df, schema_blueprint, stats) -> list[dict]:
             subtitle=subtitle,
             why_it_matters=why_it_matters,
             plain_summary=plain_summary,
+            descriptive=descriptive,
+            diagnostic=diagnostic,
+            dedup_key=f"trend:{col}",
             alt_text=f"Line chart of monthly {col} with fitted trend line",
             data={
                 "x": labels,
@@ -455,7 +528,7 @@ def _trend_spec(df, schema_blueprint, stats) -> list[dict]:
             },
             annotations=[
                 {"label": "Direction", "value": direction},
-                {"label": "Pattern strength", "value": round(float(r_squared), 4)},
+                {"label": "Trend", "value": "clear and steady" if strong else "weak / mostly noise"},
             ],
             axis={**_unit_for(col, schema_blueprint), "x_granularity": "month",
                   "y_label": titleize(col)},
@@ -509,6 +582,20 @@ def _seasonality_pattern_spec(df, schema_blueprint) -> list[dict]:
             f"in the data. {_MONTH_NAMES[best_m - 1]} is the strong month; "
             f"{_MONTH_NAMES[worst_m - 1]} is the quiet one."
         ),
+        descriptive=(
+            f"This shows the average {titleize(metric).lower()} for each calendar month. "
+            f"It is highest in {_MONTH_NAMES[best_m - 1]} (about {humanize_number(best_v)}) "
+            f"and lowest in {_MONTH_NAMES[worst_m - 1]} (about {humanize_number(worst_v)}). "
+            f"The year-round average is {humanize_number(mean_of_means)}."
+        ),
+        diagnostic=(
+            "The gap between the busy and quiet months is large, so there is a clear "
+            "yearly pattern worth planning stock, staffing and campaigns around."
+            if cv >= 0.2 else
+            "The months differ only a little, so the yearly pattern is mild and probably "
+            "not worth planning around on its own."
+        ),
+        dedup_key=f"seasonality:{metric}",
         alt_text=f"Bar chart of average {metric} by calendar month",
         data={
             "labels": [_MONTH_NAMES[m - 1] for m, _ in ordered],
@@ -553,27 +640,45 @@ def _correlation_scatter_spec(df, stats) -> list[dict]:
         fit = [[round(float(xs.min()), 4), round(float(intercept + slope * xs.min()), 4)],
                [round(float(xs.max()), 4), round(float(intercept + slope * xs.max()), 4)]]
         direction = "rise together" if slope > 0 else "move in opposite directions"
+        r = float(pair.get("pearson_r") or r_value or 0.0)
         specs.append(make_spec(
             spec_id=f"scatter_{col_x}_{col_y}",
             family="correlation_scatter",
             chart_type="scatter",
             title=f"{titleize(col_x)} vs {titleize(col_y)}",
-            subtitle=f"each dot is one record · r = {pair.get('pearson_r')}",
+            subtitle=f"each dot is one record · {len(sample):,} shown",
             why_it_matters=(
                 f"When {titleize(col_x).lower()} changes, {titleize(col_y).lower()} tends to "
                 f"{direction}. Knowing one gives you an early read on the other."
             ),
             plain_summary=(
-                "Each dot is one record. The dashed line is the general direction: dots hugging "
-                "the line closely mean a dependable relationship; a loose cloud means it is weaker."
+                "Each dot is one record. The dashed line is the general direction: dots close "
+                "to the line mean a dependable relationship; a loose cloud means a weaker one."
             ),
+            descriptive=(
+                f"Each dot is one record, placed by its {titleize(col_x).lower()} and "
+                f"{titleize(col_y).lower()}. "
+                + ("When one goes up, the other almost always goes up too."
+                   if r > 0 else
+                   "When one goes up, the other usually goes down.")
+            ),
+            diagnostic=(
+                "The dots line up very tightly, so knowing one value lets you predict the "
+                "other with confidence."
+                if abs(r) >= 0.7 else
+                f"The dots are loosely scattered, so the two are related but only roughly — "
+                f"other things affect {titleize(col_y).lower()} as well."
+            ),
+            dedup_key=f"scatter:{'|'.join(sorted([col_x, col_y]))}",
             alt_text=f"Scatter plot of {col_x} against {col_y} with fitted line",
             data={
                 "points": [[round(float(x), 4), round(float(y), 4)]
                            for x, y in zip(sample["x"], sample["y"])],
                 "fit": fit,
             },
-            annotations=[{"label": "Link strength (r)", "value": round(float(pair.get("pearson_r") or 0), 3)}],
+            annotations=[{"label": "How tightly linked",
+                          "value": ("very tight" if abs(r) >= 0.85
+                                    else "fairly tight" if abs(r) >= 0.7 else "loose")}],
             axis={**_unit_for(col_x, {}), "x_label": titleize(col_x), "y_label": titleize(col_y)},
             priority=round(abs(float(pair.get("pearson_r") or 0)) * 100, 2),
         ))
@@ -617,20 +722,32 @@ def _crosstab_spec(df, schema_blueprint) -> list[dict]:
             title=f"Do {titleize(c1)} and {titleize(c2)} travel together?",
             subtitle=f"record counts · {strength} detected",
             why_it_matters=(
-                f"{titleize(c1)} and {titleize(c2)} show a {strength}: certain combinations occur far "
-                f"more often than chance, which is useful for targeting and planning."
+                f"{titleize(c1)} and {titleize(c2)} show a {strength}: some combinations turn up "
+                f"far more often than you'd expect, which helps with targeting and planning."
             ),
             plain_summary=(
                 "Darker cells mark combinations that happen more often. Scan for dark rows/columns — "
                 "they reveal which mixtures dominate your data."
             ),
+            descriptive=(
+                f"This grid counts how many records fall into each pairing of "
+                f"{titleize(c1).lower()} and {titleize(c2).lower()}. Darker cells are the "
+                f"common pairings, pale cells the rare ones."
+            ),
+            diagnostic=(
+                f"Certain {titleize(c1).lower()} and {titleize(c2).lower()} pairings show up "
+                f"{'far more' if v >= 0.3 else 'a bit more'} often than others, so the two are "
+                f"{'strongly' if v >= 0.3 else 'loosely'} connected — one is a useful hint "
+                f"about the other."
+            ),
+            dedup_key=f"crosstab:{'|'.join(sorted([c1, c2]))}",
             alt_text=f"Heatmap of record counts between {c1} and {c2}",
             data={
                 "rows": list(ct.index)[:CROSSTAB_MAX_UNIQUE],
                 "cols": list(ct.columns)[:CROSSTAB_MAX_UNIQUE],
                 "matrix": [[int(v_) for v_ in row][:CROSSTAB_MAX_UNIQUE] for row in ct.to_numpy()],
             },
-            annotations=[{"label": "Link strength", "value": round(v, 3)}],
+            annotations=[{"label": "Connection", "value": "strong" if v >= 0.3 else "mild"}],
             axis={"x_label": titleize(c2), "y_label": titleize(c1)},
             priority=round(v * 90, 2),
         ))
@@ -649,6 +766,7 @@ def _anomaly_overlay_spec(stats) -> list[dict]:
     items.sort(key=lambda t: t[1], reverse=True)
     items = items[:8]
     pct = float(summary.get("unique_flagged_row_pct") or 0.0)
+    top_col, top_n = items[0]
     return [make_spec(
         spec_id="anomaly_watchlist",
         family="anomaly_overlay",
@@ -663,6 +781,17 @@ def _anomaly_overlay_spec(stats) -> list[dict]:
             "Each bar counts how many unusually high or low entries were found in that column. "
             "Longer bars deserve a closer look before you act on any averages."
         ),
+        descriptive=(
+            f"{summary.get('unique_flagged_rows', '?')} records — about {humanize_pct(pct)} of "
+            f"all of them — have at least one value that looks unusual for its column. The most "
+            f"are in {titleize(str(top_col))} ({int(top_n)} records)."
+        ),
+        diagnostic=(
+            "'Unusual' here means a value sits far outside the normal range for that column. "
+            "A pile-up in one column is usually a typo or a wrong unit rather than that many "
+            "real surprises — worth a quick manual look."
+        ),
+        dedup_key="anomaly:watchlist",
         alt_text="Horizontal bar chart of flagged record counts per column",
         data={
             "labels": [titleize(c) for c, _ in items],

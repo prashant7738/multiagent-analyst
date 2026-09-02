@@ -73,13 +73,25 @@ def make_spec(
     data: dict,
     subtitle: str = "",
     plain_summary: str = "",
+    descriptive: str = "",
+    diagnostic: str = "",
     alt_text: str = "",
     annotations: list | None = None,
     axis: dict | None = None,
     priority: float = 0.0,
     png_path: str | None = None,
+    dedup_key: str = "",
 ) -> dict:
-    """Build a validated ChartSpec dict with all optional fields normalized."""
+    """Build a validated ChartSpec dict with all optional fields normalized.
+
+    ``descriptive`` — a plain-language read-out of what the chart literally shows
+    for *this* data (extremes, spread, counts). ``diagnostic`` — what explains that
+    shape (skew driven by a tail, one group dominating, a trend that is mostly
+    noise). Both are rendered under the chart alongside ``why_it_matters`` (the
+    business "so what"). ``dedup_key`` — an explicit identity used by
+    ``finalize_specs`` to collapse the same chart arriving from both the planner
+    and a legacy agent_4 builder; when empty a key is derived from the title.
+    """
     if chart_type not in CHART_TYPES:
         raise ValueError(f"Unknown chart_type '{chart_type}' for spec '{spec_id}'")
     spec = {
@@ -92,11 +104,14 @@ def make_spec(
         "subtitle": subtitle or "",
         "why_it_matters": why_it_matters,
         "plain_summary": plain_summary or why_it_matters,
+        "descriptive": descriptive or "",
+        "diagnostic": diagnostic or "",
         "alt_text": alt_text or title,
         "data": _sanitize_data(data),
         "annotations": [a for a in (annotations or []) if a],
         "axis": _normalize_axis(axis or {}),
         "priority": round(float(priority), 2),
+        "dedup_key": str(dedup_key or ""),
     }
     if png_path:
         spec["png_path"] = png_path
@@ -147,6 +162,95 @@ _FAMILY_CHART_TYPES = {
 }
 
 
+# Families that describe the same underlying visual concept, so a legacy PNG and
+# a planner spec for (say) "trend of revenue" collapse to one even when their
+# titles are worded differently ("Revenue Linear Trend" vs "Revenue over time").
+_FAMILY_GROUP = {
+    "regression_trend": "trend", "derived_margin_trend": "trend",
+    "category_margin_trend": "trend", "growth_rates": "trend",
+    "growth_rates_monthly": "trend", "growth_rates_quarterly": "trend",
+    "trend": "trend",
+    "revenue_histogram": "distribution", "distribution_boxplot": "distribution",
+    "category_distribution": "distribution", "distribution": "distribution",
+    "correlation_heatmap": "correlation_heatmap",
+    "correlation_scatter": "correlation_scatter",
+    "seasonality": "seasonality", "seasonality_monthly": "seasonality",
+    "seasonality_quarterly": "seasonality", "seasonality_heatmap": "seasonality",
+    "seasonality_pattern": "seasonality",
+    "top_bottom": "ranking", "top_bottom_ranking": "ranking",
+    "dimension_ranking": "ranking", "profit_breakdown": "ranking",
+    "segment_order_value": "ranking",
+    "pareto": "pareto", "crosstab": "crosstab", "anomaly_overlay": "anomaly",
+}
+
+# Words that carry no identity when comparing two charts — chart-shape nouns and
+# the connective glue. Stripping them from the title and the explicit dedup_key
+# leaves just the columns/dimensions the chart is about, which is what decides
+# whether the planner spec and a legacy PNG are the same chart.
+_TITLE_STOPWORDS = frozenset({
+    "the", "a", "an", "of", "by", "vs", "over", "per", "and", "or", "to", "in",
+    "on", "is", "are", "how", "what", "where", "do", "does", "did", "your", "you",
+    "this", "that", "it", "there", "their", "was", "were", "with", "for",
+    "trend", "trends", "linear", "regression", "chart", "plot", "graph", "line",
+    "distribution", "distributed", "distributions", "dist", "spread", "values",
+    "value", "count", "counts", "histogram", "histbox", "boxplot", "box",
+    "scatter", "heatmap", "pareto", "pie", "donut", "map",
+    "time", "month", "monthly", "quarter", "quarterly", "year", "yearly",
+    "calendar", "rhythm", "seasonal", "seasonality", "concentrated", "across",
+    "each", "between", "travel", "together", "shape", "numbers", "numeric",
+    "cols", "records", "record", "dot", "dots",
+    "unusual", "cluster", "clusters", "rate", "rates", "ratio", "summary",
+    "overview", "breakdown", "ranking", "ranked", "top", "bottom", "avg",
+    "average", "total", "share", "level", "levels", "move", "moves",
+})
+
+
+def _identity_tokens(text: str) -> set[str]:
+    return {
+        t for t in re.split(r"[^a-z0-9]+", str(text).lower())
+        if len(t) > 1 and not t.isdigit() and t not in _TITLE_STOPWORDS
+    }
+
+
+def _dedup_identity(spec: dict) -> tuple[tuple, bool]:
+    """Return ((section, group, sorted_tokens), is_meaningful).
+
+    Both the planner (explicit ``dedup_key``) and legacy PNGs (title only) reduce
+    to the same ``(section, visual concept, columns)`` triple, so "Revenue Linear
+    Trend" and "Revenue over time" collapse to one chart. ``is_meaningful`` is
+    False only when nothing comparable could be extracted (e.g. a synthetic spec
+    titled "t"); callers then fall back to the historical "collapse across
+    sources only" rule so unrelated placeholder specs survive.
+    """
+    section = spec.get("section")
+    group = _FAMILY_GROUP.get(spec.get("family"), spec.get("chart_type") or "")
+    tokens = _identity_tokens(spec.get("title", ""))
+    explicit = str(spec.get("dedup_key") or "")
+    if explicit:
+        tokens |= _identity_tokens(explicit)
+    return ((section, group, tuple(sorted(tokens))), bool(tokens))
+
+
+# Legacy PNGs are titled from their filename slug, which yields cryptic labels
+# ("Dist Order Status", "Boxplot Numeric Cols"). Give the common ones a title a
+# non-technical reader can parse at a glance.
+_LEGACY_TITLE_OVERRIDES = {
+    "distribution_boxplot": "Spread of the main number columns",
+    "correlation_heatmap": "How the number columns move together",
+    "derived_metrics_summary": "Summary of the calculated business metrics",
+}
+
+
+def _friendly_legacy_title(title: str, family: str) -> str:
+    if family in _LEGACY_TITLE_OVERRIDES:
+        return _LEGACY_TITLE_OVERRIDES[family]
+    t = str(title or "").strip()
+    m = re.match(r"(?:dist(?:ribution)?)\s+(?:of\s+)?(.+)", t, re.I)
+    if family == "category_distribution" and m:
+        return f"{m.group(1).strip()} — how common each value is"
+    return t
+
+
 def wrap_legacy_candidate(candidate: dict) -> dict | None:
     """Convert an agent_4 legacy chart candidate ({path, family, score, reason})
     into an image-render spec so old families keep their slot in the unified
@@ -154,7 +258,9 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
     path = candidate.get("path")
     family = candidate.get("family", "legacy")
     reason = candidate.get("reason") or ""
-    title = candidate.get("title") or _title_from_path(path, family)
+    title = _friendly_legacy_title(
+        candidate.get("title") or _title_from_path(path, family), family
+    )
     blurb = _FAMILY_BLURBS.get(family) or reason or f"Shows {family.replace('_', ' ')} patterns found in your data."
     try:
         priority = float(candidate.get("score", 0.0))
@@ -162,6 +268,9 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
         priority = 0.0
     if not path:
         return None
+    # `reason` is an internal scoring string ("max |pearson r|=1.00",
+    # "skewness=2.97"). Never surface it to readers — the family blurb already
+    # says, in plain words, what the chart shows.
     return {
         "id": f"legacy_{family}_{abs(hash(path)) % 10_000}",
         "family": family,
@@ -172,19 +281,28 @@ def wrap_legacy_candidate(candidate: dict) -> dict | None:
         "subtitle": "",
         "why_it_matters": blurb,
         "plain_summary": blurb,
+        "descriptive": candidate.get("descriptive") or blurb,
+        "diagnostic": candidate.get("diagnostic") or "",
         "alt_text": title,
         "data": {},
-        "annotations": [{"label": "Signal", "value": reason}] if reason else [],
+        "annotations": [],
         "axis": {},
         "priority": round(priority, 2),
         "png_path": path,
+        "dedup_key": str(candidate.get("dedup_key") or ""),
     }
 
 
 def finalize_specs(specs: list, cap: int = 10) -> list:
-    """Dedupe by id and semantic chart identity, then cap by priority."""
+    """Dedupe by id and by chart identity, then cap by priority.
+
+    Chart identity is (report section, visual concept, the columns/dimensions the
+    title is about). Two specs with the same identity collapse to the
+    higher-priority one regardless of whether they came from the planner or a
+    legacy agent_4 PNG — this is what stops the same chart being shown twice.
+    """
     seen: set[str] = set()
-    seen_semantic: dict[tuple, str] = {}
+    seen_identity: dict[tuple, str] = {}
     unique = []
     ordered_specs = sorted(
         (spec for spec in specs if spec and isinstance(spec, dict)),
@@ -193,16 +311,15 @@ def finalize_specs(specs: list, cap: int = 10) -> list:
     )
     for spec in ordered_specs:
         sid = spec.get("id")
-        title = re.sub(r"[^a-z0-9]+", " ", str(spec.get("title", "")).lower()).strip()
         if sid in seen:
             continue
         seen.add(sid)
         source_kind = "legacy" if str(sid).startswith("legacy_") else "planner"
-        semantic_identity = (spec.get("section"), spec.get("chart_type"), title)
-        previous_kind = seen_semantic.get(semantic_identity)
-        if previous_kind and previous_kind != source_kind:
+        identity, meaningful = _dedup_identity(spec)
+        prev_kind = seen_identity.get(identity)
+        if prev_kind is not None and (meaningful or prev_kind != source_kind):
             continue
-        seen_semantic.setdefault(semantic_identity, source_kind)
+        seen_identity.setdefault(identity, source_kind)
         unique.append(spec)
     return unique[:cap]
 

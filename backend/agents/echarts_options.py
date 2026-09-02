@@ -55,13 +55,19 @@ def build_echarts_option(spec: dict) -> dict:
             "data": bar_data,
             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [3, 3, 0, 0]},
             "barMaxWidth": 46,
-            "label": {"show": len(values) <= 12, "position": "top", "fontSize": 10,
-                      "color": "#000000"},
+            # Only a plain bar chart with few bars gets on-bar value labels; a Pareto
+            # already carries the running-total % on its line, and many bars make the
+            # big formatted numbers ("$3.31M") collide above narrow bars. hideOverlap
+            # is the safety net that drops any label that would still touch a neighbour.
+            "label": {"show": kind == "bar" and len(values) <= 8, "position": "top",
+                      "fontSize": 10, "color": "#000000"},
+            "labelLayout": {"hideOverlap": True},
         }]
         option = {**base,
                   "xAxis": {"type": "category", "data": labels,
                             "axisLabel": {"interval": 0, "rotate": _label_rotation(labels),
-                                          "fontSize": 10, "width": 110, "overflow": "truncate"},
+                                          "fontSize": 10, "width": 110, "overflow": "truncate",
+                                          "hideOverlap": True},
                             "name": axis.get("x_label"), "nameGap": 28,
                             "nameTextStyle": {"fontSize": 10, "color": "#000000"}},
                   "yAxis": {"type": "value",
@@ -79,6 +85,7 @@ def build_echarts_option(spec: dict) -> dict:
                 "name": "Running total %",
                 "label": {"show": True, "formatter": "{c}%", "fontSize": 9,
                           "color": PALETTE["warning"]},
+                "labelLayout": {"hideOverlap": True},
             })
             option["yAxis"]["max"] = max(100, max(cum) * 1.05)
         return option
@@ -101,7 +108,8 @@ def build_echarts_option(spec: dict) -> dict:
                 "series": [{"type": "bar", "data": bar_data, "barMaxWidth": 22,
                             "itemStyle": {"color": PALETTE["primary"], "borderRadius": [0, 3, 3, 0]},
                             "label": {"show": True, "position": "right", "fontSize": 9,
-                                      "color": "#000000"}}]}
+                                      "color": "#000000"},
+                            "labelLayout": {"hideOverlap": True}}]}
 
     if kind == "line":
         xs, ys = data.get("x") or [], data.get("y") or []
@@ -161,11 +169,12 @@ def build_echarts_option(spec: dict) -> dict:
                 "data": [[{"coord": [box["lo"], 0]}, {"coord": [box["hi"], 0]}]],
             }
         mark_lines = []
-        for key, color, name in (("med", PALETTE["warning"], "Median"),
-                                 ("mean", PALETTE["accent"], "Average")):
+        for key, color, name, label_pos in (("med", PALETTE["warning"], "Median", "insideEndTop"),
+                                            ("mean", PALETTE["accent"], "Average", "insideEndBottom")):
             if box.get(key) is not None:
                 mark_lines.append({"yAxis": box[key], "lineStyle": {"color": color, "type": "dashed"},
-                                   "label": {"formatter": name, "fontSize": 9, "color": color}})
+                                   "label": {"formatter": name, "fontSize": 9, "color": color,
+                                             "position": label_pos}})
         series = {"type": "bar", "data": counts,
                   "itemStyle": {"color": PALETTE["primary"], "opacity": 0.85},
                   "barCategoryGap": "0%",

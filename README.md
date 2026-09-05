@@ -1,278 +1,212 @@
-# MultiAgent DataAnalyst - Automated LLM-Powered Data Analysis Pipeline
+# AnalyzeAI
 
-## 📋 Project Overview
+### Turn an opaque spreadsheet into a decision-ready story.
 
-**MultiAgent_DataAnalyst** is an automated, LLM-powered data analysis pipeline that processes CSV files through a sequence of specialized agents. It performs structural profiling, semantic tagging, data preprocessing, statistical analysis, and visualization generation.
+AnalyzeAI is a production-minded, multi-agent data analyst that takes messy business data and turns it into an explainable analysis: cleaned data, quality scores, statistical findings, signal-driven charts, recommendations, and a polished HTML/PDF report.
 
-This project demonstrates a sophisticated multi-agent architecture using state-based orchestration to intelligently analyze and transform raw data into actionable insights.
+This is more than an LLM wrapper. The system combines deterministic data engineering and statistics with carefully bounded LLM assistance, so the output remains auditable when a model is unavailable, uncertain, or wrong.
 
----
+## Why This Project Stands Out
 
-## 🏗️ Architecture Overview
+- **End-to-end ownership:** upload a dataset, watch the analysis progress in real time, explore the results, ask questions, and download a report from one product.
+- **Multi-agent architecture with a clear contract:** six specialized stages communicate through a shared `GraphState`, making responsibilities visible, testable, and replaceable.
+- **Grounded AI instead of unbounded generation:** deterministic facts are extracted from computed statistics first; LLM prose is validated before it reaches the report.
+- **Dataset-aware visualization:** chart selection is driven by statistical signal such as correlation, regression strength, concentration, skew, outliers, and category effects, rather than hardcoded column names.
+- **Failure-aware engineering:** LLM fallbacks, validation gates, accumulated errors, cooperative cancellation, upload limits, and isolated run artifacts keep partial failures understandable.
+- **Real product surface:** authentication, job history, per-user model keys, live Server-Sent Events (SSE), report downloads, responsive React UI, and dataset chat turn the pipeline into a usable application.
+- **Evidence of quality:** a focused backend test suite covers parsing, normalization, statistical edge cases, chart safety, report grounding, API behavior, and regression paths.
 
-### Technology Stack
-- **LLM**: Groq API (qwen/qwen3.6-27b)
-- **Orchestration**: LangGraph (state-based DAG pipeline)
-- **Data Processing**: Pandas, NumPy, SciPy
-- **Visualization**: Matplotlib
-- **Framework**: Python 3.12+
+## Product Flow
 
-### Pipeline Flow
-
-```
-CSV File (Input)
-    ↓
-[Agent 1] Structural Profiler
-    → Analyze raw structure & profiling
-    ↓
-[Agent 2] Semantic Tagger (LLM)
-    → Infer data types & semantic meaning
-    ↓
-[Agent 3] Preprocessor
-    → Clean, transform & normalize data
-    ↓
-[Agent 4] Statistical Analysis
-    → Generate statistics & visualizations
-    ↓
-Processed Data + Analysis (Output)
+```text
+Upload CSV / Excel / JSON / JSONL / Parquet
+                    |
+                    v
+       Profile -> Understand -> Prepare
+                    |
+                    v
+       Analyze -> Validate -> Explain
+                    |
+                    v
+     Interactive dashboard + HTML/PDF report + chat
 ```
 
----
+## What the Six Agents Do
 
-## ✅ Completed Features
+| Stage | Responsibility | Engineering value |
+| --- | --- | --- |
+| **Agent 1: Structural Profiler** | Profiles shape, types, missingness, duplicates, and representative values. | Establishes a trustworthy baseline before transformations begin. |
+| **Agent 2: Semantic Tagger** | Combines local type sniffing with LLM-assisted semantic labels such as currency, identifier, date, and category. | Gives downstream processing business context without sending entire datasets to the model. |
+| **Agent 3: Preprocessor** | Coerces types, normalizes text/nulls/currencies, imputes missing values, removes duplicates, clips outliers, scales values, extracts date features, and derives business metrics. | Produces reproducible transformations with an audit trail and quality score. |
+| **Agent 4: Statistical Analyst** | Computes descriptive statistics, correlations, anomalies, regression, growth, seasonality, and cross-dimensional findings. | Converts cleaned data into measurable evidence. |
+| **Agent 5: Output Validator** | Checks categories, trends, metrics, leakage risks, and report inputs for consistency. | Adds a quality gate between computation and communication. |
+| **Agent 6: Insight Report Generator** | Builds grounded findings, recommendations, charts, and plain-language HTML/PDF reports. | Makes analysis useful to both technical and non-technical readers. |
 
-### Agent 1: Structural Profiler (100% Complete)
-- Reads and analyzes raw CSV structure
-- **Outputs**:
-  - Data type detection for each column
-  - Missing value count & percentage
-  - Unique value counts
-  - Sample values preview
-  - Dataset-level statistics (shape, total cells, duplicate rows)
-- **Error Handling**: Robust CSV loading with error logging
+## Technical Highlights
 
-### Agent 2: Semantic Tagger (100% Complete)
-- **Type Sniffing**: Pure Python heuristics for numeric, datetime, boolean, and string detection
-- **LLM-Powered Tagging** (via Groq):
-  - Semantic classification (Currency, Identifier, DateTime, Categorical)
-  - Column-specific processing rules
-  - Imputation strategy recommendations
-- **Fallback Logic**: Graceful degradation when LLM unavailable
-- **Output**: Schema blueprint with per-column metadata
+### Reliable AI orchestration
 
-### Agent 3: Preprocessor (100% Complete)
-Comprehensive 10-step data cleaning and transformation pipeline:
+- LangGraph state-based DAG with conditional routing and shared typed state.
+- Minimal prompts based on metadata and samples to reduce cost and data exposure.
+- Groq and Gemini support with graceful fallback behavior.
+- Deterministic narrative fallback when no LLM key is available.
+- Hybrid narrative validation for unsupported claims, unknown chart IDs, and unexplained jargon.
 
-1. **Type Coercion** - Convert columns to intended types (float, int, datetime, boolean)
-2. **Currency Cleaning** - Handle international symbols (₹, $, €, £, ¥, ₩) and formats
-3. **Text Standardization** - Normalize whitespace, case, and null variants
-4. **Duplicate Removal** - Drop exact row duplicates
-5. **Imputation** - Smart missing value handling (mean, median, mode, drop, unknown_label)
-6. **Outlier Clipping** - IQR-based outlier detection and clipping
-7. **Scaling** - Min-Max normalization (0-1) with parameter tracking
-8. **Date Feature Extraction** - Derive year, month, day, day_of_week, is_weekend, etc.
-9. **Business Metrics Derivation** - Auto-calculate profit, margins, revenue per unit, etc.
-10. **Quality Scoring** - Generate comprehensive data quality metrics (0-100 score)
+### Data quality and reproducibility
 
-- **Outputs**: Cleaned DataFrame, scaling parameters, audit trail, quality metrics
+- Handles messy currencies including `$`, `€`, `£`, `₹`, `¥`, and `₩`.
+- Normalizes common null-string variants and inconsistent categorical values.
+- Tracks scaling parameters for downstream interpretation and inverse transformation.
+- Records every preprocessing action in an audit log.
+- Produces completeness, duplicate, validation, confidence, and decision-readiness signals.
 
-### Agent 4: Statistical Analysis (Partial - 40% Complete)
-- **Implemented**: Core analysis framework and chart generation infrastructure
-- **Status**: Foundation laid for full statistics pipeline
+### Insight reports that communicate
 
-### Pipeline Orchestration (100% Complete)
-- LangGraph-based state management
-- Error-aware routing with conditional edges
-- Graceful failure handling
-- Sequential flow with error accumulation
+- KPI hero section followed by an “In Plain English” explanation.
+- Story structure: what happened, why it matters, and what to do next.
+- Chart specs carry titles, explanations, alt text, annotations, and pre-aggregated data.
+- Apache ECharts for interactive browser visuals and deterministic Matplotlib twins for print/PDF.
+- Per-run chart/report directories prevent concurrent jobs from overwriting one another.
+- Technical details remain available in a structured appendix rather than overwhelming the main story.
 
----
+### Full-stack application engineering
 
-## 🚧 In Progress / Planned Features
+- FastAPI API with authenticated routes for analysis, jobs, reports, chat, settings, and health.
+- Background pipeline jobs return immediately with a job ID.
+- SSE progress streams expose agent-level status to the frontend without polling.
+- Upload validation, size limits, request validation, structured JSON errors, and cooperative cancellation.
+- React 19 + Vite frontend with responsive analysis, history, profile, report, and dataset-chat views.
+- Optional PostgreSQL persistence with `pgvector` support for retrieval-oriented features.
 
-### Agent 4: Statistical Analysis (Complete)
-- [x] Descriptive statistics (mean, median, std, quantiles)
-- [x] Correlation analysis (Pearson + Spearman, strong-pair detection)
-- [x] Anomaly detection (z-score, configurable threshold)
-- [x] Regression modeling (linear trend per numeric column)
-- [x] Advanced chart generation (heatmap, box plots, histograms, bar charts, trend lines)
+## Architecture
 
-### Future Agents
-- **Agent 5**: Data validation & constraint checking
-- **Agent 6**: Final comprehensive report generation
-
-### Additional Features
-- [ ] Frontend/UI for pipeline visualization
-- [x] Support for multiple file formats — CSV, Excel (.xlsx/.xlsm/.xls), JSON, JSON Lines, Parquet
-- [ ] Configuration file for customizable processing rules
-- [ ] Structured logging framework
-- [x] Unit tests for Agent 1, Agent 2, Agent 3, Agent 4, and pipeline diagnostics
-- [ ] Performance optimization for very large datasets (chunked ingestion)
-
----
-
-## 📁 Project Structure
-
+```text
+                         +----------------------+
+                         | React 19 / Vite UI   |
+                         | upload, dashboard,   |
+                         | history, chat        |
+                         +----------+-----------+
+                                    |
+                         HTTP + SSE |
+                                    v
+                         +----------------------+
+                         | FastAPI application  |
+                         | auth, jobs, reports, |
+                         | settings, health     |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         | LangGraph pipeline   |
+                         | Agents 1 -> 6        |
+                         +----------+-----------+
+                                    |
+             +----------------------+----------------------+
+             v                      v                      v
+       cleaned data          chart specifications     HTML / PDF report
+       + audit trail          + static render          + grounded narrative
 ```
+
+## Tech Stack
+
+**Backend:** Python 3.12+, FastAPI, Uvicorn, LangGraph, LangChain Core, Pandas, NumPy, SciPy, scikit-learn, Matplotlib, Jinja2, WeasyPrint
+
+**AI and persistence:** Groq, Google Gemini, Hugging Face integrations, PostgreSQL, `pgvector`, cryptography
+
+**Frontend:** React 19, Vite, Tailwind CSS, Framer Motion, React Router, Lucide icons
+
+**Quality:** Pytest, focused unit/integration tests, validation gates, deterministic fallbacks
+
+## Repository Layout
+
+```text
 backend/
-├── main.py                      # GraphState definition & shared state schema
-├── pipeline.py                  # LangGraph DAG construction & entry point
-├── pyproject.toml              # Dependencies & project configuration
-├── sample_sales.csv            # Test dataset
-├── agents/
-│   ├── agent_1.py             # Structural Profiler
-│   ├── agent_2.py             # Semantic Tagger (LLM)
-│   ├── agent_3.py             # Preprocessor (10-step pipeline)
-│   └── agent_4.py             # Statistical Analysis
-└── outputs/
-    └── charts/                # Generated visualizations (PNG)
+├── agents/                 # Six analysis and reporting stages
+├── api/
+│   ├── routes/             # Auth, analysis, jobs, reports, chat, settings, health
+│   ├── services/           # Job management, pipeline execution, SSE, persistence
+│   └── models/             # API schemas and domain models
+├── templates/              # HTML report templates
+├── tests/                  # Backend regression and behavior tests
+├── pipeline.py             # LangGraph pipeline entry point
+├── main.py                 # Shared graph state
+└── run.py                  # FastAPI/Uvicorn launcher
+frontend/AnalyzeAI/
+├── src/components/         # Dashboard, timeline, chat, report, upload UI
+├── src/pages/              # Analyze, history, profile, auth, and error views
+└── src/lib/                # API and client utilities
 ```
 
----
+## Run Locally
 
-## 📊 Insight Report v2 (Interactive, Data-Driven)
-
-The final report is no longer a static chart dump — it is a tiered, plain-language document whose visuals are chosen by statistical signal rather than hardcoded rules:
-
-- **Signal-driven chart planner** (`agents/chart_planner.py`): scores every candidate visualization on effect size (ANOVA η², Pareto concentration, skew/outlier interest, regression r², Cramér's V) so it works on **any dataset shape** — sales, HR, SaaS, support tickets — not just keyword-matched sales columns.
-- **Unified ChartSpec contract** (`agents/chart_spec.py`): every chart carries its own title, plain-language explanation, alt text, annotations and pre-aggregated data.
-- **Dual-path rendering**: interactive Apache ECharts charts on screen + deterministic matplotlib twins (`agents/chart_render_static.py`) for print/PDF/`<noscript>`, both built from the same spec.
-- **Tiered plain-language layout**: KPI hero strip → "In Plain English" box → three-part story (What happened / Why it matters / What to do next) → narratively grouped chart sections → technical appendix collapsed in `<details>` blocks with an inline glossary.
-- **Hybrid narrative**: deterministic grounded bullets always render; the LLM adds polish on top only where it passes story-validation, chart-id and jargon checks (`_compose_hybrid_narrative` + linter).
-- **Run isolation**: each run writes to `outputs/charts/<run_id>/` and `outputs/reports/<run_id>/`, so concurrent jobs never clobber each other's artifacts.
-
----
-
-## 🎯 Key Design Patterns
-
-1. **Stateless Agent Functions**: Pure functions that transform state without side effects
-2. **Error Propagation**: Errors accumulated and propagated throughout pipeline
-3. **Semantic-Driven Processing**: Agent 2's schema drives downstream decisions
-4. **Audit Trail**: Complete preprocessing log for reproducibility
-5. **LLM Fallback**: Graceful degradation when LLM unavailable
-6. **Minimal LLM Prompts**: Reduces API costs by sending only metadata + samples
-
----
-
-## 💡 Notable Features
-
-- **Intelligent Business Metrics**: Auto-derives profit, margins, revenue per unit
-- **Quality Scoring**: 0-100 score reflecting data quality before/after processing
-- **Scaling Parameter Tracking**: Saves min/max for inverse-transform capability
-- **Minimal LLM Prompts**: Reduces API costs by sending only metadata + 3 samples
-- **Whole-Word Keyword Matching**: Prevents false column matches
-- **Currency Cleaning**: Handles international symbols and formats
-- **Null String Normalization**: Converts 14+ variants to NaN
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.12+
-- Groq API key
-
-### Installation
+### 1. Start the backend
 
 ```bash
 cd backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env  # if your local setup provides one
+python run.py
 ```
 
-### Usage
+The API runs at `http://localhost:8000`; interactive API documentation is available at `http://localhost:8000/docs`.
+
+### 2. Start the frontend
+
+```bash
+cd frontend/AnalyzeAI
+npm install
+npm run dev
+```
+
+The Vite development server will print the local frontend URL. Configure the frontend API base URL using the project's environment example before connecting it to a non-default backend.
+
+### 3. Run the pipeline directly
+
+For a script-first run without the web application:
 
 ```bash
 cd backend
 python pipeline.py
 ```
 
-**Output**:
-- Preprocessed CSV with cleaned data
-- JSON file with statistics and quality metrics
-- Generated visualizations (PNG charts)
-- Complete preprocessing audit log
+The pipeline writes cleaned data, analysis artifacts, charts, audit information, and reports under `backend/outputs/`.
 
----
+## Configuration
 
-## 📦 Dependencies
+The backend is environment-driven. Typical local configuration includes:
 
-- `groq>=1.5.0` - LLM API client
-- `langchain-core>=1.4.8` - LangChain utilities
-- `langgraph>=1.2.6` - State graph orchestration
-- `pandas>=3.0.3` - Data manipulation
-- `numpy` - Numerical operations
-- `scipy` - Statistical functions
-- `matplotlib` - Visualization
+- LLM credentials for Groq and/or Gemini.
+- API host, port, reload, and logging settings.
+- Upload directory, maximum upload size, and allowed file extensions.
+- Optional database URL for persistence and user settings.
+- Optional frontend API URL for local development.
 
----
+Keep secrets in environment variables and never commit `.env` files or API keys.
 
-## 📊 Completion Status
+## Testing
 
-| Component | Status | Completion |
-|-----------|--------|------------|
-| Agent 1 - Structural Profiler | ✅ Complete | 100% |
-| Agent 2 - Semantic Tagger | ✅ Complete | 100% |
-| Agent 3 - Preprocessor | ✅ Complete | 100% |
-| Agent 4 - Statistical Analysis | ✅ Complete | 100% |
-| Agent 5 - Output Validator | ✅ Complete | 100% |
-| Agent 6 - Insight Report (v2) | ✅ Complete | 100% |
-| Pipeline Orchestration | ✅ Complete | 100% |
-| Error Handling | ✅ Complete | 100% |
-| Frontend/UI (React + FastAPI SSE) | ✅ Complete | 100% |
-| Multi-format Support (CSV/Excel/JSON/Parquet) | ✅ Complete | 100% |
-| Testing Suite | ✅ Complete | 205 tests green |
+Run the backend tests from the backend directory:
 
----
+```bash
+cd backend
+pytest -q
+```
 
-## 🔗 Data Flow & State Management
+The suite covers agent behavior, JSON recovery, currency parsing, category normalization, derived metrics, anomaly calibration, chart planning/rendering, report grounding, table completeness, API services, configuration propagation, and data-quality auditing.
 
-The pipeline uses a centralized `GraphState` that contains:
+## Engineering Decisions Worth Discussing
 
-**Inputs**:
-- `csv_path` - Path to input CSV file
+1. **Why not let the LLM analyze the raw file?** Metadata-first prompts reduce cost and exposure, while deterministic Python handles transformations and calculations.
+2. **Why validate generated prose?** A fluent sentence can still make an unsupported claim. The report pipeline keeps computed facts authoritative and treats model prose as an enhancement.
+3. **Why use both ECharts and Matplotlib?** Users get an interactive web experience and a deterministic, printable artifact from the same chart contract.
+4. **Why keep agents as state transformations?** Explicit `(state) -> state` boundaries make the workflow observable, testable, and easy to extend.
 
-**State Fields**:
-- `raw_profile` - Raw structural analysis from Agent 1
-- `_df_cache` - Cached DataFrame for downstream use
-- `schema_blueprint` - Column metadata from Agent 2
-- `cleaned_df` - Processed DataFrame from Agent 3
-- `scaling_params` - Min/max values for normalization
-- `preprocessing_log` - Audit trail of all transformations
-- `data_quality` - Quality metrics (0-100 score)
-- `stats` - Statistical analysis from Agent 4
-- `chart_paths` - Generated visualization file paths
-- `errors` - Error collection throughout pipeline
+## Future Direction
 
----
+The architecture is ready for larger datasets through chunked ingestion, streaming execution, richer anomaly detection, persisted model artifacts, and distributed processing. These are deliberate extension points rather than prerequisites for the current end-to-end workflow.
 
-## 📝 Notes for Developers
+## License
 
-1. Each agent is a pure function: `(state) → (state)`
-2. All data flows through `GraphState`
-3. Errors are accumulated and checked at each pipeline stage
-4. Pipeline halts gracefully on critical failures
-5. Agent 2 uses minimal LLM prompts for cost efficiency
-6. Agent 3's preprocessing is fully auditable via preprocessing_log
-
----
-
-## 🎓 Educational Value
-
-This project demonstrates:
-- **Multi-Agent Architectures**: State-based orchestration with LangGraph
-- **LLM Integration**: API calls with fallback patterns
-- **Data Engineering**: Multi-step ETL pipeline design
-- **Error Handling**: Graceful degradation and error propagation
-- **Data Quality**: Comprehensive quality scoring and audit trails
-- **Software Architecture**: Stateless function design and separation of concerns
-
----
-
-## 📚 Future Enhancements
-
-- Performance optimization for datasets >1GB
-- Streaming data support
-- Advanced anomaly detection algorithms
-- ML model persistence and deployment
-- Interactive dashboard for pipeline monitoring
-- Distributed processing with Apache Spark
+This project is currently maintained as a portfolio and learning project. Add a license before distributing it as an open-source package.
